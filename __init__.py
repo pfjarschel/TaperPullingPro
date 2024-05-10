@@ -1,4 +1,9 @@
-import main
+from . import main
+from . import TaperShape
+from . import TaperPullingUI
+from . import TaperPullingData
+from . import TaperPullingDAQ
+from . import TaperPullingMotors
 
 # TODO: Not sure if these are still relevant
 __all__ = ["TaperShape", "TaperPullingUI", "TaperPullingData", "TaperPullingDAQ", "TaperPullingMotors"]

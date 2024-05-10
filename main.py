@@ -6,7 +6,7 @@ import sys
 
 # Import UI
 from PyQt6.QtWidgets import QApplication
-import TaperPullingUI
+from . import TaperPullingUI
 
 def create_ui() -> tuple[QApplication, TaperPullingUI.MainWindow]: 
     app = QApplication(sys.argv)
