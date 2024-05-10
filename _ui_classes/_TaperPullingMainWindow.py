@@ -192,3 +192,9 @@ class MainWindow(FormUI, WindowUI):
     
     def go2zeroLoop(self):
         pass
+    
+    def recalc_from_diam(self):
+        pass
+    
+    def recalc_from_pulled(self):
+        pass
