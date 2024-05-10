@@ -1,21 +1,25 @@
-if __name__ == '__main__':
-    # Import system stuff
-    import os, sys
+# This file can be run to open the main application, but also allows the UI to be open from another script,
+# using the create_ui() function
 
-    from PyQt6.QtWidgets import QApplication
+ # Import system stuff
+import sys
 
-    # File paths
-    main_path = os.path.dirname(os.path.realpath(__file__))
-    thisfile = os.path.basename(__file__)
-    os.chdir(main_path)
-    
-    import TaperPullingUI
-    
+# Import UI
+from PyQt6.QtWidgets import QApplication
+import TaperPullingUI
+
+def create_ui() -> tuple[QApplication, TaperPullingUI.MainWindow]: 
     app = QApplication(sys.argv)
     mainwindow = TaperPullingUI.MainWindow()
-    mainwindow.show()
     
     # TODO: address "qt.gui.imageio: libpng warning: iCCP: known incorrect sRGB profile" warnings
     
-    # Run program
+    return app, mainwindow
+
+
+# Run entire application if this file is called directly
+if __name__ == '__main__':
+    app, mainwindow = create_ui()
+    # mainwindow.show()  # TODO: Really needed?
+    
     sys.exit(app.exec())
