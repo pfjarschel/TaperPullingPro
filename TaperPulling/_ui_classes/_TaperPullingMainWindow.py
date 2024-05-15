@@ -1,8 +1,9 @@
 # Import PyQt6 stuff
 from PyQt6 import uic
-from PyQt6.QtCore import *
-from PyQt6.QtWidgets import *
-from PyQt6.QtGui import *
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
+                            QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar
+# from PyQt6.QtGui import *
 
 # Import other stuff
 import os
@@ -12,13 +13,10 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 
 
 # Load UI files
-thispath = os.path.dirname(os.path.realpath(__file__))
-respath = f"{thispath}/../resources"
-rootpath = f"{thispath}/.."
-currpath = os.getcwd()
-os.chdir(rootpath)
+thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
+rootpath = os.path.dirname(thispath).replace("\\", "/")
+respath = f"{rootpath}/resources"
 FormUI, WindowUI = uic.loadUiType(f"{respath}/mainwindow.ui")
-# os.chdir(currpath)
 
 
 class MainWindow(FormUI, WindowUI):
@@ -36,6 +34,76 @@ class MainWindow(FormUI, WindowUI):
         self.enableControls()
         
     def configUi(self):
+        # Sliders icons
+        self.inoutIndSlider.setStyleSheet(
+            f"QSlider:vertical {{ \
+                min-width: 16px; \
+            }} \
+            \
+            QSlider::groove:vertical {{ \
+                width: 7px; \
+                border: 1px solid #999999; \
+                border-radius: 4px; \
+            }} \
+            \
+            QSlider::handle:vertical {{ \
+                image: url({respath}/flame_orange.png); \
+                margin: -116px -6px; \
+            }}"
+        )
+        
+        self.brusherIndSlider.setStyleSheet(
+            f"QSlider:horizontal {{ \
+                min-height: 32px; \
+            }} \
+            \
+            QSlider::groove:horizontal {{ \
+                height: 10px; \
+                border: 1px solid #999999; \
+                border-radius: 4px; \
+            }} \
+            \
+            QSlider::handle:horizontal {{ \
+                image: url({respath}/flame_orange.png); \
+                margin: -10px -76px; \
+            }}"
+        )
+        
+        self.pullLeftIndSlider.setStyleSheet(
+            f"QSlider:horizontal {{ \
+                min-height: 32px; \
+            }} \
+            \
+            QSlider::groove:horizontal {{ \
+                height: 10px; \
+                border: 1px solid #999999; \
+                border-radius: 4px; \
+            }} \
+            \
+            QSlider::handle:horizontal {{ \
+                image: url({respath}/arrow_left.png); \
+                margin: -10px -136px; \
+            }}"
+        )
+        
+        self.pullRightIndSlider.setStyleSheet(
+            f"QSlider:horizontal {{ \
+                min-height: 32px; \
+            }} \
+            \
+            QSlider::groove:horizontal {{ \
+                height: 10px; \
+                border: 1px solid #999999; \
+                border-radius: 4px; \
+            }} \
+            \
+            QSlider::handle:horizontal {{ \
+                image: url({respath}/arrow_right.png); \
+                margin: -10px -136px; \
+            }}"
+        )
+        
+        
         # Plots
         SMALL_SIZE = 7
         MEDIUM_SIZE = 8
