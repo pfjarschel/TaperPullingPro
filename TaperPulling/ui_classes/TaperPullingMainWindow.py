@@ -10,6 +10,7 @@ import os
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+import numpy as np
 
 
 # Load UI files
@@ -185,6 +186,17 @@ class MainWindow(FormUI, WindowUI):
         self.go2zeroLoop_timer = QTimer()
         self.go2zeroLoop_timer.setInterval(self.main_to)
         self.go2zeroLoop_timer.timeout.connect(self.go2zeroLoop)
+        
+        # UI connections
+        # Recalculate taper params
+        self.distPriorRadio.clicked.connect(self.recalc_params)
+        self.diamPriorRadio.clicked.connect(self.recalc_params)
+        self.d0Spin.valueChanged.connect(self.recalc_params)
+        self.x0Spin.valueChanged.connect(self.recalc_params)
+        self.l0Spin.valueChanged.connect(self.recalc_params)
+        self.dwSpin.valueChanged.connect(self.recalc_params)
+        self.fSizeSpin.valueChanged.connect(self.recalc_params)
+        self.alphaSpin.valueChanged.connect(self.recalc_params)
     
     def initialize(self):
         pass
@@ -267,8 +279,25 @@ class MainWindow(FormUI, WindowUI):
     def go2zeroLoop(self):
         pass
     
-    def recalc_from_diam(self):
-        pass
-    
-    def recalc_from_pulled(self):
-        pass
+    def recalc_params(self):
+        alpha = self.alphaSpin.value()
+        if np.abs(alpha) < 1e-15: alpha = 1e-15
+        
+        x0 = self.x0Spin.value()
+        dw = self.dwSpin.value()
+        d0 = self.d0Spin.value()
+        l0 = self.l0Spin.value()
+        
+        z0 = (1 - alpha)*x0/2
+        lw = l0 + alpha*x0
+
+        if self.distPriorRadio.isChecked():
+            rw = (d0/2)*((1 + alpha*x0/l0)**(-1/(2*alpha)))  # Explodes for alpha = 0
+            self.dwSpin.setValue(2*rw)
+        elif self.diamPriorRadio.isChecked():
+            x0 = 2*(pow(((d0/2)/(dw/2)),(2*alpha)) - 1)*l0/(2*alpha)
+            self.x0Spin.setValue(x0)
+
+        self.setTransLengthSpin.setValue(z0)
+        self.setWaistLengthSpin.setValue(lw)
+        self.timeleftSpin.setValue(x0/(2.0*self.pullerPullVelSpin.value()))
