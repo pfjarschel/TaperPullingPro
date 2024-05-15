@@ -27,7 +27,7 @@
   </property>
   <property name="windowIcon">
    <iconset>
-    <normaloff>resources/preform.ico</normaloff>resources/preform.ico</iconset>
+    <normaloff>preform.ico</normaloff>preform.ico</iconset>
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QGridLayout" name="gridLayout_8">
@@ -1193,7 +1193,7 @@ margin: -10px -76px;
                   <string notr="true"/>
                  </property>
                  <property name="pixmap">
-                  <pixmap>resources/red_led.png</pixmap>
+                  <pixmap>red_led.png</pixmap>
                  </property>
                  <property name="scaledContents">
                   <bool>true</bool>
@@ -1222,7 +1222,7 @@ margin: -10px -76px;
                   <string/>
                  </property>
                  <property name="pixmap">
-                  <pixmap>resources/red_led.png</pixmap>
+                  <pixmap>red_led.png</pixmap>
                  </property>
                  <property name="scaledContents">
                   <bool>true</bool>
@@ -1290,7 +1290,7 @@ margin: -10px -76px;
                   <string/>
                  </property>
                  <property name="pixmap">
-                  <pixmap>resources/red_led.png</pixmap>
+                  <pixmap>red_led.png</pixmap>
                  </property>
                  <property name="scaledContents">
                   <bool>true</bool>
@@ -1319,7 +1319,7 @@ margin: -10px -76px;
                   <string/>
                  </property>
                  <property name="pixmap">
-                  <pixmap>resources/red_led.png</pixmap>
+                  <pixmap>red_led.png</pixmap>
                  </property>
                  <property name="scaledContents">
                   <bool>true</bool>
@@ -1387,7 +1387,7 @@ margin: -10px -76px;
                   <string/>
                  </property>
                  <property name="pixmap">
-                  <pixmap>resources/red_led.png</pixmap>
+                  <pixmap>red_led.png</pixmap>
                  </property>
                  <property name="scaledContents">
                   <bool>true</bool>
@@ -1416,7 +1416,7 @@ margin: -10px -76px;
                   <string/>
                  </property>
                  <property name="pixmap">
-                  <pixmap>resources/red_led.png</pixmap>
+                  <pixmap>red_led.png</pixmap>
                  </property>
                  <property name="scaledContents">
                   <bool>true</bool>
@@ -1484,7 +1484,7 @@ margin: -10px -76px;
                   <string/>
                  </property>
                  <property name="pixmap">
-                  <pixmap>resources/red_led.png</pixmap>
+                  <pixmap>red_led.png</pixmap>
                  </property>
                  <property name="scaledContents">
                   <bool>true</bool>
@@ -1513,7 +1513,7 @@ margin: -10px -76px;
                   <string/>
                  </property>
                  <property name="pixmap">
-                  <pixmap>resources/red_led.png</pixmap>
+                  <pixmap>red_led.png</pixmap>
                  </property>
                  <property name="scaledContents">
                   <bool>true</bool>
@@ -1604,7 +1604,7 @@ margin: -10px -76px;
              </property>
              <property name="icon">
               <iconset>
-               <normaloff>resources/redbutton.png</normaloff>resources/redbutton.png</iconset>
+               <normaloff>redbutton.png</normaloff>redbutton.png</iconset>
              </property>
              <property name="iconSize">
               <size>

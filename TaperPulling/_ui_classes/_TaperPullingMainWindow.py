@@ -13,7 +13,12 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 
 # Load UI files
 thispath = os.path.dirname(os.path.realpath(__file__))
-FormUI, WindowUI = uic.loadUiType(f"{thispath}/../resources/mainwindow.ui")
+respath = f"{thispath}/../resources"
+rootpath = f"{thispath}/.."
+currpath = os.getcwd()
+os.chdir(rootpath)
+FormUI, WindowUI = uic.loadUiType(f"{respath}/mainwindow.ui")
+# os.chdir(currpath)
 
 
 class MainWindow(FormUI, WindowUI):
