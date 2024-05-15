@@ -1,1 +1,1 @@
-from ._ui_classes._TaperPullingMainWindow import MainWindow
+from .ui_classes.TaperPullingMainWindow import MainWindow
