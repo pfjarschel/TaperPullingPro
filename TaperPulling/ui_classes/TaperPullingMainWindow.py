@@ -188,6 +188,8 @@ class MainWindow(FormUI, WindowUI):
         self.go2zeroLoop_timer.timeout.connect(self.go2zeroLoop)
         
         # UI connections
+        self.enablemanualCheck.clicked.connect(self.toggle_manual_control)
+        
         # Recalculate taper params
         self.distPriorRadio.clicked.connect(self.recalc_params)
         self.diamPriorRadio.clicked.connect(self.recalc_params)
@@ -301,3 +303,19 @@ class MainWindow(FormUI, WindowUI):
         self.setTransLengthSpin.setValue(z0)
         self.setWaistLengthSpin.setValue(lw)
         self.timeleftSpin.setValue(x0/(2.0*self.pullerPullVelSpin.value()))
+        
+    def toggle_manual_control(self):
+        self.flameIOPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+        self.brusherPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+        self.leftPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+        self.rightPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+        
+        if self.enablemanualCheck.isChecked():
+            buttons = QSpinBox.ButtonSymbols.UpDownArrows
+        else:
+            buttons = QSpinBox.ButtonSymbols.NoButtons
+
+        self.flameIOPosIndSpin.setButtonSymbols(buttons)
+        self.brusherPosIndSpin.setButtonSymbols(buttons)
+        self.leftPosIndSpin.setButtonSymbols(buttons)
+        self.rightPosIndSpin.setButtonSymbols(buttons)

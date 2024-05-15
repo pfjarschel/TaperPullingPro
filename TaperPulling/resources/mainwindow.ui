@@ -1144,7 +1144,10 @@ margin: -10px -76px;
                 <bool>false</bool>
                </property>
                <property name="maximum">
-                <double>999.990000000000009</double>
+                <double>100.000000000000000</double>
+               </property>
+               <property name="singleStep">
+                <double>0.100000000000000</double>
                </property>
               </widget>
              </item>
@@ -1250,7 +1253,10 @@ margin: -10px -76px;
                 <bool>false</bool>
                </property>
                <property name="maximum">
-                <double>999.990000000000009</double>
+                <double>100.000000000000000</double>
+               </property>
+               <property name="singleStep">
+                <double>0.100000000000000</double>
                </property>
               </widget>
              </item>
@@ -1347,7 +1353,10 @@ margin: -10px -76px;
                 <bool>false</bool>
                </property>
                <property name="maximum">
-                <double>999.990000000000009</double>
+                <double>100.000000000000000</double>
+               </property>
+               <property name="singleStep">
+                <double>0.100000000000000</double>
                </property>
               </widget>
              </item>
@@ -1444,7 +1453,10 @@ margin: -10px -76px;
                 <bool>false</bool>
                </property>
                <property name="maximum">
-                <double>999.990000000000009</double>
+                <double>100.000000000000000</double>
+               </property>
+               <property name="singleStep">
+                <double>0.100000000000000</double>
                </property>
               </widget>
              </item>
@@ -1641,7 +1653,7 @@ margin: -10px -76px;
           <enum>QTabWidget::North</enum>
          </property>
          <property name="currentIndex">
-          <number>0</number>
+          <number>3</number>
          </property>
          <property name="elideMode">
           <enum>Qt::ElideRight</enum>
