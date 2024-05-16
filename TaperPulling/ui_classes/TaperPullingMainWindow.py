@@ -1,8 +1,9 @@
 # Import PyQt6 stuff
 from PyQt6 import uic
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QCoreApplication
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
-                            QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar
+                            QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
+                            QMessageBox
 # from PyQt6.QtGui import *
 
 # Import other stuff
@@ -21,9 +22,13 @@ FormUI, WindowUI = uic.loadUiType(f"{respath}/mainwindow.ui")
 
 
 class MainWindow(FormUI, WindowUI):
+    done_loading = False
     busy = False
     wait_switch = False
-    main_to = 1  # ms
+    main_to = 1000  # ms
+    
+    def __del__(self):
+        print("closing all")
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -34,6 +39,11 @@ class MainWindow(FormUI, WindowUI):
         self.configUi()
         self.enableControls()
         
+        self.daq_init()
+        
+        self.done_loading = True
+    
+    # Configure UI
     def configUi(self):
         # Sliders icons
         self.inoutIndSlider.setStyleSheet(
@@ -187,10 +197,29 @@ class MainWindow(FormUI, WindowUI):
         self.go2zeroLoop_timer.setInterval(self.main_to)
         self.go2zeroLoop_timer.timeout.connect(self.go2zeroLoop)
         
-        # UI connections
+        # DAQ connections
+        self.srateSpin.valueChanged.connect(self.daq_init)
+        self.daqChannelCombo.currentIndexChanged.connect(self.daq_init)
+        self.daqConfCombo.currentIndexChanged.connect(self.daq_init)
+        self.daqClockCombo.currentIndexChanged.connect(self.daq_init)
+        self.daqminvSpin.valueChanged.connect(self.daq_init)
+        self.daqmaxvSpin.valueChanged.connect(self.daq_init)
+        self.set0powBut.clicked.connect(self.set_ref_power)
+        
+        # Motors connections
+        self.resetmotorsBut.clicked.connect(self.init_motors)
+        self.gotozeroBut.clicked.connect(self.go2start)
+        self.startBut.clicked.connect(self.start_pulling)
+        self.stopBut.clicked.connect(self.stop_pulling)
+        self.cleaveBut.clicked.connect(self.cleave)
+        self.emerBut.clicked.connect(self.stop_all_motors)
+        self.flameIOPosIndSpin.valueChanged.connect(self.fio_move2)
+        self.brusherPosIndSpin.valueChanged.connect(self.fb_move2)
+        self.leftPosIndSpin.valueChanged.connect(self.lp_move2)
+        self.rightPosIndSpin.valueChanged.connect(self.rp_move2)
         self.enablemanualCheck.clicked.connect(self.toggle_manual_control)
         
-        # Recalculate taper params
+        # Taper params connections
         self.distPriorRadio.clicked.connect(self.recalc_params)
         self.diamPriorRadio.clicked.connect(self.recalc_params)
         self.d0Spin.valueChanged.connect(self.recalc_params)
@@ -199,18 +228,31 @@ class MainWindow(FormUI, WindowUI):
         self.dwSpin.valueChanged.connect(self.recalc_params)
         self.fSizeSpin.valueChanged.connect(self.recalc_params)
         self.alphaSpin.valueChanged.connect(self.recalc_params)
+        self.loadHZBut.clicked.connect(self.load_hotzone)
+        
+         # Menu connections
+        self.actionSave_Data.triggered.connect(self.action_save_data)
+        self.actionLoad_Default_Settings.triggered.connect(self.action_load_def_settings)
+        self.actionSet_Current_as_Default.triggered.connect(self.action_set_def_settings)
+        self.actionLoad_Settings.triggered.connect(self.action_load_settings)
+        self.actionSave_Settings.triggered.connect(self.action_save_settings)
+        self.actionReset_to_Factory.triggered.connect(self.action_factory_settings)
+        self.actionExit.triggered.connect(self.action_exit)
+        self.actionAbout.triggered.connect(self.action_about)
+        self.actionAbout_Qt.triggered.connect(self.action_about_qt)
     
+    # General functions
     def initialize(self):
-        pass
+        print("Initialized")
     
     def saveSettings(self, file):
-        pass
+        print("Settings saved")
     
     def loadSettings(self):
-        pass
+        print("Settings loaded")
     
     def loadDefaultSettings(self):
-        pass
+        print("Default settings loaded")
     
     def enableControls(self):
         widgets = self.findChildren(QWidget)
@@ -264,23 +306,98 @@ class MainWindow(FormUI, WindowUI):
         self.cologradSpin.setEnabled(True)
         
     def resetPullStats(self):
-        pass
+        print("Pull stats reset")
 
+    # Timer functions
     def mainLoop(self):
-        pass
+        print("main loop")
     
     def initLoop(self):
-        pass
+        print("init loop")
     
     def flameholdLoop(self):
-        pass
+        print("flame hold loop")
     
     def pullLoop(self):
-        pass
+        print("pull loop")
     
     def go2zeroLoop(self):
-        pass
+        print("go2zero loop")
     
+    # DAQ functions
+    def daq_init(self):
+        print("inited DAQ")
+    
+    def set_ref_power(self):
+        print("set ref. power")
+        
+    # Motors functions
+    def toggle_manual_control(self):
+        self.flameIOPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+        self.brusherPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+        self.leftPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+        self.rightPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+        
+        if self.enablemanualCheck.isChecked():
+            buttons = QSpinBox.ButtonSymbols.UpDownArrows
+        else:
+            buttons = QSpinBox.ButtonSymbols.NoButtons
+
+        self.flameIOPosIndSpin.setButtonSymbols(buttons)
+        self.brusherPosIndSpin.setButtonSymbols(buttons)
+        self.leftPosIndSpin.setButtonSymbols(buttons)
+        self.rightPosIndSpin.setButtonSymbols(buttons)
+        
+    def fb_init(self):
+        print("inited flame brusher")
+        
+    def fio_init(self):
+        print("inited flame in/out")
+        
+    def lp_init(self):
+        print("inited left puller")
+        
+    def rp_init(self):
+        print("inited right puller")
+    
+    def fb_move2(self):
+        print("moving flame brusher")
+        
+    def fio_move2(self):
+        print("moving flame in/out")
+        
+    def lp_move2(self):
+        print("moving left puller")
+        
+    def rp_move2(self):
+        print("moving right puller")
+        
+    def stop_all_motors(self):
+        print("stopped all motors")
+        
+    def init_motors(self):
+        print("inited motors")
+        self.fb_init()
+        self.fio_init()
+        self.lp_init()
+        self.rp_init()
+        
+    def go2start(self):
+        print("going to start")
+        
+    def start_pulling(self):
+        print("started pulling")
+        
+    def stop_pulling(self):
+        print("stopped pulling")
+        
+    def cleave(self):
+        print("cleaved")
+        
+    def set_indicators(self):
+        print("indicators set")
+    
+    # Taper params functions
     def recalc_params(self):
         alpha = self.alphaSpin.value()
         if np.abs(alpha) < 1e-15: alpha = 1e-15
@@ -304,18 +421,42 @@ class MainWindow(FormUI, WindowUI):
         self.setWaistLengthSpin.setValue(lw)
         self.timeleftSpin.setValue(x0/(2.0*self.pullerPullVelSpin.value()))
         
-    def toggle_manual_control(self):
-        self.flameIOPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
-        self.brusherPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
-        self.leftPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
-        self.rightPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
+    def load_hotzone(self):
+        print("loaded hotzone profile")
         
-        if self.enablemanualCheck.isChecked():
-            buttons = QSpinBox.ButtonSymbols.UpDownArrows
-        else:
-            buttons = QSpinBox.ButtonSymbols.NoButtons
+    # Menu functions
+    def action_save_data(self):
+        print("saved data")
+        
+    def action_load_def_settings(self):
+        print("loaded default settings")
+        
+    def action_set_def_settings(self):
+        print("set current settings as default")
+        
+    def action_load_settings(self):
+        print("loaded settings")
+        
+    def action_save_settings(self):
+        print("saved settings")
+        
+    def action_factory_settings(self):
+        print("reset settings to factory")
+    
+    def action_exit(self):
+        QCoreApplication.quit()
+        
+    def action_about(self):
+        aboutText = \
+            "<p><b>LPD Taper Pulling Software - PyTaper v1.0</b></p>" +\
+            "<p>This software uses PyQt6, NI DAQmx API, and ThorLabs Kinesis API.</p>" +\
+            "<p>Copyright &copy; 2017-2024</p>" +\
+            "<p>By Paulo Jarschel</p>"
 
-        self.flameIOPosIndSpin.setButtonSymbols(buttons)
-        self.brusherPosIndSpin.setButtonSymbols(buttons)
-        self.leftPosIndSpin.setButtonSymbols(buttons)
-        self.rightPosIndSpin.setButtonSymbols(buttons)
+        QMessageBox.about(self, "About", aboutText)
+    
+    def action_about_qt(self):
+        QMessageBox.aboutQt(self, "About Qt")
+
+        
+    
