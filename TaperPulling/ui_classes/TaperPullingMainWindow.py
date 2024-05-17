@@ -36,15 +36,15 @@ class MainWindow(FormUI, WindowUI):
         self.setupUi(self)
         self.show()
         self.initialize()
-        self.configUi()
-        self.enableControls()
+        self.config_ui()
+        self.enable_controls()
         
         self.daq_init()
         
         self.done_loading = True
     
     # Configure UI
-    def configUi(self):
+    def config_ui(self):
         # Sliders icons
         self.inoutIndSlider.setStyleSheet(
             f"QSlider:vertical {{ \
@@ -114,7 +114,6 @@ class MainWindow(FormUI, WindowUI):
             }}"
         )
         
-        
         # Plots
         SMALL_SIZE = 7
         MEDIUM_SIZE = 8
@@ -164,17 +163,7 @@ class MainWindow(FormUI, WindowUI):
         self.graph_hz_ax.set_ylabel("Hotzone Size (mm)")
         self.graph_hz_ax.grid(True)
         self.graph_hz.draw()
-        
-        
-        # Settings
-        if not os.path.isfile("PyTaper_factory_settings.json"):
-            self.saveSettings("PyTaper_factory_settings.json")
-            
-        if not os.path.isfile("PyTaper_default_settings.json"):
-            self.saveSettings("PyTaper_default_settings.json")
-        else:
-            self.loadDefaultSettings()
-            
+          
         # Timers
         self.mainLoop_timer = QTimer()
         self.mainLoop_timer.setInterval(self.main_to)
@@ -241,26 +230,39 @@ class MainWindow(FormUI, WindowUI):
         self.actionAbout.triggered.connect(self.action_about)
         self.actionAbout_Qt.triggered.connect(self.action_about_qt)
     
+        # Settings
+        if not os.path.isfile("PyTaper_factory_settings.json"):
+            self.save_settings("PyTaper_factory_settings.json")
+            
+        if not os.path.isfile("PyTaper_default_settings.json"):
+            self.save_settings("PyTaper_default_settings.json")
+        else:
+            self.load_default_settings()
+            
     # General functions
     def initialize(self):
+        self.tabWidget.setCurrentIndex(0)
+        self.reset_pull_stats()
+        self.recalc_params()
         print("Initialized")
-    
-    def saveSettings(self, file):
+        
+
+    def save_settings(self, file):
         print("Settings saved")
     
-    def loadSettings(self):
+    def load_settings(self):
         print("Settings loaded")
     
-    def loadDefaultSettings(self):
+    def load_default_settings(self):
         print("Default settings loaded")
     
-    def enableControls(self):
+    def enable_controls(self):
         widgets = self.findChildren(QWidget)
         for i in range(len(widgets)):
             widgets[i].setEnabled(True)
         self.stopBut.setEnabled(False)
         
-    def disableControls(self):
+    def disable_controls(self):
         lines = self.findChildren(QLineEdit)
         for i in range(len(lines)):
             if "Text" in lines[i].objectName():
@@ -305,7 +307,7 @@ class MainWindow(FormUI, WindowUI):
         self.emerBut.setEnabled(True)
         self.cologradSpin.setEnabled(True)
         
-    def resetPullStats(self):
+    def reset_pull_stats(self):
         print("Pull stats reset")
 
     # Timer functions

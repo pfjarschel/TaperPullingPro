@@ -1653,7 +1653,7 @@ margin: -10px -76px;
           <enum>QTabWidget::North</enum>
          </property>
          <property name="currentIndex">
-          <number>3</number>
+          <number>0</number>
          </property>
          <property name="elideMode">
           <enum>Qt::ElideRight</enum>
@@ -2623,36 +2623,6 @@ margin: -10px -76px;
    </property>
    <property name="shortcut">
     <string>Ctrl+S</string>
-   </property>
-  </action>
-  <action name="action_Re_Connect_DAQ">
-   <property name="text">
-    <string>(Re) Connect DAQ</string>
-   </property>
-  </action>
-  <action name="action_Re_Connect_Brusher">
-   <property name="text">
-    <string>(Re) Connect Brusher</string>
-   </property>
-  </action>
-  <action name="action_Re_Connect_In_Out">
-   <property name="text">
-    <string>(Re) Connect In/Out</string>
-   </property>
-  </action>
-  <action name="action_Re_Connect_Left_Puller">
-   <property name="text">
-    <string>(Re) Connect Left Puller</string>
-   </property>
-  </action>
-  <action name="action_Re_Connect_Right_Puller">
-   <property name="text">
-    <string>(Re) Connect Right Puller</string>
-   </property>
-  </action>
-  <action name="action_Re_Connect_all_motors">
-   <property name="text">
-    <string>(Re) Connect all motors</string>
    </property>
   </action>
  </widget>
