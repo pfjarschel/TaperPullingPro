@@ -1,23 +1,26 @@
 # Import PyQt6 stuff
 from PyQt6 import uic
-from PyQt6.QtCore import QTimer, QCoreApplication
+from PyQt6.QtCore import QTimer, QCoreApplication, QDir
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
                             QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
-                            QMessageBox
+                            QMessageBox, QFileDialog
 # from PyQt6.QtGui import *
 
 # Import other stuff
 import os
+from pathlib import Path
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import numpy as np
+import json
 
 
 # Load UI files
 thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
 rootpath = os.path.dirname(thispath).replace("\\", "/")
 respath = f"{rootpath}/resources"
+confpath = f"{rootpath}/config"
 FormUI, WindowUI = uic.loadUiType(f"{respath}/mainwindow.ui")
 
 
@@ -26,6 +29,10 @@ class MainWindow(FormUI, WindowUI):
     busy = False
     wait_switch = False
     main_to = 1000  # ms
+    temp_settings_file = f"{rootpath}/config/temp_settings.json"
+    default_settings_file = f"{confpath}/PyTaper_default_settings.json"
+    factory_settings_file = f"{confpath}/PyTaper_factory_settings.json"
+    last_dir = QDir.homePath()
     
     def __del__(self):
         print("closing all")
@@ -231,11 +238,12 @@ class MainWindow(FormUI, WindowUI):
         self.actionAbout_Qt.triggered.connect(self.action_about_qt)
     
         # Settings
-        if not os.path.isfile("PyTaper_factory_settings.json"):
-            self.save_settings("PyTaper_factory_settings.json")
+        Path(confpath).mkdir(parents=True, exist_ok=True)
+        if not os.path.isfile(self.default_settings_file):
+            self.save_settings(self.default_settings_file)
             
-        if not os.path.isfile("PyTaper_default_settings.json"):
-            self.save_settings("PyTaper_default_settings.json")
+        if not os.path.isfile(self.factory_settings_file):
+            self.save_settings(self.factory_settings_file)
         else:
             self.load_default_settings()
             
@@ -243,18 +251,60 @@ class MainWindow(FormUI, WindowUI):
     def initialize(self):
         self.tabWidget.setCurrentIndex(0)
         self.reset_pull_stats()
-        self.recalc_params()
-        print("Initialized")
-        
+        self.recalc_params()        
 
-    def save_settings(self, file):
-        print("Settings saved")
+    def save_settings(self, filename):
+        if filename != "":
+            directory = os.path.dirname(os.path.realpath(filename)).replace("\\", "/")
+            Path(directory).mkdir(parents=True, exist_ok=True)
+            
+            settings_dict = {}
+            settings_dict["__lastdir__"] = self.last_dir
+            for w in self.findChildren(QSpinBox):
+                settings_dict[w.objectName()] = w.value()
+            for w in self.findChildren(QDoubleSpinBox):
+                settings_dict[w.objectName()] = w.value()
+            for w in self.findChildren(QCheckBox):
+                settings_dict[w.objectName()] = w.isChecked()
+            for w in self.findChildren(QRadioButton):
+                settings_dict[w.objectName()] = w.isChecked()
+            for w in self.findChildren(QComboBox):
+                settings_dict[w.objectName()] = w.currentIndex()
+            for w in self.findChildren(QLineEdit):
+                settings_dict[w.objectName()] = w.text()
+                
+            json.dump(settings_dict, open(filename, "w"))
     
-    def load_settings(self):
-        print("Settings loaded")
+    def load_settings(self, filename):
+        if filename != "":
+            directory = os.path.dirname(os.path.realpath(filename)).replace("\\", "/")
+            Path(directory).mkdir(parents=True, exist_ok=True)
+
+            settings_dict = json.load(open(filename, "r"))
+            if "__lastdir__" in settings_dict:
+                self.last_dir = settings_dict["__lastdir__"]
+            for key in settings_dict:
+                if key[:2] != "__" and key[-2:] != "__":
+                    try:
+                        w = self.findChild(QWidget, key)
+                        if "Spin" in key:
+                            w.setValue(settings_dict[key])
+                        if "Check" in key:
+                            # For safety, never enable manual control
+                            if key != "enablemanualCheck":
+                                w.setChecked(settings_dict[key])
+                        if "Radio" in key:
+                            w.setChecked(settings_dict[key])
+                        if "Combo" in key:
+                            w.setCurrentIndex(settings_dict[key])
+                        if "Text" in key:
+                            w.setText(settings_dict[key])
+                    except:
+                        pass
+            print(self.last_dir)
     
     def load_default_settings(self):
-        print("Default settings loaded")
+        self.load_settings(self.default_settings_file)
     
     def enable_controls(self):
         widgets = self.findChildren(QWidget)
@@ -431,19 +481,33 @@ class MainWindow(FormUI, WindowUI):
         print("saved data")
         
     def action_load_def_settings(self):
-        print("loaded default settings")
+        self.load_default_settings()
         
     def action_set_def_settings(self):
-        print("set current settings as default")
+        self.save_settings(self.default_settings_file)
         
     def action_load_settings(self):
-        print("loaded settings")
+        file = QFileDialog.getOpenFileName(self, "Load settings", self.last_dir, "json files (*.json)")
+        filename = file[0]
+        
+        self.last_dir = os.path.dirname(os.path.realpath(filename)).replace("\\", "/")
+       
+        self.load_settings(filename)
+        
+        self.statusBar.showMessage(f"Settings loaded")
         
     def action_save_settings(self):
-        print("saved settings")
+        file = QFileDialog.getSaveFileName(self, "Save settings", self.last_dir, "json files (*.json)")
+        filename = file[0]
+        
+        self.last_dir = os.path.dirname(os.path.realpath(filename)).replace("\\", "/")
+       
+        self.save_settings(filename)
+        
+        self.statusBar.showMessage(f"Settings saved")
         
     def action_factory_settings(self):
-        print("reset settings to factory")
+        self.load_settings(self.factory_settings_file)
     
     def action_exit(self):
         QCoreApplication.quit()
