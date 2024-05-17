@@ -13,4 +13,4 @@
 .history/
 
 # Created files
-config/*
+**/config/*
