@@ -32,7 +32,7 @@ class MainWindow(FormUI, WindowUI):
     temp_settings_file = f"{rootpath}/config/temp_settings.json"
     default_settings_file = f"{confpath}/PyTaper_default_settings.json"
     factory_settings_file = f"{confpath}/PyTaper_factory_settings.json"
-    last_dir = QDir.homePath()
+    last_dir = "" #QDir.homePath()
     
     def __del__(self):
         print("closing all")
