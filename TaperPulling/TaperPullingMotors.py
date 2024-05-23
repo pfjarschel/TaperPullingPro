@@ -64,8 +64,6 @@ class GenericTLMotor:
         if serial != "" and not simulate:
             # TODO: add specific code to connect to a ThorLabs motor
             self.ok = False
-        else:
-            self.ok = True
         
     def disconnect(self):
         """
@@ -174,7 +172,7 @@ class GenericTLMotor:
             # TODO: code to get position
             pass
         elif self.simulate:
-            new_pos = self.sim_last_pos + self.vel*self.moving*(time.time() - self.sim_last_t)
+            new_pos = self.sim_last_pos + self.vel*self.moving.value*(time.time() - self.sim_last_t)
             self.pos = new_pos
             self.sim_last_pos = self.pos
             self.sim_last_t = time.time()
@@ -185,21 +183,21 @@ class Brusher(GenericTLMotor):
     Class for the flame brusher motor. Inherits the generic ThorLabs motors class.
     """
     def __init__(self):
-        super.__init__()
+        super().__init__()
 
 class FlameIO(GenericTLMotor):
     """
     Class for the flame in/out motor. Inherits the generic ThorLabs motors class.
     """
     def __init__(self):
-        super.__init__()
+        super().__init__()
         
 class Puller(GenericTLMotor):
     """
     Class for the pullers. Inherits the generic ThorLabs motors class.
     """
     def __init__(self):
-        super.__init__()
+        super().__init__()
 
 class TaperPullingMotors:
     """
