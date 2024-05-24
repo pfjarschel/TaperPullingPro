@@ -298,4 +298,5 @@ class TaperPullingMotors:
         motor.set_velocity(vel, max_vel)
         motor.set_acceleration(accel, max_accel)
         motor.home()
+        motor.get_position()
         
