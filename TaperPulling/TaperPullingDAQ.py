@@ -83,7 +83,7 @@ class TaperPullingDAQ:
         
         if not self.simulate:
             #TODO: code to setup daq
-            pass
+            self.ok = True
             
     def read_single(self) -> float:
         """
