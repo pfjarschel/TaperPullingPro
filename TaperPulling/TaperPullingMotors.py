@@ -59,11 +59,12 @@ class GenericTLMotor:
             serial (str, optional): Serial number to connect. Defaults to "".
             simulate (bool, optional): Simulate this motor. Defaults to False.
         """
-        self.serial = serial
         self.simulate = simulate
+        if serial != "":
+            self.serial = serial
         if serial != "" and not simulate:
             # TODO: add specific code to connect to a ThorLabs motor
-            self.ok = False
+            self.ok = True
         
     def disconnect(self):
         """
@@ -72,26 +73,31 @@ class GenericTLMotor:
         # TODO: Code to disconnect
         self.ok = False
         
-    def set_parameters(self, vel: float, accel: float, max_vel: float=0.0, max_accel: float=0.0):
+    def set_velocity(self, vel: float=-1.0, max_vel: float=-1.0):
         """
-        Set motor parameters. If max values are not provided, the standard value is used.
+        Set motor velocity. If a value is not provided, it is not changed.
 
         Args:
-            vel (float): Standard velocity
-            accel (float): Standard acceleration
-            max_vel (float, optional): Maximum velocity. Defaults to 0.0, which sets standard value.
-            max_accel (float, optional): Maximum acceleration. Defaults to 0.0, which sets standard value.
+            vel (float): Standard velocity. Defaults to -1.0, which does nothing.
+            max_vel (float, optional): Maximum velocity. Defaults to -1.0, which does nothing.
         """
-        self.vel = vel
-        self.accel = accel
-        if max_vel != 0.0:
+        if max_vel > 0.0:
             self.max_vel = max_vel
-        else:
-            self.max_vel = vel
-        if max_accel != 0.0:
+        if vel > 0.0:
+            self.vel = vel
+            
+    def set_acceleration(self, accel: float=-1.0, max_accel: float=-1.0):
+        """
+        Set motor acceleration. If a value is not provided, it is not changed.
+
+        Args:
+            accel (float): Standard acceleration. Defaults to -1.0, which does nothing.
+            max_accel (float, optional): Maximum acceleration. Defaults to -1.0, which sets standard value.
+        """
+        if max_accel > 0.0:
             self.max_accel = max_accel
-        else:
-            self.max_accel = accel
+        if accel > 0.0:
+            self.accel = accel
     
     def home(self):
         """
@@ -182,6 +188,13 @@ class Brusher(GenericTLMotor):
     """
     Class for the flame brusher motor. Inherits the generic ThorLabs motors class.
     """
+    # Default parameters
+    vel = 2.5  # mm/s
+    accel = 4.5  # mm/s2
+    max_vel = vel # mm/s
+    max_accel = accel # mm/s2
+    serial = "83837733"
+    
     def __init__(self):
         super().__init__()
 
@@ -189,13 +202,41 @@ class FlameIO(GenericTLMotor):
     """
     Class for the flame in/out motor. Inherits the generic ThorLabs motors class.
     """
+    # Default parameters
+    vel = 2.0  # mm/s
+    accel = 2.0  # mm/s2
+    max_vel = vel # mm/s
+    max_accel = accel # mm/s2
+    serial = "83837788"
+    
     def __init__(self):
         super().__init__()
         
-class Puller(GenericTLMotor):
+class LeftPuller(GenericTLMotor):
     """
-    Class for the pullers. Inherits the generic ThorLabs motors class.
+    Class for the left puller. Inherits the generic ThorLabs motors class.
     """
+    # Default parameters
+    vel = 0.125  # mm/s
+    accel = 50.0  # mm/s2
+    max_vel = 20.0  # mm/s
+    max_accel = accel # mm/s2
+    pullers_l_serial = "67838837"
+    
+    def __init__(self):
+        super().__init__()
+        
+class RightPuller(GenericTLMotor):
+    """
+    Class for the left puller. Inherits the generic ThorLabs motors class.
+    """
+    # Default parameters
+    vel = 0.125  # mm/s
+    accel = 50.0  # mm/s2
+    max_vel = 20.0  # mm/s
+    max_accel = accel # mm/s2
+    pullers_l_serial = "67839254"
+    
     def __init__(self):
         super().__init__()
 
@@ -203,6 +244,16 @@ class TaperPullingMotors:
     """
     This class contains the motors relevant to the taper pulling process.
     """
+    
+    class MotorTypes(Enum):
+        """
+        Enum for motor types (specific to our setup)
+        """
+        BRUSHER = 0
+        FLAME_IO = 1
+        LEFT_PULLER = 2
+        RIGHT_PULLER = 3
+    
     def __init__(self):
         """
         This class contains the motors relevant to the taper pulling process.
@@ -210,69 +261,41 @@ class TaperPullingMotors:
         """
         self.brusher = Brusher()
         self.flame_io = FlameIO()
-        self.left_puller = Puller()
-        self.right_puller = Puller()
+        self.left_puller = LeftPuller()
+        self.right_puller = RightPuller()
         
-    def initialize_brusher(self, serial:str, vel: float, accel: float, max_vel: float=0.0, max_accel: float=0.0, simulate=False):
+    def initialize_motor(self, motor_type: MotorTypes, serial: str="", 
+                         vel: float=-1.0, accel: float=-1.0,
+                         max_vel: float=-1.0, max_accel: float=-1.0, 
+                         simulate=False):
         """
-        Connect to, configure, and home (if needed) brusher motor.
+        Connect to, configure, and home (if needed) a motor.
+        If a parameter is not given, its current value (default at initialization) is used
 
         Args:
-            serial (str): Serial number
-            vel (float): Standard velocity
-            accel (float): Standard acceleration
-            max_vel (float, optional): Maximum velocity. Defaults to 0.0.
-            max_accel (float, optional): Maximum acceleration. Defaults to 0.0.
+            motor_type (MotorTypes): Type of the motor to be initialized
+            serial (str): Serial number. Defaults to empty.
+            vel (float): Standard velocity. Defaults to -1.0.
+            accel (float): Standard acceleration. Defaults to -1.0.
+            max_vel (float, optional): Maximum velocity. Defaults to -1.0.
+            max_accel (float, optional): Maximum acceleration. Defaults to -1.0.
             simulate (bool, optional): Simulate this motor. Defaults to False.
         """
-        self.brusher.connect(serial, simulate)
-        self.brusher.set_parameters(vel, accel, max_vel, max_accel)
-        self.brusher.home()
+        motor = None
+        match motor_type:
+            case self.MotorTypes.BRUSHER:
+                motor = self.brusher
+            case self.MotorTypes.FLAME_IO: 
+                motor = self.flame_io
+            case self.MotorTypes.LEFT_PULLER:
+                motor = self.left_puller
+            case self.MotorTypes.RIGHT_PULLER:
+                motor = self.right_puller
+            case _:  # Default case. Does nothing if a valid motor type is not specified.
+                return 0
         
-    def initialize_flame_io(self, serial:str, vel: float, accel: float, max_vel: float=0.0, max_accel: float=0.0, simulate=False):
-        """
-        Connect to, configure, and home (if needed) flame in/out motor.
-
-        Args:
-            serial (str): Serial number
-            vel (float): Standard velocity
-            accel (float): Standard acceleration
-            max_vel (float, optional): Maximum velocity. Defaults to 0.0.
-            max_accel (float, optional): Maximum acceleration. Defaults to 0.0.
-            simulate (bool, optional): Simulate this motor. Defaults to False.
-        """
-        self.flame_io.connect(serial, simulate)
-        self.flame_io.set_parameters(vel, accel, max_vel, max_accel)
-        self.flame_io.home()
+        motor.connect(serial, simulate)
+        motor.set_velocity(vel, max_vel)
+        motor.set_acceleration(accel, max_accel)
+        motor.home()
         
-    def initialize_left_puller(self, serial:str, vel: float, accel: float, max_vel: float=0.0, max_accel: float=0.0, simulate=False):
-        """
-        Connect to, configure, and home (if needed) left puller motor.
-
-        Args:
-            serial (str): Serial number
-            vel (float): Standard velocity
-            accel (float): Standard acceleration
-            max_vel (float, optional): Maximum velocity. Defaults to 0.0.
-            max_accel (float, optional): Maximum acceleration. Defaults to 0.0.
-            simulate (bool, optional): Simulate this motor. Defaults to False.
-        """
-        self.left_puller.connect(serial, simulate)
-        self.left_puller.set_parameters(vel, accel, max_vel, max_accel)
-        self.left_puller.home()
-        
-    def initialize_right_puller(self, serial:str, vel: float, accel: float, max_vel: float=0.0, max_accel: float=0.0, simulate=False):
-        """
-        Connect to, configure, and home (if needed) right puller motor.
-
-        Args:
-            serial (str): Serial number
-            vel (float): Standard velocity
-            accel (float): Standard acceleration
-            max_vel (float, optional): Maximum velocity. Defaults to 0.0.
-            max_accel (float, optional): Maximum acceleration. Defaults to 0.0.
-            simulate (bool, optional): Simulate this motor. Defaults to False.
-        """
-        self.right_puller.connect(serial, simulate)
-        self.right_puller.set_parameters(vel, accel, max_vel, max_accel)
-        self.right_puller.home()
