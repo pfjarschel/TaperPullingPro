@@ -13,7 +13,8 @@ control procedures during taper fabrication.
 
 import numpy as np
 import time
-from PyQt6.QtCore import QTimer  # Even if the GUI is not used, use QTimer
+from threading import Timer
+# from PyQt6.QtCore import QTimer, QThread # Even if the GUI is not used, use QTimer and QThread
 
 from .TaperPullingDAQ import TaperPullingDAQ
 from .TaperPullingMotors import TaperPullingMotors
@@ -28,9 +29,17 @@ class TaperPullingCore:
     process. This can be easily obtained from the TaperShape class.
     """
     
+    class Loop(Timer):
+        """
+        Class that manages the pulling loop.
+        """
+        def run(self):
+            while not self.finished.wait(self.interval):
+                self.function(*self.args, **self.kwargs)
+    
     # Flow control
+    update_loop = None
     poll_interval = 10  # ms.
-    update_loop = QTimer()
     running_process = False     # If pulling process started
     flame_approaching = False   # Stage 1
     flame_holding = False       # Stage 2
@@ -39,7 +48,7 @@ class TaperPullingCore:
     standby = False             # Stage 5
     cleaving = False            # Opt. Stage 6
     looping = False             # Opt. Stage 6
-    pos_check_precision = 1.0   # Precision expected when checking for positions (%)
+    pos_check_precision = 0.01   # Precision expected when checking for positions (mm)
     
     # Devices to control
     motors = None
@@ -84,7 +93,7 @@ class TaperPullingCore:
     brusher_reverse = True  # Start brushing to more negative positions (v < 0)
     
     flame_io_x0 = 14.3  # mm
-    flame_io_hold = 10.0  # s
+    flame_io_hold = 1.0  # s
     flame_io_moveback = False
     flame_io_mb_to = 12.0  # mm
     flame_io_mb_start = 0.01  # mm
@@ -98,19 +107,27 @@ class TaperPullingCore:
     def __init__(self):
         """
         "This class centralizes all devices controls."
-        """
+        """        
         self.motors = TaperPullingMotors()
         self.daq = TaperPullingDAQ()
         
-        self.update_loop.setInterval(1000)
-        self.update_loop.timeout.connect(self.update_function)
+        self.update_loop = self.Loop(self.poll_interval/1000.0, self.update_function)
         self.update_loop.start()
+        # self.update_loop.moveToThread(self)
+        # self.update_loop.setInterval(self.poll_interval)
+        # self.update_loop.timeout.connect(self.update_function)
+        # self.update_loop.start()
+        # self.exec()
         
     def __del__(self):
+        self.close()
+        
+    def close(self):
         """
         Shutdown procedures
         """
-        pass
+        # Stop timer thread
+        self.update_loop.cancel()
     
     def reset_pull_stats(self):
         """
@@ -183,7 +200,7 @@ class TaperPullingCore:
             
             if stage == 0:
                 # Stage 0, Sending motors to start positions
-                pass
+                self.going_to_start()
             elif stage < 2:
                 # Stage 1: Flame approaching
                 self.check_brushing()
@@ -210,21 +227,21 @@ class TaperPullingCore:
                 self.perform_cleave()
                 
     def going_to_start(self):
-        left = (self.puller_left_pos >= self.left_puller_x0*(1 - self.pos_check_precision/100.0)) and \
-               (self.puller_left_pos <= self.left_puller_x0*(1 + self.pos_check_precision/100.0))
-        right = (self.puller_right_pos >= self.right_puller_x0*(1 - self.pos_check_precision/100.0)) and \
-               (self.puller_right_pos <= self.right_puller_x0*(1 + self.pos_check_precision/100.0))
-        brusher = (self.brusher_pos >= self.brusher_x0*(1 - self.pos_check_precision/100.0)) and \
-               (self.brusher_pos <= self.brusher_x0*(1 + self.pos_check_precision/100.0))
+        left = (self.puller_left_pos >= self.left_puller_x0 - self.pos_check_precision) and \
+               (self.puller_left_pos <= self.left_puller_x0 + self.pos_check_precision)
+        right = (self.puller_right_pos >= self.right_puller_x0 - self.pos_check_precision) and \
+               (self.puller_right_pos <= self.right_puller_x0 + self.pos_check_precision)
+        brusher = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
+               (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
         if left and right and brusher:
             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
             self.flame_approaching = True
             print("starting positions ok")
             print("started brushing")
     
-    def approach_flame(self):       
-        flame_in = (self.flame_io_pos >= self.left_puller_x0*(1 - self.pos_check_precision/100.0)) and \
-                   (self.flame_io_pos <= self.left_puller_x0*(1 + self.pos_check_precision/100.0))
+    def approach_flame(self):
+        flame_in = (self.flame_io_pos >= self.flame_io_x0 - self.pos_check_precision) and \
+                   (self.flame_io_pos <= self.flame_io_x0 + self.pos_check_precision)
         if flame_in:
             print("flame in")
             self.time_hold0 = time.time()
@@ -278,7 +295,15 @@ class TaperPullingCore:
         # TODO: Code to perform the cleaving procedure automatically
         print("cleave")
         
-    def start_process(self):
+    def start_process(self, hotzone_function: list[list[float]]|np.ndarray):
+        """
+        Starts the pulling process.
+        
+        Args:
+            hotzone_function (np.ndarray): A 2 dimensional list or numpy array 
+                containing the hotzone size vs. total pulled distance.
+        """
+        
         # Reset
         self.reset_pull_stats()
         
@@ -287,7 +312,16 @@ class TaperPullingCore:
         self.motors.flame_io.go_to(self.flame_io_x0)
         self.motors.left_puller.go_to(self.left_puller_x0)
         self.motors.right_puller.go_to(self.right_puller_x0)
-        self.running_process = True
+        
+        # Set hotzone function
+        try:
+            self.hotzone_function = np.array(hotzone_function)
+        except:
+            raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
+        if self.hotzone_function.shape[0] >= 2:
+            self.running_process = True
+        else:
+            raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
         
         # Set initial time
         self.time_init = time.time()
