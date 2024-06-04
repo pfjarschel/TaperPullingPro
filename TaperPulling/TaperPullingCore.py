@@ -14,7 +14,6 @@ control procedures during taper fabrication.
 import numpy as np
 import time
 from threading import Timer
-# from PyQt6.QtCore import QTimer, QThread # Even if the GUI is not used, use QTimer and QThread
 
 from .TaperPullingDAQ import TaperPullingDAQ
 from .TaperPullingMotors import TaperPullingMotors
