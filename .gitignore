@@ -16,4 +16,4 @@
 **/config/*
 
 # Dev testing
-private_tests.py
+private_tests*
