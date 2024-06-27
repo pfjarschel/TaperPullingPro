@@ -131,7 +131,8 @@ class TaperPullingSim:
         last_sweep = False
         
         while not done:
-            if not self.turn_off_at_edges or (self.turn_off_at_edges and (np.abs(cur_vf) == self.vf)) or not self.move_flame:
+            turn_off_condition = np.abs(np.abs(cur_vf) - self.vf) > 0.10*self.vf
+            if not self.turn_off_at_edges or (self.turn_off_at_edges and not turn_off_condition) or not self.move_flame:
                 # Store flame position and size, hotzone size, and mean waist radius
                 if i < len(self.fpos_arr):
                     self.fpos_arr[i] = pos_1
