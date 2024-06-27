@@ -12,8 +12,6 @@ tapers.
 It can output a hotzone function to be used in fabrication (by the
 TaperPullingCore module) given desired parameters, such as final waist radius
 and length, and adiabaticity criteria.
-It can also aid in monitoring the fabrication process, showin valuable inferred
-data from the pulling stats (total pulled, etc.)
 All length units in mm.
 Wavelength parameter in µm.
 """
@@ -81,13 +79,12 @@ class TaperShape:
         n_points: Number of points for the profile/hotzone function. Default is 1001.
         """
         
-        self.set_parameters(wl, r0, r_core, n_core_ratio, n_medium, n_points)
+        # Load default modal effective index difference if parameters are default
+        if wl == (self.wavelength and r0 == self.initial_r and r_core == self.r_core and 
+                  n_core_ratio == self.n_core_ratio and n_medium == self.n_medium):
+            self.load_dneffs(f"{respath}/dneffs_SMF28_FB_1550.txt")
         
-        # Load modal effective index difference and pre-calculate parameters
-        print("Loading taper shape data...")
-        # self.load_dneffs()
-        # self.calculate_approx_dneffs()
-        print("TaperShape loaded")
+        self.set_parameters(wl, r0, r_core, n_core_ratio, n_medium, n_points)
         
     def set_parameters(self,  wl: float=1.55,
                        r0: float=0.0625,
