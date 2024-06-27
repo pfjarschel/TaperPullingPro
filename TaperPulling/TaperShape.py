@@ -386,7 +386,7 @@ class TaperShape:
             
         if hz.min() >= min_hz or min_hz_idx >= len(hz) - 1:          
             # Profile is already feasible, min_hz is not broken
-            print("Found a feasible profile!")
+            print("Found an feasible profile!")
             return z_rw, adiab_r_array, f
         else:          
             # Perform optimization using parametric hot-zone
@@ -409,7 +409,7 @@ class TaperShape:
             z_arr_opt0, r_arr_opt0 = self.profile_from_hz(x_arr_opt0, l_arr_opt0)
             z_arr_opt0, r_arr_opt0 = self.extend_profile_until_rw(z_arr_opt0, r_arr_opt0, rw, l_arr_opt0[-1])
             
-            print("Found a optimized profile!")
+            print("Found an optimized profile!")
             return z_arr_opt0, r_arr_opt0
     
     
