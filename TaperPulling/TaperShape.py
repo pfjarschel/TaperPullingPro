@@ -52,7 +52,7 @@ class TaperShape:
     initial_r = 62.5e-3  # mm
     r_core = 4.1e-3  # mm
     n_core_ratio = 1.0036
-    n_medium: 1.0
+    n_medium = 1.0
     n_points = 1001
         
     # Modal effective index difference
@@ -61,8 +61,8 @@ class TaperShape:
     z_r0 = np.zeros(11)
     
     def __init__(self, wl: float=1.55,
-                       r0: float=0.0625,
-                       r_core: float=0.0041,
+                       r0: float=62.5e-3,
+                       r_core: float=4.1e-3,
                        n_core_ratio: float=1.0036,
                        n_medium: float=1.0,
                        n_points: int=1001
@@ -80,15 +80,15 @@ class TaperShape:
         """
         
         # Load default modal effective index difference if parameters are default
-        if wl == (self.wavelength and r0 == self.initial_r and r_core == self.r_core and 
+        if (wl == self.wavelength and r0 == self.initial_r and r_core == self.r_core and 
                   n_core_ratio == self.n_core_ratio and n_medium == self.n_medium):
             self.load_dneffs(f"{respath}/dneffs_SMF28_FB_1550.txt")
         
         self.set_parameters(wl, r0, r_core, n_core_ratio, n_medium, n_points)
         
     def set_parameters(self,  wl: float=1.55,
-                       r0: float=0.0625,
-                       r_core: float=0.0041,
+                       r0: float=62.5e-3,
+                       r_core: float=4.1e-3,
                        n_core_ratio: float=1.0036,
                        n_medium: float=1.0,
                        n_points: int=1001
@@ -357,6 +357,8 @@ class TaperShape:
     
     def real_adiabatic_profile(self, rw: float, min_hz: float=2.0, start_f: float=1.0,
                                f_step: float=0.01, limit_r: float=20e-3):        
+        print("Trying to find the best feasible profile for the current parameters...")
+        
         # Find f factor that allows starting hz to be feasible
         f = 1.0  # First attempt
         start_hz_ok = False
@@ -384,6 +386,7 @@ class TaperShape:
             
         if hz.min() >= min_hz or min_hz_idx >= len(hz) - 1:          
             # Profile is already feasible, min_hz is not broken
+            print("Found a feasible profile!")
             return z_rw, adiab_r_array, f
         else:          
             # Perform optimization using parametric hot-zone
@@ -406,6 +409,7 @@ class TaperShape:
             z_arr_opt0, r_arr_opt0 = self.profile_from_hz(x_arr_opt0, l_arr_opt0)
             z_arr_opt0, r_arr_opt0 = self.extend_profile_until_rw(z_arr_opt0, r_arr_opt0, rw, l_arr_opt0[-1])
             
+            print("Found a optimized profile!")
             return z_arr_opt0, r_arr_opt0
     
     
