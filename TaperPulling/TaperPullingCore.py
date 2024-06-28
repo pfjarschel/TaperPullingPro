@@ -14,8 +14,6 @@ control procedures during taper fabrication.
 import numpy as np
 import time
 from threading import Timer
-
-from .TaperPullingDAQ import TaperPullingDAQ
 from .TaperPullingMotors import TaperPullingMotors
 
 
@@ -51,7 +49,6 @@ class TaperPullingCore:
     
     # Devices to control
     motors = None
-    daq = None
     
     # Current data (for convenience)
     brusher_pos = 0.0
@@ -108,7 +105,6 @@ class TaperPullingCore:
         "This class centralizes all devices controls."
         """        
         self.motors = TaperPullingMotors()
-        self.daq = TaperPullingDAQ()
         
         self.update_loop = self.Loop(self.poll_interval/1000.0, self.update_function)
         self.update_loop.start()
@@ -165,19 +161,6 @@ class TaperPullingCore:
         self.motors.initialize_motor(self.motors.MotorTypes.FLAME_IO, simulate=simulate)
         self.motors.initialize_motor(self.motors.MotorTypes.LEFT_PULLER, simulate=simulate)
         self.motors.initialize_motor(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
-        
-    def init_daq_as_default(self, simulate=False):
-        self.daq.get_devices()
-        if len(self.daq.devices) > 0:
-            self.daq.get_ai_channels()
-        if len(self.daq.channels) > 0:
-            self.daq.setup_daq(self.daq.sampling_rate,
-                               self.daq.device_channel,
-                               self.daq.min_scale,
-                               self.daq.max_scale,
-                               self.daq.term_config,
-                               self.daq.clock_source,
-                               simulate)
             
     def update_function(self):
         # Get current time

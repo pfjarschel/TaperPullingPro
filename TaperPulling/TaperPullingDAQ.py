@@ -101,7 +101,7 @@ class TaperPullingDAQ:
         else:
             return 0.0
         
-    def read_data(self, n:int) -> np.ndarray:
+    def read_data(self, n:int=1) -> np.ndarray:
         """
         Read multiple values from the DAQ, at the defined sampling rate. Blocking.
         Args:
