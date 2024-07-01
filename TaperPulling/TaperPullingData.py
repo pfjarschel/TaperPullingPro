@@ -77,8 +77,8 @@ class TaperPullingData:
         self.cuton_f = cuton_f
         self.cutoff_f = cutoff_f
         
-        self.spectrogram_loop = self.Loop(self.spectrogram_interval/1000.0, self.update_function)
-        self.monitor_loop = self.Loop(self.monitor_interval/1000.0, self.update_function)
+        self.spectrogram_loop = self.Loop(self.spectrogram_interval/1000.0, self.build_spectrogram)
+        self.monitor_loop = self.Loop(self.monitor_interval/1000.0, self.monitor)
         
     def init_daq_as_default(self, simulate=False):
         self.daq.get_devices()
@@ -113,7 +113,7 @@ class TaperPullingData:
             self.init_daq_as_default()
             
     def set_monitor_buffer(self, n: int=1024):
-        while not self.daq_busy:
+        while self.daq_busy:
             pass
         self.monitor_buffer_size = n
         self.monitor_buffer = np.zeros(n)
@@ -131,6 +131,9 @@ class TaperPullingData:
             return data
         else:
             return -1
+        
+    def get_last_monitor(self):
+        return self.monitor_buffer[-1]
     
     def get_transmission_points(self, n:int, wait=False):
         if wait:
@@ -183,7 +186,6 @@ class TaperPullingData:
         return spec_x, spec_y
     
     def clear_spectrogram(self):
-        del self.spectra
         self.spectra = []
     
     def start_monitor(self):

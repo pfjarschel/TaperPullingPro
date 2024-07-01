@@ -17,11 +17,16 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from TaperPulling.TaperPullingCore import TaperPullingCore
+from TaperPulling.TaperPullingData import TaperPullingData
 
 # Initialize core
 core = TaperPullingCore()
-core.init_daq_as_default(simulate=True)
 core.init_motors_as_default(simulate=True)
+
+# Initialize Data acquisition and processing
+data_manager = TaperPullingData()
+data_manager.set_sampling_rate(1e3)
+data_manager.init_daq_as_default(simulate=True)
 
 # Lists to hold data
 b_pos = []
@@ -33,13 +38,16 @@ times = []
 vals = []
 
 # Hotzone function: a 2 point line
-# Will pull 90 mm (45 on each side)
-# Hot zone will grow from 2 mm to 20 mm
-hz_function = [[0.0, 90.0], [2.0, 20.0]]
+# Will pull 40 mm (20 on each side)
+# Hot zone will grow from 2 mm to 10 mm
+hz_function = [[0.0, 40.0], [2.0, 10.0]]
 
 # Initialize list to hold measured hz lengths
 hz_points = [[0.0, hz_function[1][0]]]
 hz = np.array(hz_points).T
+
+# Start monitoring
+data_manager.start_monitor()
 
 # Start process
 core.start_process(hz_function)
@@ -76,7 +84,7 @@ while not core.standby:
     fio_pos.append(core.motors.flame_io.pos)
     lp_pos.append(core.motors.left_puller.pos)
     rp_pos.append(core.motors.right_puller.pos)
-    vals.append(core.daq.read_data(10).mean())
+    vals.append(data_manager.get_last_monitor())
     total_pulled.append(core.total_pulled)
     times.append(time.time() - t0)
     
@@ -126,5 +134,6 @@ plt.ioff()
 plt.show()  
 
 # Shut down
+data_manager.stop_monitor()
 core.stop_pulling()
 core.close()
