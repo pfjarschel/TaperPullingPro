@@ -86,7 +86,7 @@ class TaperPullingCore:
     
     brusher_x0 = 33.0  # mm
     brusher_min_span = 0.5  # mm, minimum brush span. Motor glitches if it's too low
-    brusher_reverse = True  # Start brushing to more negative positions (v < 0)
+    brusher_reverse = False  # Start brushing to more negative positions (v < 0)
     
     flame_io_x0 = 14.3  # mm
     flame_io_hold = 1.0  # s
@@ -250,7 +250,8 @@ class TaperPullingCore:
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
         l = self.brusher_x0 - hz/2.0
         r = self.brusher_x0 + hz/2.0
-        if self.brusher_pos <= l or self.brusher_pos >= r:
+        if (self.brusher_pos < l and self.brusher_dir == -1) or \
+            self.brusher_pos > r and self.brusher_dir == 1:
             self.brusher_dir = -1*self.brusher_dir
             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
     

@@ -25,14 +25,17 @@ FormUI, WindowUI = uic.loadUiType(f"{respath}/mainwindow.ui")
 
 
 class MainWindow(FormUI, WindowUI):
-    done_loading = False
-    busy = False
-    wait_switch = False
-    main_to = 1000  # ms
+    # General variables
     temp_settings_file = f"{rootpath}/config/temp_settings.json"
     default_settings_file = f"{confpath}/PyTaper_default_settings.json"
     factory_settings_file = f"{confpath}/PyTaper_factory_settings.json"
     last_dir = QDir.homePath()
+    
+    # Flow control variables
+    done_loading = False
+    busy = False
+    wait_switch = False
+    main_to = 1000  # ms    
     
     def __del__(self):
         print("closing all")
@@ -301,7 +304,6 @@ class MainWindow(FormUI, WindowUI):
                             w.setText(settings_dict[key])
                     except:
                         pass
-            print(self.last_dir)
     
     def load_default_settings(self):
         self.load_settings(self.default_settings_file)
@@ -362,7 +364,8 @@ class MainWindow(FormUI, WindowUI):
 
     # Timer functions
     def mainLoop(self):
-        print("main loop")
+        # print("main loop")
+        pass
     
     def initLoop(self):
         print("init loop")

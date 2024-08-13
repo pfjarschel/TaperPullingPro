@@ -255,7 +255,7 @@ class TaperPullingSim:
         print("Simulation done                                           ")
         self.r_arrs[-1] = r_arr  # Safety
         
-        return self.z_arr, self.r_arrs
+        return self.z_arr, self.r_arrs, total_pulled
     
     def show_last_sim_animation(self, smooth_window: float=0.02):
         smooth_w = int(smooth_window*len(self.r_arrs[0]))
