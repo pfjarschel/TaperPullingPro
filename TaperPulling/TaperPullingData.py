@@ -150,6 +150,7 @@ class TaperPullingData:
     def get_last_power(self, db=False):
         pwr = 1e3*self.get_last_monitor()/(self.impedance*self.responsivity)
         if db:
+            if pwr <= 0: pwr = 1e-99
             return 10*np.log10(pwr)
         else:
             return pwr
@@ -175,6 +176,7 @@ class TaperPullingData:
     def get_buffer_power_average(self, n, db=False):
         pwr = 1e3*self.get_buffer_average(n)/(self.impedance*self.responsivity)
         if db:
+            if pwr <= 0: pwr = 1e-99
             return 10*np.log10(pwr)
         else:
             return pwr
