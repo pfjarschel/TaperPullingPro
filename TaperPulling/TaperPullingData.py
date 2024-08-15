@@ -52,8 +52,12 @@ class TaperPullingData:
     monitor_buffer_size = 1024
     monitor_buffer = np.zeros(1024)
     
+    impedance = 1e4  # Ohms
+    responsivity = 1.0  # A/W
+    
     spectrogram_loop = None
     spectrogram_interval = 10  # ms
+    spectrogram_samples = 128
     spectrum_points = 1024
     last_spectrum = np.zeros((2, 1024))
     last_spectrum_data = np.zeros((2, 2*1024))
@@ -81,10 +85,13 @@ class TaperPullingData:
         self.monitor_loop = self.Loop(self.monitor_interval/1000.0, self.monitor)
         
     def init_daq_as_default(self, simulate=False):
+        while self.daq_busy:
+            pass
+        self.daq_busy = True
         self.daq.get_devices()
         if len(self.daq.devices) > 0:
             self.daq.get_ai_channels()
-        if len(self.daq.channels) > 0:
+        if len(self.daq.channels) > 0 or simulate:
             self.daq.setup_daq(self.daq.sampling_rate,
                                self.daq.device_channel,
                                self.daq.min_scale,
@@ -93,15 +100,20 @@ class TaperPullingData:
                                self.daq.clock_source,
                                simulate)
             self.sampling_rate = self.daq.sampling_rate
+        self.daq_busy = False
             
     def init_daq(self, srate: float, dev_ch: str, min_v: float, max_v: float, term: str = "default",
                  clock: str = "OnboardClock", simulate: bool = False):
+        while self.daq_busy:
+            pass
+        self.daq_busy = True
         self.daq.get_devices()
         if len(self.daq.devices) > 0:
             self.daq.get_ai_channels()
         if len(self.daq.channels) > 0:
             self.daq.setup_daq(srate, dev_ch, min_v, max_v, term, clock, simulate)
             self.sampling_rate = self.daq.sampling_rate
+        self.daq_busy = False
             
     def set_sampling_rate(self, sampling_rate: float):
         self.sampling_rate = sampling_rate
@@ -135,6 +147,13 @@ class TaperPullingData:
     def get_last_monitor(self):
         return self.monitor_buffer[-1]
     
+    def get_last_power(self, db=False):
+        pwr = 1e3*self.get_last_monitor()/(self.impedance*self.responsivity)
+        if db:
+            return 10*np.log10(pwr)
+        else:
+            return pwr
+    
     def get_transmission_points(self, n:int, wait=False):
         if wait:
             while self.daq_busy:
@@ -152,6 +171,13 @@ class TaperPullingData:
             return self.monitor_buffer[-n:].mean()
         else:
             return self.monitor_buffer.mean()
+        
+    def get_buffer_power_average(self, n, db=False):
+        pwr = 1e3*self.get_buffer_average(n)/(self.impedance*self.responsivity)
+        if db:
+            return 10*np.log10(pwr)
+        else:
+            return pwr
     
     def perform_fft(self, x_data, y_data, smooth=0.01, window=False, beta=1.0):
         yf = []
