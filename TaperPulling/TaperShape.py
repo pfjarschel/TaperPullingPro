@@ -239,7 +239,8 @@ class TaperShape:
         return wl
     
     def uniform_hz(self, hz0: float, alpha: float, pull: float) -> np.ndarray:
-        hz_function = np.array([[0.0, pull], [hz0, hz0 + pull*alpha]])
+        hz_function = np.array([np.linspace(0.0, pull, self.n_points), 
+                                np.linspace(hz0, hz0 + pull*alpha, self.n_points)])
         return hz_function
     
     def calc_rw_uniform_hz(self, hz0: float, alpha: float, pull: float, r0: float) -> float:
@@ -386,7 +387,7 @@ class TaperShape:
             
         if hz.min() >= min_hz or min_hz_idx >= len(hz) - 1:          
             # Profile is already feasible, min_hz is not broken
-            print("Found an feasible profile!")
+            print("Found a feasible profile!")
             return z_rw, adiab_r_array, f
         else:          
             # Perform optimization using parametric hot-zone
