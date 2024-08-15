@@ -41,7 +41,7 @@ min_l = 2  # Minimum hotzone size, mm
 flame_size = 1.0  # Estimated flame size, mm
 rw = 0.4e-3  # Desired final radius, mm
 lw = 3  # Desired waist length, mm
-f = 0.9# Adiabaticity factor. 0 to 1. Above 1 it is NOT adiabatic.
+f = 0.9  # Adiabaticity factor. 0 to 1. Above 1 it is NOT adiabatic.
 
 # Calculate ideal profile
 z_arr, r_arr = shape_man.real_adiabatic_profile(rw, min_l, f)
