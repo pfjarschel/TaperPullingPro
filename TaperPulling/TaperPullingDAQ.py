@@ -97,7 +97,9 @@ class TaperPullingDAQ:
             # TODO: code to read a single value
             return 0.0
         elif self.simulate and not self.paused:
-            return np.random.randint(self.min_scale*1000.0, self.max_scale*1000.0)/1000.0
+            avg = (self.min_scale + self.max_scale)/2
+            span = np.abs(self.max_scale - self.min_scale)
+            return avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000))/2000000.0
         else:
             return 0.0
         
@@ -114,7 +116,9 @@ class TaperPullingDAQ:
             # TODO: code to read multiple values
             return np.zeros(n)
         elif self.simulate and not self.paused:
-            return np.random.randint(self.min_scale*1000.0, self.max_scale*1000.0, n)/1000.0
+            avg = (self.min_scale + self.max_scale)/2
+            span = np.abs(self.max_scale - self.min_scale)
+            return avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000), n)/2000000.0
         else:
             return np.zeros(n)
         
