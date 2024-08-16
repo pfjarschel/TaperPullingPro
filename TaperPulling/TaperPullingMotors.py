@@ -17,6 +17,7 @@ motors.
 
 from enum import Enum
 import time
+from threading import Timer
 
 
 class GenericTLMotor:
@@ -37,8 +38,12 @@ class GenericTLMotor:
     accel = 1.0
     max_accel = 1.0
     pos = 0.0
+    initing = False
+    homing = False
     homed = False
+    connected = False
     ok = False
+    error = False
     serial = ""
     moving = MoveDirection.STOPPED
     simulate = False
@@ -64,13 +69,14 @@ class GenericTLMotor:
             self.serial = serial
         if serial != "" and not simulate:
             # TODO: add specific code to connect to a ThorLabs motor
-            self.ok = True
+            self.connected = True
         
     def disconnect(self):
         """
         Disconnect to motor
         """
         # TODO: Code to disconnect
+        self.connected = False
         self.ok = False
         
     def set_velocity(self, vel: float=-1.0, max_vel: float=-1.0):
@@ -103,13 +109,24 @@ class GenericTLMotor:
         """
         Perform homing procedure
         """
-        if not self.get_homed():
-            if self.ok:
-                # TODO: code to home motor 
-                pass
-            elif self.simulate:
-                self.pos = 0.0
-                self.homed = True
+        if not self.get_homed() and self.connected:
+            self.start_home()
+            
+            i = 0
+            while not self.homed and i < 600:
+                time.sleep(0.1)
+                self.homed = self.get_homed()
+                i += 1
+                
+    def start_home(self):
+        if self.connected:
+            self.homing = True
+            # TODO: code to home motor
+            pass
+        elif self.simulate:
+            self.homing = True
+            self.go_to(10.0)
+            self.move(self.MoveDirection.NEGATIVE)
     
     def go_to(self, pos:float):
         """
@@ -146,7 +163,7 @@ class GenericTLMotor:
         """
         Stop movement
         """
-        if self.ok:
+        if self.connected:
             # TODO: code to stop
             pass
         elif self.simulate:
@@ -162,9 +179,14 @@ class GenericTLMotor:
         Returns:
             bool: Wheter the motor is homed
         """
-        if self.ok:
+        if self.connected:
             # TODO: code to get homed status
             pass
+        elif self.simulate:
+            if self.pos <= 0.0:
+                self.go_to(0.0)
+                self.homed = True
+                self.homing = False
         return self.homed
     
     def get_position(self) -> float:
@@ -253,6 +275,14 @@ class TaperPullingMotors:
         FLAME_IO = 1
         LEFT_PULLER = 2
         RIGHT_PULLER = 3
+        
+    class Loop(Timer):
+        """
+        Class that manages a threaded loop.
+        """
+        def run(self):
+            while not self.finished.wait(self.interval):
+                self.function(*self.args, **self.kwargs)
     
     def __init__(self):
         """
@@ -263,6 +293,22 @@ class TaperPullingMotors:
         self.flame_io = FlameIO()
         self.left_puller = LeftPuller()
         self.right_puller = RightPuller()
+        
+        self.init_loop = self.Loop(0.1, self.init_loop_function)
+        self.init_busy = False
+        self.init_running = False
+        
+    def __del__(self):
+        self.close()
+        
+    def close(self):
+        """
+        Shutdown procedures
+        """
+        # Stop thread
+        if self.init_running:
+            self.init_running = False
+            self.init_loop.cancel()
         
     def initialize_motor(self, motor_type: MotorTypes, serial: str="", 
                          vel: float=-1.0, accel: float=-1.0,
@@ -294,9 +340,83 @@ class TaperPullingMotors:
             case _:  # Default case. Does nothing if a valid motor type is not specified.
                 return 0
         
+        motor.initing = True
         motor.connect(serial, simulate)
         motor.set_velocity(vel, max_vel)
         motor.set_acceleration(accel, max_accel)
         motor.home()
-        motor.get_position()
+        motor.initing = False
         
+        if (motor.connected or motor.simulate) and motor.homed:
+            motor.ok = True
+            
+        return motor.ok
+    
+    def initialize_motor_async(self, motor_type: MotorTypes, serial: str="", 
+                         vel: float=-1.0, accel: float=-1.0,
+                         max_vel: float=-1.0, max_accel: float=-1.0, 
+                         simulate=False):
+        """
+        Connect to, configure, and home (if needed) a motor.
+        If a parameter is not given, its current value (default at initialization) is used
+
+        Args:
+            motor_type (MotorTypes): Type of the motor to be initialized
+            serial (str): Serial number. Defaults to empty.
+            vel (float): Standard velocity. Defaults to -1.0.
+            accel (float): Standard acceleration. Defaults to -1.0.
+            max_vel (float, optional): Maximum velocity. Defaults to -1.0.
+            max_accel (float, optional): Maximum acceleration. Defaults to -1.0.
+            simulate (bool, optional): Simulate this motor. Defaults to False.
+        """
+        motor = None
+        match motor_type:
+            case self.MotorTypes.BRUSHER:
+                motor = self.brusher
+            case self.MotorTypes.FLAME_IO: 
+                motor = self.flame_io
+            case self.MotorTypes.LEFT_PULLER:
+                motor = self.left_puller
+            case self.MotorTypes.RIGHT_PULLER:
+                motor = self.right_puller
+            case _:  # Default case. Does nothing if a valid motor type is not specified.
+                return 0
+        
+        motor.initing = True
+        motor.connect(serial, simulate)
+        motor.set_velocity(vel, max_vel)
+        motor.set_acceleration(accel, max_accel)
+        if not self.init_running:
+            self.init_running = True
+            self.init_loop.start()
+        
+    def init_loop_function(self):
+        if not self.init_busy:
+            self.init_busy = True
+            self.init_running = True
+            
+            motors = [self.brusher, self.flame_io, self.left_puller, self.right_puller]
+            finish = [False]*len(motors)
+            for i, motor in enumerate(motors):
+                connected = (motor.connected or motor.simulate)
+                if motor.initing and connected and not motor.homing:
+                    motor.start_home()
+                
+                if motor.initing and connected and motor.homing and not motor.homed:
+                    motor.get_homed()
+                    
+                if motor.initing and connected and motor.homed:
+                    motor.ok = True
+                    
+                if motor.ok or motor.error:
+                    finish[i] = True
+                    motor.initing = False
+                else:
+                    finish[i] = False
+            
+            self.init_busy = False
+            if all(finish):
+                self.init_running = False
+                self.init_loop.cancel()
+                
+            print(finish)

@@ -28,7 +28,7 @@ class TaperPullingCore:
     
     class Loop(Timer):
         """
-        Class that manages the pulling loop.
+        Class that manages a threaded loop.
         """
         def run(self):
             while not self.finished.wait(self.interval):
@@ -156,11 +156,29 @@ class TaperPullingCore:
         self.current_profile_step = 0
         self.last_total_pulled = 0.0
     
-    def init_motors_as_default(self, simulate=False):
-        self.motors.initialize_motor(self.motors.MotorTypes.BRUSHER, simulate=simulate)
-        self.motors.initialize_motor(self.motors.MotorTypes.FLAME_IO, simulate=simulate)
-        self.motors.initialize_motor(self.motors.MotorTypes.LEFT_PULLER, simulate=simulate)
-        self.motors.initialize_motor(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
+    def init_brusher_as_default(self, simulate=False):
+        return self.motors.initialize_motor(self.motors.MotorTypes.BRUSHER, simulate=simulate)
+    
+    def init_flameio_as_default(self, simulate=False):
+        return self.motors.initialize_motor(self.motors.MotorTypes.FLAME_IO, simulate=simulate)
+    
+    def init_puller_l_as_default(self, simulate=False):
+        return self.motors.initialize_motor(self.motors.MotorTypes.LEFT_PULLER, simulate=simulate)
+        
+    def init_puller_r_as_default(self, simulate=False):
+        return self.motors.initialize_motor(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
+    
+    def init_brusher_as_default_async(self, simulate=False):
+        return self.motors.initialize_motor_async(self.motors.MotorTypes.BRUSHER, simulate=simulate)
+    
+    def init_flameio_as_default_async(self, simulate=False):
+        return self.motors.initialize_motor_async(self.motors.MotorTypes.FLAME_IO, simulate=simulate)
+    
+    def init_puller_l_as_default_async(self, simulate=False):
+        return self.motors.initialize_motor_async(self.motors.MotorTypes.LEFT_PULLER, simulate=simulate)
+        
+    def init_puller_r_as_default_async(self, simulate=False):
+        return self.motors.initialize_motor_async(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
             
     def update_function(self):
         # Get current time
