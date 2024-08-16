@@ -57,7 +57,7 @@ class TaperPullingDAQ:
         """
         Gets all analog in channels from all NI DAQ boards present in the system.
         """
-        #TODO: code to get devices
+        #TODO: code to get channels
         self.channels = ["ai0"]
         
     def setup_daq(self, srate: float, dev_ch: str, min_v: float, max_v: float, term="default", clock="OnboardClock", simulate=False):
