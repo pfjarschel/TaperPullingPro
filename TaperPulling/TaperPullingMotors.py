@@ -33,28 +33,45 @@ class GenericTLMotor:
         STOPPED = 0
         POSITIVE = 1
         
+    class Loop(Timer):
+        """
+        Class that manages a threaded loop.
+        """
+        def run(self):
+            while not self.finished.wait(self.interval):
+                self.function(*self.args, **self.kwargs)
+        
     vel = 1.0
     max_vel = 1.0
     accel = 1.0
     max_accel = 1.0
     pos = 0.0
+    target_pos = 0.0
+    min_pos = 0.0
+    max_pos = 100.0
     initing = False
     homing = False
     homed = False
     connected = False
     ok = False
+    simok = False
     error = False
+    busy = False
     serial = ""
     moving = MoveDirection.STOPPED
+    going_to = False
     simulate = False
     sim_last_t = 0.0
     sim_last_pos = 0.0
     
     def __init__(self):
-        pass
+        self.go_to_loop = None
     
     def __del__(self):
-        pass
+        self.close()
+        
+    def close(self):
+        self.go_to_loop.cancel()
     
     def connect(self, serial="", simulate=False):
         """
@@ -109,7 +126,7 @@ class GenericTLMotor:
         """
         Perform homing procedure
         """
-        if not self.get_homed() and self.connected:
+        if not self.get_homed() and (self.connected or self.simulate):
             self.start_home()
             
             i = 0
@@ -125,8 +142,9 @@ class GenericTLMotor:
             pass
         elif self.simulate:
             self.homing = True
-            self.go_to(10.0)
-            self.move(self.MoveDirection.NEGATIVE)
+            self.pos = self.max_pos/2.0
+            self.sim_last_pos = self.pos
+            self.go_to(0.0)
     
     def go_to(self, pos:float):
         """
@@ -135,14 +153,46 @@ class GenericTLMotor:
         Args:
             pos (float): target position
         """
-        if self.ok:
+        self.target_pos = pos
+        if self.connected:
             # TODO: code to go to position 
             pass
         elif self.simulate:
-            self.pos = pos
-            self.sim_last_pos = pos
+            self.sim_last_pos = self.get_position()
             self.sim_last_t = time.time()
-    
+            if self.sim_last_pos < pos:
+                self.move(self.MoveDirection.POSITIVE)
+            elif self.sim_last_pos > pos:
+                self.move(self.MoveDirection.NEGATIVE)
+            if not self.going_to:
+                self.going_to = True
+                self.go_to_loop = None
+                self.go_to_loop = self.Loop(0.001, self.go_to_loop_function)
+                self.go_to_loop.start()          
+            
+    def go_to_loop_function(self):
+        if not self.busy:
+            self.busy = True
+            
+            pos = self.get_position()
+            done = False
+            if self.moving == self.MoveDirection.POSITIVE:
+                if pos >= self.target_pos:
+                    done = True
+            if self.moving == self.MoveDirection.NEGATIVE:
+                if pos <= self.target_pos:
+                    done = True
+            if self.moving == self.MoveDirection.STOPPED:
+                done = True
+            
+            self.busy = False
+            if done:
+                self.stop()
+                self.going_to = False
+                self.pos = self.target_pos
+                self.sim_last_pos = self.pos
+                self.go_to_loop.cancel()
+            
     def move(self, dir:MoveDirection):
         """
         Move continuously in a certain direction
@@ -150,7 +200,7 @@ class GenericTLMotor:
         Args:
             dir (MoveDirection): Direction to move
         """
-        if self.ok:
+        if self.connected:
             # TODO: code to move
             pass
         elif self.simulate:
@@ -184,7 +234,8 @@ class GenericTLMotor:
             pass
         elif self.simulate:
             if self.pos <= 0.0:
-                self.go_to(0.0)
+                self.pos = 0.0
+                self.sim_last_pos = 0.0
                 self.homed = True
                 self.homing = False
         return self.homed
@@ -196,7 +247,7 @@ class GenericTLMotor:
         Returns:
             float: The position
         """
-        if self.ok:
+        if self.connected:
             # TODO: code to get position
             pass
         elif self.simulate:
@@ -216,6 +267,7 @@ class Brusher(GenericTLMotor):
     max_vel = vel # mm/s
     max_accel = accel # mm/s2
     serial = "83837733"
+    max_pos = 50.0  # mm
     
     def __init__(self):
         super().__init__()
@@ -230,6 +282,7 @@ class FlameIO(GenericTLMotor):
     max_vel = vel # mm/s
     max_accel = accel # mm/s2
     serial = "83837788"
+    max_pos = 25.0  # mm
     
     def __init__(self):
         super().__init__()
@@ -244,6 +297,7 @@ class LeftPuller(GenericTLMotor):
     max_vel = 20.0  # mm/s
     max_accel = accel # mm/s2
     pullers_l_serial = "67838837"
+    max_pos = 100.0  # mm
     
     def __init__(self):
         super().__init__()
@@ -258,6 +312,7 @@ class RightPuller(GenericTLMotor):
     max_vel = 20.0  # mm/s
     max_accel = accel # mm/s2
     pullers_l_serial = "67839254"
+    max_pos = 100.0  # mm
     
     def __init__(self):
         super().__init__()
@@ -294,7 +349,7 @@ class TaperPullingMotors:
         self.left_puller = LeftPuller()
         self.right_puller = RightPuller()
         
-        self.init_loop = self.Loop(0.1, self.init_loop_function)
+        self.init_loop = None
         self.init_busy = False
         self.init_running = False
         
@@ -388,6 +443,8 @@ class TaperPullingMotors:
         motor.set_acceleration(accel, max_accel)
         if not self.init_running:
             self.init_running = True
+            self.init_loop = None
+            self.init_loop = self.Loop(0.1, self.init_loop_function)
             self.init_loop.start()
         
     def init_loop_function(self):
