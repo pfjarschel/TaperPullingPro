@@ -418,5 +418,3 @@ class TaperPullingMotors:
             if all(finish):
                 self.init_running = False
                 self.init_loop.cancel()
-                
-            print(finish)
