@@ -70,7 +70,7 @@ class TaperPullingCore:
     count = 0
     total_pulled = 0.0
     hotzone = 0.0
-    real_hotzone = 0.0
+    rhz_edges = []
     brusher_last_hit = 0
     flameIO_zeroed = False
     brusher_zeroed = False
@@ -146,7 +146,7 @@ class TaperPullingCore:
         self.count = 0
         self.total_pulled = 0.0
         self.hotzone = 0.0
-        self.real_hotzone = 0.0
+        self.rhz_edges = []
         self.brusher_last_hit = 0
         self.brusher_dir = 1
         self.flameIO_zeroed = False
@@ -270,6 +270,7 @@ class TaperPullingCore:
         r = self.brusher_x0 + hz/2.0
         if (self.brusher_pos < l and self.brusher_dir == -1) or \
             self.brusher_pos > r and self.brusher_dir == 1:
+            self.rhz_edges.append(self.brusher_pos)
             self.brusher_dir = -1*self.brusher_dir
             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
     
