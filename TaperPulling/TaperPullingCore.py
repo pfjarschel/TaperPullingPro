@@ -36,7 +36,7 @@ class TaperPullingCore:
     
     # Flow control
     update_loop = None
-    poll_interval = 10  # ms.
+    poll_interval = 1  # ms.
     running_process = False     # If pulling process started
     flame_approaching = False   # Stage 1
     flame_holding = False       # Stage 2

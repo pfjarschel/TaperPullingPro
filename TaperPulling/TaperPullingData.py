@@ -48,7 +48,7 @@ class TaperPullingData:
     sampling_rate = 1e3
     
     monitor_loop = None
-    monitor_interval = 10  # ms
+    monitor_interval = 1  # ms
     monitor_buffer_size = 1024
     monitor_buffer = np.zeros(1024)
     

@@ -63,6 +63,7 @@ class GenericTLMotor:
     simulate = False
     sim_last_t = 0.0
     sim_last_pos = 0.0
+    monitor_interval = 1  # ms
     
     def __init__(self):
         self.go_to_loop = None
@@ -167,7 +168,7 @@ class GenericTLMotor:
             if not self.going_to:
                 self.going_to = True
                 self.go_to_loop = None
-                self.go_to_loop = self.Loop(0.001, self.go_to_loop_function)
+                self.go_to_loop = self.Loop(self.monitor_interval/1000.0, self.go_to_loop_function)
                 self.go_to_loop.start()          
             
     def go_to_loop_function(self):
