@@ -4,7 +4,7 @@ from PyQt6.QtCore import QTimer, QCoreApplication, QDir
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
                             QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
                             QMessageBox, QFileDialog
-# from PyQt6.QtGui import *
+from PyQt6.QtGui import QPixmap
 
 # Import other stuff
 import os
@@ -15,6 +15,11 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 import numpy as np
 import json
 
+# Import taper pulling classes
+from TaperPulling.TaperShape import TaperShape
+from TaperPulling.TaperPullingSim import TaperPullingSim
+from TaperPulling.TaperPullingCore import TaperPullingCore
+from TaperPulling.TaperPullingData import TaperPullingData
 
 # Load UI files
 thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
@@ -25,6 +30,12 @@ FormUI, WindowUI = uic.loadUiType(f"{respath}/mainwindow.ui")
 
 
 class MainWindow(FormUI, WindowUI):
+    # Taper classes objects
+    shape = None
+    simultaion = None
+    core = None
+    data = None
+    
     # General variables
     temp_settings_file = f"{rootpath}/config/temp_settings.json"
     default_settings_file = f"{confpath}/PyTaper_default_settings.json"
@@ -35,7 +46,15 @@ class MainWindow(FormUI, WindowUI):
     done_loading = False
     busy = False
     wait_switch = False
-    main_to = 1000  # ms    
+    main_to = 100  # ms
+    
+    # Fabrication variables
+    hz_function = np.array([[0.0, 1.0], [1.0, 1.0]])
+    profile = np.array([[0.0, 1.0], [1.0, 1.0]])
+    min_hz = 0.0
+    total_to_pull = 0.0
+    adiab_angles = np.array([[0.0, 1.0], [1.0, 1.0]])
+    profile_angles = np.array([[0.0, 1.0], [1.0, 1.0]])
     
     def __del__(self):
         print("closing all")
@@ -43,15 +62,34 @@ class MainWindow(FormUI, WindowUI):
     def __init__(self, parent=None):
         super().__init__(parent)
         
+        # Initialize taper classes
+        self.shape = TaperShape()
+        self.simultaion = TaperPullingSim()
+        self.core = TaperPullingCore()
+        self.data = TaperPullingData()
+        
         self.setupUi(self)
         self.show()
-        self.initialize()
         self.config_ui()
+        self.initialize()
         self.enable_controls()
-        
-        self.daq_init()
+        self.toggle_manual_control()
+        self.toggle_fiber_defaults()
         
         self.done_loading = True
+        
+    def closeEvent(self, event):
+        reply = QMessageBox.question(self, 'Exiting...',
+            "Are you sure to exit?", QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.data.stop_monitor()
+            self.core.stop_pulling()
+            self.core.close()
+            self.core.motors.close()
+            event.accept()
+        else:
+            event.ignore()
     
     # Configure UI
     def config_ui(self):
@@ -140,7 +178,7 @@ class MainWindow(FormUI, WindowUI):
         self.figure_pow = plt.figure()
         self.graph_pow = FigureCanvas(self.figure_pow)
         self.graphToolbar_pow = NavigationToolbar(self.graph_pow, self)
-        self.powGraph.addWidget(self.graphToolbar_pow)
+        # self.powGraph.addWidget(self.graphToolbar_pow)
         self.powGraph.addWidget(self.graph_pow)
         self.graph_pow_ax = self.figure_pow.add_subplot()
         self.graph_pow_ax.set_xlabel("Pulled Dist. (mm)")
@@ -152,7 +190,7 @@ class MainWindow(FormUI, WindowUI):
         self.figure_spec = plt.figure()
         self.graph_spec = FigureCanvas(self.figure_spec)
         self.graphToolbar_spec = NavigationToolbar(self.graph_spec, self)
-        self.spectrumGraph.addWidget(self.graphToolbar_spec)
+        # self.spectrumGraph.addWidget(self.graphToolbar_spec)
         self.spectrumGraph.addWidget(self.graph_spec)
         self.graph_spec_ax = self.figure_spec.add_subplot()
         self.graph_spec_img = self.graph_spec_ax.imshow([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [1.0, 1.0, 1.0]], aspect="auto",
@@ -165,14 +203,34 @@ class MainWindow(FormUI, WindowUI):
         self.figure_hz = plt.figure()
         self.graph_hz = FigureCanvas(self.figure_hz)
         self.graphToolbar_hz = NavigationToolbar(self.graph_hz, self)
-        self.hotzoneGraph.addWidget(self.graphToolbar_hz)
+        # self.hotzoneGraph.addWidget(self.graphToolbar_hz)
         self.hotzoneGraph.addWidget(self.graph_hz)
         self.graph_hz_ax = self.figure_hz.add_subplot()
         self.graph_hz_line, = self.graph_hz_ax.plot([0, 0], [0, 0])
+        self.graph_hz_minline, = self.graph_hz_ax.plot([0, 0], [0, 0], 'r')
         self.graph_hz_ax.set_xlabel("Pulled Dist. (mm)")
         self.graph_hz_ax.set_ylabel("Hotzone Size (mm)")
         self.graph_hz_ax.grid(True)
         self.graph_hz.draw()
+        
+        self.figure_anglemini = plt.figure()
+        self.graph_anglemini = FigureCanvas(self.figure_anglemini)
+        self.angleMiniGraph.addWidget(self.graph_anglemini)
+        self.graph_anglemini_ax = self.figure_anglemini.add_subplot()
+        self.graph_anglemini_line, = self.graph_anglemini_ax.plot([0, 0], [0, 0])
+        self.graph_anglemini_adialine, = self.graph_anglemini_ax.plot([0, 0], [0, 0], 'r')
+        self.graph_anglemini_ax.set_xticks([])
+        self.graph_anglemini_ax.set_yticks([])
+        self.graph_anglemini.draw()
+        
+        self.figure_profmini = plt.figure()
+        self.graph_profmini = FigureCanvas(self.figure_profmini)
+        self.profMiniGraph.addWidget(self.graph_profmini)
+        self.graph_profmini_ax = self.figure_profmini.add_subplot()
+        self.graph_profmini_line, = self.graph_profmini_ax.plot([0.1, 0.1], [0.1, 0.1])
+        self.graph_profmini_ax.set_xticks([])
+        self.graph_profmini_ax.set_yticks([])
+        self.graph_profmini.draw()
           
         # Timers
         self.mainLoop_timer = QTimer()
@@ -203,6 +261,9 @@ class MainWindow(FormUI, WindowUI):
         self.daqClockCombo.currentIndexChanged.connect(self.daq_init)
         self.daqminvSpin.valueChanged.connect(self.daq_init)
         self.daqmaxvSpin.valueChanged.connect(self.daq_init)
+        self.responSpin.valueChanged.connect(self.daq_init)
+        self.impedanceSpin.valueChanged.connect(self.daq_init)
+        self.specsamplesSpin.valueChanged.connect(self.daq_init)
         self.set0powBut.clicked.connect(self.set_ref_power)
         
         # Motors connections
@@ -212,22 +273,30 @@ class MainWindow(FormUI, WindowUI):
         self.stopBut.clicked.connect(self.stop_pulling)
         self.cleaveBut.clicked.connect(self.cleave)
         self.emerBut.clicked.connect(self.stop_all_motors)
-        self.flameIOPosIndSpin.valueChanged.connect(self.fio_move2)
-        self.brusherPosIndSpin.valueChanged.connect(self.fb_move2)
-        self.leftPosIndSpin.valueChanged.connect(self.lp_move2)
-        self.rightPosIndSpin.valueChanged.connect(self.rp_move2)
+        self.flameIOPosSpin.valueChanged.connect(self.fio_move2)
+        self.brusherPosSpin.valueChanged.connect(self.fb_move2)
+        self.leftPosSpin.valueChanged.connect(self.lp_move2)
+        self.rightPosSpin.valueChanged.connect(self.rp_move2)
         self.enablemanualCheck.clicked.connect(self.toggle_manual_control)
+        self.brusherMinSpanSpin.valueChanged.connect(self.update_minimum_hz)
+        self.fSizeSpin.valueChanged.connect(self.update_minimum_hz)
         
         # Taper params connections
         self.distPriorRadio.clicked.connect(self.recalc_params)
         self.diamPriorRadio.clicked.connect(self.recalc_params)
-        self.d0Spin.valueChanged.connect(self.recalc_params)
         self.x0Spin.valueChanged.connect(self.recalc_params)
         self.l0Spin.valueChanged.connect(self.recalc_params)
         self.dwSpin.valueChanged.connect(self.recalc_params)
-        self.fSizeSpin.valueChanged.connect(self.recalc_params)
         self.alphaSpin.valueChanged.connect(self.recalc_params)
         self.loadHZBut.clicked.connect(self.load_hotzone)
+        self.calcHZBut.clicked.connect(self.calc_hotzone)
+        self.fiberdefsCheck.clicked.connect(self.toggle_fiber_defaults)
+        self.d0Spin.valueChanged.connect(self.set_fiber_params)
+        self.coredSpin.valueChanged.connect(self.set_fiber_params)
+        self.cladSpin.valueChanged.connect(self.set_fiber_params)
+        self.corenSpin.valueChanged.connect(self.set_fiber_params)
+        self.wlSpin.valueChanged.connect(self.set_fiber_params)
+        self.mednSpin.valueChanged.connect(self.set_fiber_params)
         
          # Menu connections
         self.actionSave_Data.triggered.connect(self.action_save_data)
@@ -252,9 +321,93 @@ class MainWindow(FormUI, WindowUI):
             
     # General functions
     def initialize(self):
-        self.tabWidget.setCurrentIndex(0)
+        self.devsTabs.setCurrentIndex(0)
+        self.designTabs.setCurrentIndex(0)
+        
         self.reset_pull_stats()
-        self.recalc_params()        
+        self.recalc_params()
+        self.set_fiber_params()
+        
+        self.daq_init()
+        self.data.start_monitor()
+        
+    def set_daq_params(self):
+        self.data.daq.sampling_rate = self.srateSpin.value()
+        self.data.daq.device_channel = self.daqChannelCombo.currentText()
+        self.data.daq.min_scale = self.daqminvSpin.value()
+        self.data.daq.max_scale = self.daqmaxvSpin.value()
+        self.data.daq.clock_source = self.daqClockCombo.currentText()
+        self.data.daq.term_config = self.daqConfCombo.currentText()
+        self.data.spectrogram_samples = self.specsamplesSpin.value()
+        self.data.responsivity = self.responSpin.value()
+        self.data.impedance = self.impedanceSpin.value()
+    
+    def set_motors_params(self):
+        # Brusher
+        self.core.motors.brusher.serial = self.brusherSerialText.text()
+        self.core.motors.brusher.set_velocity(self.brusherVelSpin.value())
+        self.core.motors.brusher.set_acceleration(self.brusherAccelSpin.value())
+        self.core.brusher_x0 = self.brusherInitPosSpin.value()
+        if self.revdirCheck.isChecked():
+            self.core.brusher_dir = -1
+        else:
+            self.core.brusher_dir = 1
+            
+        # In/Out
+        self.core.motors.flame_io.serial = self.flameIOSerialText.text()
+        self.core.motors.flame_io.set_velocity(self.flameIOVelSpin.value())
+        self.core.motors.flame_io.set_acceleration(self.flameIOAccelSpin.value())
+        self.core.flame_io_x0 = self.flameIOMovSpin.value()
+        self.core.flame_io_hold = self.flameIOHoldSpin.value()
+        self.core.flame_io_mb_start = self.flameIOTrigger1Spin.value()
+        self.core.flame_io_mb_end = self.flameIOTrigger2Spin.value()
+        self.core.flame_io_mb_to = self.flameIOMov2Spin.value()
+        
+        # Pullers
+        self.core.motors.left_puller.serial = self.pullerLeftSerialText.text()
+        self.core.motors.right_puller.serial = self.pullerRightSerialText.text()
+        self.core.motors.left_puller.set_acceleration(self.pullerAccelSpin.value(), self.pullerAccelSpin.value())
+        self.core.motors.right_puller.set_acceleration(self.pullerAccelSpin.value(), self.pullerAccelSpin.value())
+        self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value(), self.pullerVelSpin.value())
+        self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value(), self.pullerVelSpin.value())
+        self.core.left_puller_x0 = self.pullerInitPosSpin.value()
+        self.core.right_puller_x0 = self.pullerInitPosSpin.value()
+        
+    def set_fiber_params(self):
+        n_cl = self.cladSpin.value()
+        n_co = self.corenSpin.value()
+        n_ratio = n_co/n_cl
+        self.shape.set_parameters(self.wlSpin.value(), 1e-3*self.d0Spin.value()/2.0, 1e-3*self.coredSpin.value()/2.0, 
+                                  n_ratio, self.mednSpin.value(), self.optimpointsSpin.value())
+        self.shape.n_cladding = n_cl
+        self.shape.n_core = n_co
+        self.shape.n_core_ratio = self.shape.n_core/self.shape.n_cladding
+        
+    def toggle_fiber_defaults(self):
+        self.d0Spin.setReadOnly(self.fiberdefsCheck.isChecked())
+        self.coredSpin.setReadOnly(self.fiberdefsCheck.isChecked())
+        self.corenSpin.setReadOnly(self.fiberdefsCheck.isChecked())
+        self.cladSpin.setReadOnly(self.fiberdefsCheck.isChecked())
+        self.wlSpin.setReadOnly(self.fiberdefsCheck.isChecked())
+        self.mednSpin.setReadOnly(self.fiberdefsCheck.isChecked())
+        
+        if self.fiberdefsCheck.isChecked():
+            buttons = QSpinBox.ButtonSymbols.NoButtons
+            self.d0Spin.setValue(125.0)
+            self.coredSpin.setValue(8.2)
+            self.corenSpin.setValue(1.4492)
+            self.cladSpin.setValue(1.444)
+            self.wlSpin.setValue(1.55)
+            self.mednSpin.setValue(1.0)
+        else:
+            buttons = QSpinBox.ButtonSymbols.UpDownArrows
+
+        self.d0Spin.setButtonSymbols(buttons)
+        self.coredSpin.setButtonSymbols(buttons)
+        self.corenSpin.setButtonSymbols(buttons)
+        self.cladSpin.setButtonSymbols(buttons)
+        self.wlSpin.setButtonSymbols(buttons)
+        self.mednSpin.setButtonSymbols(buttons)
 
     def save_settings(self, filename):
         if filename != "":
@@ -360,127 +513,347 @@ class MainWindow(FormUI, WindowUI):
         self.cologradSpin.setEnabled(True)
         
     def reset_pull_stats(self):
-        print("Pull stats reset")
+        self.core.reset_pull_stats()
+        self.timeleftSpin.setValue(0.0)
+        self.totalPulledSpin.setValue(self.core.total_pulled)
+        self.waistDiamIndSpin.setValue(self.shape.initial_r*2.0)
+        self.waistLengthIndSpin.setValue(0.0)
+        self.transLengthSpin.setValue(0.0)
+        self.hotzoneIndSpin.setValue(0.0)
 
     # Timer functions
     def mainLoop(self):
-        # print("main loop")
-        pass
+        if not self.busy:
+            self.busy = True
+                
+            # Update power monitor
+            if self.monpowCheck.isChecked():
+                self.transpowIndSpin.setValue(self.data.get_last_power(db=True))
+                self.lossIndSpin.setValue(self.refpowIndSpin.value() - self.transpowIndSpin.value())
+                
+            # Update motor positions
+            self.brusherPosIndSpin.setValue(self.core.motors.brusher.get_position())
+            self.flameIOPosIndSpin.setValue(self.core.motors.flame_io.get_position())
+            self.leftPosIndSpin.setValue(self.core.motors.left_puller.get_position())
+            self.rightPosIndSpin.setValue(self.core.motors.right_puller.get_position())
+            
+            # Update leds
+            if self.core.motors.brusher.ok and self.core.motors.brusher.moving == self.core.motors.brusher.MoveDirection.STOPPED:
+                self.brInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+            elif self.core.motors.brusher.ok and self.core.motors.brusher.moving != self.core.motors.brusher.MoveDirection.STOPPED:
+                self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            elif self.core.motors.brusher.error:
+                self.brInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            
+            if self.core.motors.flame_io.ok and self.core.motors.flame_io.moving == self.core.motors.flame_io.MoveDirection.STOPPED:
+                self.fioInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+            elif self.core.motors.flame_io.ok and self.core.motors.flame_io.moving != self.core.motors.flame_io.MoveDirection.STOPPED:
+                self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            elif self.core.motors.flame_io.error:
+                self.fioInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            
+            if self.core.motors.left_puller.ok and self.core.motors.left_puller.moving == self.core.motors.left_puller.MoveDirection.STOPPED:
+                self.leftInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+            elif self.core.motors.left_puller.ok and self.core.motors.left_puller.moving != self.core.motors.left_puller.MoveDirection.STOPPED:
+                self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            elif self.core.motors.left_puller.error:
+                self.leftInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            
+            if self.core.motors.right_puller.ok and self.core.motors.right_puller.moving == self.core.motors.right_puller.MoveDirection.STOPPED:
+                self.rightInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+            elif self.core.motors.right_puller.ok and self.core.motors.right_puller.moving != self.core.motors.right_puller.MoveDirection.STOPPED:
+                self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            elif self.core.motors.right_puller.error:
+                self.rightInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            
+            self.busy = False
     
     def initLoop(self):
-        print("init loop")
+        if not self.busy:
+            self.busy = True
+            
+            connected = [False]*4
+            homed = [False]*4
+            
+            if self.core.motors.brusher.connected or self.core.motors.brusher.simulate:
+                self.brInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                connected[0] = True
+            elif self.core.motors.brusher.error:
+                self.brInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            if self.core.motors.flame_io.connected or self.core.motors.flame_io.simulate:
+                self.fioInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                connected[1] = True
+            elif self.core.motors.flame_io.error:
+                self.fioInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            if self.core.motors.left_puller.connected or self.core.motors.left_puller.simulate:
+                self.leftInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                connected[2] = True
+            elif self.core.motors.left_puller.error:
+                self.leftInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            if self.core.motors.right_puller.connected or self.core.motors.right_puller.simulate:
+                self.rightInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                connected[3] = True
+            elif self.core.motors.right_puller.error:
+                self.rightInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            
+            if self.core.motors.brusher.homed:
+                self.brHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                homed[0] = True
+            elif self.core.motors.brusher.homing:
+                self.brHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            if self.core.motors.flame_io.homed:
+                self.fioHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                homed[1] = True
+            elif self.core.motors.flame_io.homing:
+                self.fioHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            if self.core.motors.left_puller.homed:
+                self.leftHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                homed[2] = True
+            elif self.core.motors.left_puller.homing:
+                self.leftHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            if self.core.motors.right_puller.homed:
+                self.rightHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                homed[3] = True
+            elif self.core.motors.right_puller.homing:
+                self.rightHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+
+            self.busy = False
+            if all(connected + homed):
+                self.initLoop_timer.stop()
     
     def flameholdLoop(self):
+        #TODO: flame holding loop
         print("flame hold loop")
     
     def pullLoop(self):
+        #TODO: pulling loop
         print("pull loop")
     
     def go2zeroLoop(self):
+        #TODO: go to zero
         print("go2zero loop")
     
     # DAQ functions
     def daq_init(self):
-        print("inited DAQ")
+        self.set_daq_params()
+        if self.daqChannelCombo.currentText() == "Simulation":
+            self.data.init_daq_as_default(simulate=True)
+        else:
+            self.data.init_daq_as_default(simulate=False)
     
     def set_ref_power(self):
-        print("set ref. power")
+        self.refpowIndSpin.setValue(self.transpowIndSpin.value())
         
     # Motors functions
     def toggle_manual_control(self):
-        self.flameIOPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
-        self.brusherPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
-        self.leftPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
-        self.rightPosIndSpin.setReadOnly(not self.enablemanualCheck.isChecked())
-        
-        if self.enablemanualCheck.isChecked():
-            buttons = QSpinBox.ButtonSymbols.UpDownArrows
-        else:
-            buttons = QSpinBox.ButtonSymbols.NoButtons
-
-        self.flameIOPosIndSpin.setButtonSymbols(buttons)
-        self.brusherPosIndSpin.setButtonSymbols(buttons)
-        self.leftPosIndSpin.setButtonSymbols(buttons)
-        self.rightPosIndSpin.setButtonSymbols(buttons)
-        
-    def fb_init(self):
-        print("inited flame brusher")
-        
-    def fio_init(self):
-        print("inited flame in/out")
-        
-    def lp_init(self):
-        print("inited left puller")
-        
-    def rp_init(self):
-        print("inited right puller")
+        self.flameIOPosSpin.setEnabled(self.enablemanualCheck.isChecked())
+        self.brusherPosSpin.setEnabled(self.enablemanualCheck.isChecked())
+        self.leftPosSpin.setEnabled(self.enablemanualCheck.isChecked())
+        self.rightPosSpin.setEnabled(self.enablemanualCheck.isChecked())
     
     def fb_move2(self):
-        print("moving flame brusher")
+        if self.enablemanualCheck.isChecked():
+            self.core.motors.brusher.go_to(self.brusherPosSpin.value())
         
     def fio_move2(self):
-        print("moving flame in/out")
+        if self.enablemanualCheck.isChecked():
+            self.core.motors.flame_io.go_to(self.flameIOPosSpin.value())
         
     def lp_move2(self):
-        print("moving left puller")
+        if self.enablemanualCheck.isChecked():
+            self.core.motors.left_puller.go_to(self.leftPosSpin.value())
         
     def rp_move2(self):
-        print("moving right puller")
+        if self.enablemanualCheck.isChecked():
+            self.core.motors.right_puller.go_to(self.rightPosSpin.value())
         
     def stop_all_motors(self):
+        #TODO: stop motors
         print("stopped all motors")
         
     def init_motors(self):
-        print("inited motors")
-        self.fb_init()
-        self.fio_init()
-        self.lp_init()
-        self.rp_init()
+        self.set_motors_params()
+        
+        self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+        self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+        self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+        self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+        
+        brOk = self.core.init_brusher_as_default_async(self.brSimCheck.isChecked())
+        fioOk = self.core.init_flameio_as_default_async(self.fioSimCheck.isChecked())
+        leftOk = self.core.init_puller_l_as_default_async(self.leftSimCheck.isChecked())
+        rightOk = self.core.init_puller_r_as_default_async(self.rightSimCheck.isChecked())
+        
+        self.initLoop_timer.start()
         
     def go2start(self):
-        print("going to start")
+        self.core.motors.brusher.go_to(self.brusherInitPosSpin.value())
+        self.core.motors.flame_io.go_to(self.flameIOMovSpin.value())
+        self.core.motors.left_puller.go_to(self.pullerInitPosSpin.value())
+        self.core.motors.right_puller.go_to(self.pullerInitPosSpin.value())
         
     def start_pulling(self):
-        print("started pulling")
+        #TODO: start pulling
+        self.core.motors.left_puller.set_velocity(self.pullerPullVelSpin.value())
+        self.core.motors.right_puller.set_velocity(self.pullerPullVelSpin.value())
+        self.core.start_process(self.hz_function)
         
     def stop_pulling(self):
-        print("stopped pulling")
+        #TODO: stop pulling
+        self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
+        self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
+        self.core.stop_pulling()
         
     def cleave(self):
+        #TODO: cleave function
         print("cleaved")
         
     def set_indicators(self):
+        #TODO: set indicators
         print("indicators set")
     
     # Taper params functions
     def recalc_params(self):
         alpha = self.alphaSpin.value()
-        if np.abs(alpha) < 1e-15: alpha = 1e-15
-        
         x0 = self.x0Spin.value()
-        dw = self.dwSpin.value()
-        d0 = self.d0Spin.value()
-        l0 = self.l0Spin.value()
-        
-        z0 = (1 - alpha)*x0/2
-        lw = l0 + alpha*x0
+        dw = 1e-3*self.dwSpin.value()
+        d0 = 1e-3*self.d0Spin.value()
+        hz0 = self.l0Spin.value()
 
         if self.distPriorRadio.isChecked():
-            rw = (d0/2)*((1 + alpha*x0/l0)**(-1/(2*alpha)))  # Explodes for alpha = 0
-            self.dwSpin.setValue(2*rw)
+            rw = self.shape.calc_rw_uniform_hz(hz0, alpha, x0, d0/2.0)
+            self.dwSpin.setValue(1e3*2*rw)
+            dw = 2*rw
         elif self.diamPriorRadio.isChecked():
-            x0 = 2*(pow(((d0/2)/(dw/2)),(2*alpha)) - 1)*l0/(2*alpha)
+            x0 = self.shape.calc_pull_uniform_hz(hz0, alpha, dw/2.0, d0/2.0)
             self.x0Spin.setValue(x0)
+            
+        z0 = (1 - alpha)*x0/2
+        lw = hz0 + alpha*x0
 
         self.setTransLengthSpin.setValue(z0)
         self.setWaistLengthSpin.setValue(lw)
         self.timeleftSpin.setValue(x0/(2.0*self.pullerPullVelSpin.value()))
         
+        if np.abs(alpha) > 0.01:
+            hz_data = self.shape.uniform_hz(hz0, alpha, x0)
+        else:
+            hz_data = np.array([np.linspace(0.0, x0, self.shape.n_points), np.ones(self.shape.n_points)*hz0])
+        
+        profile_data = self.shape.profile_from_hz(hz_data[0], hz_data[1])
+        self.profile_angles = self.shape.profile_angles(profile_data[0], profile_data[1])
+        ideal_prof = self.shape.ideal_adiabatic_profile(dw/2.0, 1.0)
+        self.adiab_angles = self.shape.profile_angles(ideal_prof[0], ideal_prof[1])
+        self.hz_function = hz_data
+        self.profile = profile_data
+        
+        self.update_graph(hz_data, self.graph_hz_line, self.graph_hz_ax, self.graph_hz)
+        self.update_graph(profile_data, self.graph_profmini_line, self.graph_profmini_ax, self.graph_profmini)
+        self.update_graph(np.array([ideal_prof[1], self.adiab_angles]), self.graph_anglemini_adialine, self.graph_anglemini_ax, self.graph_anglemini)
+        self.update_graph(np.array([profile_data[1], self.profile_angles]), self.graph_anglemini_line, self.graph_anglemini_ax, self.graph_anglemini)
+        self.update_minimum_hz()
+        
+        self.total_to_pull = x0
+        
+    def update_graph(self, data, graph_line, graph_ax, graph_canvas):
+        graph_line.set_xdata(data[0])
+        graph_line.set_ydata(data[1])
+        graph_ax.relim()
+        graph_ax.autoscale()
+        graph_canvas.draw()
+        graph_canvas.flush_events()
+        
+    def update_minimum_hz(self):
+        self.min_hz = self.fSizeSpin.value() + self.brusherMinSpanSpin.value()
+        self.update_graph(np.array([[0.0, self.total_to_pull], [self.min_hz, self.min_hz]]), 
+                          self.graph_hz_minline, self.graph_hz_ax, self.graph_hz)
+        
     def load_hotzone(self):
-        print("loaded hotzone profile")
+        file = QFileDialog.getOpenFileName(self, "Load hotzone profile", self.last_dir, "Text files (*.txt *.csv *.dat)")
+        filename = file[0]
+        
+        self.last_dir = os.path.dirname(os.path.realpath(filename)).replace("\\", "/")
+       
+        if filename != "":
+            directory = os.path.dirname(os.path.realpath(filename)).replace("\\", "/")
+            Path(directory).mkdir(parents=True, exist_ok=True)
+
+            delimiters = [" ", ",", "\t", ";"]
+            del_i = 0
+            seems_ok = False
+            while not seems_ok and del_i < len(delimiters):
+                try:
+                    loaded_data = np.loadtxt(filename, delimiter=delimiters[del_i]).T
+                    if loaded_data.shape[0] == 2 and loaded_data.shape[1] > 1:
+                        seems_ok = True
+                        self.hz_function = np.array([loaded_data[0], loaded_data[1]])
+                        self.total_to_pull = self.hz_function[0][-1]
+                        
+                        profile_data = self.shape.profile_from_hz(self.hz_function[0], self.hz_function[1])
+                        self.profile_angles = self.shape.profile_angles(profile_data[0], profile_data[1])
+                        ideal_prof = self.shape.ideal_adiabatic_profile(profile_data[1].min(), 1.0)
+                        self.adiab_angles = self.shape.profile_angles(ideal_prof[0], ideal_prof[1])
+                        self.profile = profile_data
+                        
+                        self.update_graph(self.hz_function, self.graph_hz_line, self.graph_hz_ax, self.graph_hz)
+                        self.update_graph(profile_data, self.graph_profmini_line, self.graph_profmini_ax, self.graph_profmini)
+                        self.update_graph(np.array([ideal_prof[1], self.adiab_angles]), self.graph_anglemini_adialine, self.graph_anglemini_ax, self.graph_anglemini)
+                        self.update_graph(np.array([profile_data[1], self.profile_angles]), self.graph_anglemini_line, self.graph_anglemini_ax, self.graph_anglemini)
+                        self.update_minimum_hz()
+
+                        self.dwoptSpin.setValue(2e3*profile_data[1].min())
+                        self.wlenoptSpin.setValue(self.hz_function[1][-1])
+                        self.setWaistLengthSpin.setValue(self.hz_function[1][-1])
+                        self.pulledoptIndSpin.setValue(self.hz_function[0][-1])
+                        self.hz0optIndSpin.setValue(self.hz_function[1][0])
+                        self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
+                        self.timeleftSpin.setValue(0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value())
+                        
+                        self.statusBar.showMessage(f"Hotzone file loaded")
+                except:
+                    pass
+                del_i += 1
+            if not seems_ok:
+                self.statusBar.showMessage(f"Hotzone file loading failed! The file format is probably wrong.")
+    
+    def calc_hotzone(self):
+        self.statusBar.showMessage(f"Calculating ideal feasible profile. Please wait...")
+        
+        try:
+            z_arr, r_arr = self.shape.real_adiabatic_profile(0.5e-3*self.dwoptSpin.value(), self.min_hz, self.ffactorSpin.value())
+            x_arr, l_arr = self.shape.hz_from_profile(z_arr, r_arr, self.wlenoptSpin.value())
+            
+            self.hz_function = np.array([x_arr, l_arr])
+            self.total_to_pull = self.hz_function[0][-1]
+            
+            profile_data = self.shape.profile_from_hz(self.hz_function[0], self.hz_function[1])
+            self.profile_angles = self.shape.profile_angles(profile_data[0], profile_data[1])
+            ideal_prof = self.shape.ideal_adiabatic_profile(profile_data[1].min(), 1.0)
+            self.adiab_angles = self.shape.profile_angles(ideal_prof[0], ideal_prof[1])
+            self.profile = profile_data
+            
+            self.update_graph(self.hz_function, self.graph_hz_line, self.graph_hz_ax, self.graph_hz)
+            self.update_graph(profile_data, self.graph_profmini_line, self.graph_profmini_ax, self.graph_profmini)
+            self.update_graph(np.array([ideal_prof[1], self.adiab_angles]), self.graph_anglemini_adialine, self.graph_anglemini_ax, self.graph_anglemini)
+            self.update_graph(np.array([profile_data[1], self.profile_angles]), self.graph_anglemini_line, self.graph_anglemini_ax, self.graph_anglemini)
+            self.update_minimum_hz()
+
+            self.dwoptSpin.setValue(2e3*profile_data[1].min())
+            self.wlenoptSpin.setValue(self.hz_function[1][-1])
+            self.setWaistLengthSpin.setValue(self.hz_function[1][-1])
+            self.pulledoptIndSpin.setValue(self.hz_function[0][-1])
+            self.hz0optIndSpin.setValue(self.hz_function[1][0])
+            self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
+            self.timeleftSpin.setValue(0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value())
+            
+            self.statusBar.showMessage(f"Profile calculated successfully!")
+        except Exception as e:
+            print(e)
+            self.statusBar.showMessage(e)
         
     # Menu functions
     def action_save_data(self):
+        #TODO: save data function
         print("saved data")
         
     def action_load_def_settings(self):
