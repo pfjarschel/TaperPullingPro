@@ -142,7 +142,7 @@ class GenericTLMotor:
             pass
         elif self.simulate:
             self.homing = True
-            self.pos = self.max_pos/2.0
+            # self.pos = self.max_pos/2.0
             self.sim_last_pos = self.pos
             self.go_to(0.0)
     

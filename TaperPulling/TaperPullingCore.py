@@ -336,7 +336,7 @@ class TaperPullingCore:
         self.motors.right_puller.stop()
         
         # Retract Flame I/O
-        self.motors.flame_io.MoveDirection(self.motors.flame_io.MoveDirection(-1*self.flame_io_dir))
+        self.motors.flame_io.go_to(0.0)
     
         
         
