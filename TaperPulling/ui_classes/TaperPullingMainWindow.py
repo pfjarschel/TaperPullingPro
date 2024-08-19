@@ -55,6 +55,9 @@ class MainWindow(FormUI, WindowUI):
     total_to_pull = 0.0
     adiab_angles = np.array([[0.0, 1.0], [1.0, 1.0]])
     profile_angles = np.array([[0.0, 1.0], [1.0, 1.0]])
+    hz_sweep_n = 0
+    rhz_array = []
+    rhz_x_array = []
     
     def __del__(self):
         print("closing all")
@@ -206,8 +209,9 @@ class MainWindow(FormUI, WindowUI):
         # self.hotzoneGraph.addWidget(self.graphToolbar_hz)
         self.hotzoneGraph.addWidget(self.graph_hz)
         self.graph_hz_ax = self.figure_hz.add_subplot()
-        self.graph_hz_line, = self.graph_hz_ax.plot([0, 0], [0, 0])
+        self.graph_hz_real_line, = self.graph_hz_ax.plot([0.0], [self.hz_function[1][0]], '.', color='navy')
         self.graph_hz_minline, = self.graph_hz_ax.plot([0, 0], [0, 0], 'r')
+        self.graph_hz_line, = self.graph_hz_ax.plot([0, 0], [0, 0], color='tab:blue')
         self.graph_hz_ax.set_xlabel("Pulled Dist. (mm)")
         self.graph_hz_ax.set_ylabel("Hotzone Size (mm)")
         self.graph_hz_ax.grid(True)
@@ -242,17 +246,9 @@ class MainWindow(FormUI, WindowUI):
         self.initLoop_timer.setInterval(self.main_to)
         self.initLoop_timer.timeout.connect(self.initLoop)
         
-        self.flameholdLoop_timer = QTimer()
-        self.flameholdLoop_timer.setInterval(self.main_to)
-        self.flameholdLoop_timer.timeout.connect(self.flameholdLoop)
-        
         self.pullLoop_timer = QTimer()
         self.pullLoop_timer.setInterval(self.main_to)
         self.pullLoop_timer.timeout.connect(self.pullLoop)
-        
-        self.go2zeroLoop_timer = QTimer()
-        self.go2zeroLoop_timer.setInterval(self.main_to)
-        self.go2zeroLoop_timer.timeout.connect(self.go2zeroLoop)
         
         # DAQ connections
         self.srateSpin.valueChanged.connect(self.daq_init)
@@ -466,6 +462,8 @@ class MainWindow(FormUI, WindowUI):
         for i in range(len(widgets)):
             widgets[i].setEnabled(True)
         self.stopBut.setEnabled(False)
+        self.toggle_manual_control()
+        self.toggle_fiber_defaults()
         
     def disable_controls(self):
         lines = self.findChildren(QLineEdit)
@@ -511,15 +509,21 @@ class MainWindow(FormUI, WindowUI):
         
         self.emerBut.setEnabled(True)
         self.cologradSpin.setEnabled(True)
+        self.stopBut.setEnabled(True)
         
     def reset_pull_stats(self):
         self.core.reset_pull_stats()
-        self.timeleftSpin.setValue(0.0)
-        self.totalPulledSpin.setValue(self.core.total_pulled)
-        self.waistDiamIndSpin.setValue(self.shape.initial_r*2.0)
+        self.timeleftLabel.setText(f"Time left: {self.total_to_pull/(2*self.pullerPullVelSpin.value()):.2f} s")
+        self.timeleftBar.setValue(0)
+        self.totalPulledIndSpin.setValue(0.0)
+        self.waistDiamIndSpin.setValue(self.d0Spin.value())
         self.waistLengthIndSpin.setValue(0.0)
-        self.transLengthSpin.setValue(0.0)
+        self.transLengthIndSpin.setValue(0.0)
         self.hotzoneIndSpin.setValue(0.0)
+        self.rhz_array = []
+        self.rhz_x_array = []
+        self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
+        self.hz_sweep_n = 0
 
     # Timer functions
     def mainLoop(self):
@@ -532,10 +536,20 @@ class MainWindow(FormUI, WindowUI):
                 self.lossIndSpin.setValue(self.refpowIndSpin.value() - self.transpowIndSpin.value())
                 
             # Update motor positions
-            self.brusherPosIndSpin.setValue(self.core.motors.brusher.get_position())
-            self.flameIOPosIndSpin.setValue(self.core.motors.flame_io.get_position())
-            self.leftPosIndSpin.setValue(self.core.motors.left_puller.get_position())
-            self.rightPosIndSpin.setValue(self.core.motors.right_puller.get_position())
+            br_pos = self.core.motors.brusher.get_position()
+            fio_pos = self.core.motors.flame_io.get_position()
+            l_pos = self.core.motors.left_puller.get_position()
+            r_pos = self.core.motors.right_puller.get_position()
+            self.brusherPosIndSpin.setValue(br_pos)
+            self.flameIOPosIndSpin.setValue(fio_pos)
+            self.leftPosIndSpin.setValue(l_pos)
+            self.rightPosIndSpin.setValue(r_pos)
+            
+            # Update indicators
+            self.brusherIndSlider.setValue(int(1000.0*br_pos/self.core.motors.brusher.max_pos))
+            self.inoutIndSlider.setValue(int(1000.0*fio_pos/self.core.motors.flame_io.max_pos))
+            self.pullLeftIndSlider.setValue(int(1000.0*l_pos/self.core.motors.left_puller.max_pos))
+            self.pullRightIndSlider.setValue(int(1000.0*r_pos/self.core.motors.right_puller.max_pos))
             
             # Update leds
             if self.core.motors.brusher.ok and self.core.motors.brusher.moving == self.core.motors.brusher.MoveDirection.STOPPED:
@@ -621,17 +635,41 @@ class MainWindow(FormUI, WindowUI):
             if all(connected + homed):
                 self.initLoop_timer.stop()
     
-    def flameholdLoop(self):
-        #TODO: flame holding loop
-        print("flame hold loop")
-    
     def pullLoop(self):
-        #TODO: pulling loop
-        print("pull loop")
-    
-    def go2zeroLoop(self):
-        #TODO: go to zero
-        print("go2zero loop")
+        # Update time
+        pull_left = self.total_to_pull - self.core.total_pulled
+        time_left = pull_left/(2*self.pullerPullVelSpin.value())
+        total_time = self.total_to_pull/(2*self.pullerPullVelSpin.value())
+        self.timeleftLabel.setText(f"Time left: {time_left:.2f} s")
+        self.timeleftBar.setValue(int(100.0*(1 - time_left/total_time)))
+        
+        # Update est. values
+        tp = self.core.total_pulled
+        curr_hz = self.hz_function[1][np.abs(self.hz_function[0] - tp).argmin()]
+        self.totalPulledIndSpin.setValue(tp)
+        self.waistLengthIndSpin.setValue(curr_hz)
+        self.transLengthIndSpin.setValue((tp + self.hz_function[1][0] - curr_hz)/2)
+        
+        # Update est. diameter
+        x_ind = np.abs(self.hz_function[0] - tp).argmin()
+        curr_d = 2000*self.profile[1][x_ind]
+        self.waistDiamIndSpin.setValue(curr_d)
+        
+        # Update real hotzone
+        curr_hz_sweep_n = len(self.core.rhz_edges)
+        if len(self.core.rhz_edges) > self.hz_sweep_n:
+            if curr_hz_sweep_n > 1:
+                rhz = np.abs(self.core.rhz_edges[-1] - self.core.rhz_edges[-2])
+                self.hotzoneIndSpin.setValue(rhz)
+                if self.core.pulling:
+                    self.rhz_array.append(rhz)
+                    self.rhz_x_array.append(tp)
+                    rhz_data = np.array([self.rhz_x_array, self.rhz_array])
+                    self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
+            self.hz_sweep_n += 1
+            
+        # Update transmission
+        # TODO: Update transmission plots
     
     # DAQ functions
     def daq_init(self):
@@ -646,6 +684,12 @@ class MainWindow(FormUI, WindowUI):
         
     # Motors functions
     def toggle_manual_control(self):
+        if self.enablemanualCheck.isChecked():
+            self.flameIOPosSpin.setValue(self.flameIOPosIndSpin.value())
+            self.brusherPosSpin.setValue(self.brusherPosIndSpin.value())
+            self.leftPosSpin.setValue(self.leftPosIndSpin.value())
+            self.rightPosSpin.setValue(self.rightPosIndSpin.value())
+        
         self.flameIOPosSpin.setEnabled(self.enablemanualCheck.isChecked())
         self.brusherPosSpin.setEnabled(self.enablemanualCheck.isChecked())
         self.leftPosSpin.setEnabled(self.enablemanualCheck.isChecked())
@@ -668,8 +712,12 @@ class MainWindow(FormUI, WindowUI):
             self.core.motors.right_puller.go_to(self.rightPosSpin.value())
         
     def stop_all_motors(self):
-        #TODO: stop motors
-        print("stopped all motors")
+        self.stop_pulling()
+        self.core.motors.brusher.stop()
+        self.core.motors.flame_io.stop()
+        self.core.motors.left_puller.stop()
+        self.core.motors.right_puller.stop()
+        self.core.motors.flame_io.go_to(0.0)
         
     def init_motors(self):
         self.set_motors_params()
@@ -688,29 +736,33 @@ class MainWindow(FormUI, WindowUI):
         
     def go2start(self):
         self.core.motors.brusher.go_to(self.brusherInitPosSpin.value())
-        self.core.motors.flame_io.go_to(self.flameIOMovSpin.value())
         self.core.motors.left_puller.go_to(self.pullerInitPosSpin.value())
         self.core.motors.right_puller.go_to(self.pullerInitPosSpin.value())
         
     def start_pulling(self):
-        #TODO: start pulling
+        self.disable_controls()
+        self.core.motors.flame_io.go_to(self.flameIOMovSpin.value())
         self.core.motors.left_puller.set_velocity(self.pullerPullVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerPullVelSpin.value())
+        
+        self.reset_pull_stats()
+        
         self.core.start_process(self.hz_function)
+        self.pullLoop_timer.start()
         
     def stop_pulling(self):
-        #TODO: stop pulling
+        self.enable_controls()
+        self.core.motors.flame_io.go_to(0.0)
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
         self.core.stop_pulling()
+        self.pullLoop_timer.stop()
+        self.timeleftBar.setValue(0)
+        self.timeleftLabel.setText(f"Time left: 0.0 s")
         
     def cleave(self):
         #TODO: cleave function
         print("cleaved")
-        
-    def set_indicators(self):
-        #TODO: set indicators
-        print("indicators set")
     
     # Taper params functions
     def recalc_params(self):
@@ -733,7 +785,7 @@ class MainWindow(FormUI, WindowUI):
 
         self.setTransLengthSpin.setValue(z0)
         self.setWaistLengthSpin.setValue(lw)
-        self.timeleftSpin.setValue(x0/(2.0*self.pullerPullVelSpin.value()))
+        self.timeleftLabel.setText(f"Time left: {x0/(2.0*self.pullerPullVelSpin.value()):.2f} s")
         
         if np.abs(alpha) > 0.01:
             hz_data = self.shape.uniform_hz(hz0, alpha, x0)
@@ -748,6 +800,7 @@ class MainWindow(FormUI, WindowUI):
         self.profile = profile_data
         
         self.update_graph(hz_data, self.graph_hz_line, self.graph_hz_ax, self.graph_hz)
+        self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
         self.update_graph(profile_data, self.graph_profmini_line, self.graph_profmini_ax, self.graph_profmini)
         self.update_graph(np.array([ideal_prof[1], self.adiab_angles]), self.graph_anglemini_adialine, self.graph_anglemini_ax, self.graph_anglemini)
         self.update_graph(np.array([profile_data[1], self.profile_angles]), self.graph_anglemini_line, self.graph_anglemini_ax, self.graph_anglemini)
@@ -796,6 +849,7 @@ class MainWindow(FormUI, WindowUI):
                         self.profile = profile_data
                         
                         self.update_graph(self.hz_function, self.graph_hz_line, self.graph_hz_ax, self.graph_hz)
+                        self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
                         self.update_graph(profile_data, self.graph_profmini_line, self.graph_profmini_ax, self.graph_profmini)
                         self.update_graph(np.array([ideal_prof[1], self.adiab_angles]), self.graph_anglemini_adialine, self.graph_anglemini_ax, self.graph_anglemini)
                         self.update_graph(np.array([profile_data[1], self.profile_angles]), self.graph_anglemini_line, self.graph_anglemini_ax, self.graph_anglemini)
@@ -807,7 +861,7 @@ class MainWindow(FormUI, WindowUI):
                         self.pulledoptIndSpin.setValue(self.hz_function[0][-1])
                         self.hz0optIndSpin.setValue(self.hz_function[1][0])
                         self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
-                        self.timeleftSpin.setValue(0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value())
+                        self.timeleftLabel.setText(f"Time left: {0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value():.2f} s")
                         
                         self.statusBar.showMessage(f"Hotzone file loaded")
                 except:
@@ -833,6 +887,7 @@ class MainWindow(FormUI, WindowUI):
             self.profile = profile_data
             
             self.update_graph(self.hz_function, self.graph_hz_line, self.graph_hz_ax, self.graph_hz)
+            self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
             self.update_graph(profile_data, self.graph_profmini_line, self.graph_profmini_ax, self.graph_profmini)
             self.update_graph(np.array([ideal_prof[1], self.adiab_angles]), self.graph_anglemini_adialine, self.graph_anglemini_ax, self.graph_anglemini)
             self.update_graph(np.array([profile_data[1], self.profile_angles]), self.graph_anglemini_line, self.graph_anglemini_ax, self.graph_anglemini)
@@ -844,7 +899,7 @@ class MainWindow(FormUI, WindowUI):
             self.pulledoptIndSpin.setValue(self.hz_function[0][-1])
             self.hz0optIndSpin.setValue(self.hz_function[1][0])
             self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
-            self.timeleftSpin.setValue(0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value())
+            self.timeleftLabel.setText(f"Time left: {0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value():.2f} s")
             
             self.statusBar.showMessage(f"Profile calculated successfully!")
         except Exception as e:
