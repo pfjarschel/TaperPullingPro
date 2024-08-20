@@ -66,7 +66,7 @@ class TaperPullingData:
     cuton_f = 0.0
     cutoff_f = np.inf
        
-    def __init__(self, sampling_rate: float=1e4, cuton_f: float=0.0, cutoff_f: float=np.inf):
+    def __init__(self, sampling_rate: float=1e3, cuton_f: float=0.0, cutoff_f: float=np.inf):
         """
         This class is responsible for acquiring and processing the 
         fabrication process data.
@@ -185,6 +185,8 @@ class TaperPullingData:
     def perform_fft(self, x_data, y_data, smooth=0.01, window=False, sigma=0.15):
         yf = []
         n = len(y_data)
+        y_data = np.array(y_data)
+        y_data = y_data - y_data.mean()
         if window:
             if np.abs(sigma) > 1.0: sigma = 1.0
             if np.abs(sigma) < 0.0: sigma = 0.0
