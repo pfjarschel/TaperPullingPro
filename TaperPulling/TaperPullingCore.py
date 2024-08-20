@@ -37,6 +37,7 @@ class TaperPullingCore:
     # Flow control
     update_loop = None
     poll_interval = 1  # ms.
+    busy = False
     running_process = False     # If pulling process started
     flame_approaching = False   # Stage 1
     flame_holding = False       # Stage 2
@@ -57,6 +58,7 @@ class TaperPullingCore:
     puller_right_pos = 0.0
     
     # Movement directions
+    brusher_dir0 = 1  # Position increases
     brusher_dir = 1  # Position increases
     flame_io_dir = 1  # Position increases
     puller_left_dir = -1  # Position decreases
@@ -71,7 +73,6 @@ class TaperPullingCore:
     total_pulled = 0.0
     hotzone = 0.0
     rhz_edges = []
-    brusher_last_hit = 0
     flameIO_zeroed = False
     brusher_zeroed = False
     pullers_zeroed = False
@@ -147,8 +148,7 @@ class TaperPullingCore:
         self.total_pulled = 0.0
         self.hotzone = 0.0
         self.rhz_edges = []
-        self.brusher_last_hit = 0
-        self.brusher_dir = 1
+        self.brusher_dir = self.brusher_dir0
         self.flameIO_zeroed = False
         self.brusher_zeroed = False
         self.pullers_zeroed = False
@@ -181,50 +181,55 @@ class TaperPullingCore:
         return self.motors.initialize_motor_async(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
             
     def update_function(self):
-        # Get current time
-        self.time_bef = self.time_now
-        self.time_now = time.time()
+        if not self.busy:
+            self.busy = True
         
-        # Get current positions
-        self.brusher_pos = self.motors.brusher.get_position()
-        self.flame_io_pos = self.motors.flame_io.get_position()
-        self.puller_left_pos = self.motors.left_puller.get_position()
-        self.puller_right_pos = self.motors.right_puller.get_position()
-        
-        if self.running_process:
-            # Process stages
-            # Convert all stage switches to 7-bit number
-            stage_array = [self.flame_approaching, self.flame_holding, self.pulling, 
-                        self.stopping, self.standby, self.cleaving, self.looping]
-            stage = sum(map(lambda x: x[1] << x[0], enumerate(stage_array)))
+            # Get current time
+            self.time_bef = self.time_now
+            self.time_now = time.time()
             
-            if stage == 0:
-                # Stage 0, Sending motors to start positions
-                self.going_to_start()
-            elif stage < 2:
-                # Stage 1: Flame approaching
-                self.check_brushing()
-                self.approach_flame()
-            elif stage < 4:
-                # Stage 2: Flame holding
-                self.check_brushing()
-                self.hold_flame()
-            elif stage < 8:
-                # Stage 3: Pulling
-                self.check_pulling()
-                self.check_brushing()
-            elif stage < 16:
-                # Stage 4: Stopping
-                self.check_stopping()
-            elif stage < 32:
-                # Stage 5: Stand-by, do nothing (for now?)
-                pass
-            elif stage < 64:
-                # Opt. Stage 6: Looping
-                self.perform_loop()
-            elif stage < 128:
-                # Opt. Stage 6: Cleaving
-                self.perform_cleave()
+            # Get current positions
+            self.brusher_pos = self.motors.brusher.get_position()
+            self.flame_io_pos = self.motors.flame_io.get_position()
+            self.puller_left_pos = self.motors.left_puller.get_position()
+            self.puller_right_pos = self.motors.right_puller.get_position()
+            
+            if self.running_process:
+                # Process stages
+                # Convert all stage switches to 7-bit number
+                stage_array = [self.flame_approaching, self.flame_holding, self.pulling, 
+                            self.stopping, self.standby, self.cleaving, self.looping]
+                stage = sum(map(lambda x: x[1] << x[0], enumerate(stage_array)))
+                
+                if stage == 0:
+                    # Stage 0, Sending motors to start positions
+                    self.going_to_start()
+                elif stage < 2:
+                    # Stage 1: Flame approaching
+                    self.check_brushing()
+                    self.approach_flame()
+                elif stage < 4:
+                    # Stage 2: Flame holding
+                    self.check_brushing()
+                    self.hold_flame()
+                elif stage < 8:
+                    # Stage 3: Pulling
+                    self.check_pulling()
+                    self.check_brushing()
+                elif stage < 16:
+                    # Stage 4: Stopping
+                    self.check_stopping()
+                elif stage < 32:
+                    # Stage 5: Stand-by, do nothing (for now?)
+                    pass
+                elif stage < 64:
+                    # Opt. Stage 6: Looping
+                    self.perform_loop()
+                elif stage < 128:
+                    # Opt. Stage 6: Cleaving
+                    self.perform_cleave()
+            
+            self.busy = False
                 
     def going_to_start(self):
         left = (self.puller_left_pos >= self.left_puller_x0 - self.pos_check_precision) and \
@@ -265,6 +270,8 @@ class TaperPullingCore:
             print("pulling end")
     
     def check_brushing(self):
+        if self.motors.brusher.moving == self.motors.brusher.MoveDirection.STOPPED:
+            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
         l = self.brusher_x0 - hz/2.0
         r = self.brusher_x0 + hz/2.0
@@ -330,6 +337,8 @@ class TaperPullingCore:
         self.time_now = time.time()
         
     def stop_pulling(self):
+        self.standby = True
+        
         # Stop all motors
         self.motors.brusher.stop()
         self.motors.flame_io.stop()
