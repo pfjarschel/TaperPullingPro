@@ -242,17 +242,21 @@ class TaperPullingData:
         self.monitor_loop.cancel()
         self.monitor_loop = None
             
-    def start_spectrogram(self, from_buffer=True):
+    def start_spectrogram(self, from_buffer=True, smooth=0.01, window=True, sigma=0.15, wait=True):
         self.spectrogram_running = True
         self.spectrogram_from_buffer = from_buffer
         self.clear_spectrogram()
         self.spectrogram_loop = None
-        self.spectrogram_loop = self.Loop(self.spectrogram_interval/1000.0, self.build_spectrogram)
+        self.spectrogram_loop = self.Loop(self.spectrogram_interval/1000.0, self.build_spectrogram, 
+                                          args=(smooth, window, sigma, wait))
         self.spectrogram_loop.start()
         
-    def build_spectrogram(self):
+    def build_spectrogram(self, smooth=0.01, window=True, sigma=0.15, wait=True):
+        if wait:
+            while self.daq_busy:
+                pass
         if not self.daq_busy:
-            spec_x, spec_y = self.get_spectrum()
+            spec_x, spec_y = self.get_spectrum(smooth, window, sigma, wait)
             self.spectra.append([spec_x, spec_y])
     
     def stop_spectrogram(self):
