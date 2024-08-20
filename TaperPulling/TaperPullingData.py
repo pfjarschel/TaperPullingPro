@@ -259,7 +259,9 @@ class TaperPullingData:
                 pass
         if not self.daq_busy:
             spec_x, spec_y = self.get_spectrum(smooth, window, sigma, wait)
-            self.spectra.append([spec_x, spec_y])
+            cuton_i = np.abs(spec_x - self.cuton_f).argmin()
+            cutoff_i = np.abs(spec_x - self.cutoff_f).argmin()
+            self.spectra.append([spec_x[cuton_i:cutoff_i], spec_y[cuton_i:cutoff_i]])
     
     def stop_spectrogram(self):
         self.spectrogram_running = False
