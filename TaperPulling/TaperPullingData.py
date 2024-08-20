@@ -50,7 +50,7 @@ class TaperPullingData:
     monitor_loop = None
     monitor_interval = 1  # ms
     monitor_buffer_size = 10240
-    monitor_buffer = np.zeros(10240)
+    monitor_buffer = np.zeros(monitor_buffer_size)
     
     impedance = 1e4  # Ohms
     responsivity = 1.0  # A/W
@@ -60,8 +60,8 @@ class TaperPullingData:
     spectrum_points = 1024
     spectrogram_from_buffer = True
     spectrogram_running = False
-    last_spectrum = np.zeros((2, 1024))
-    last_spectrum_data = np.zeros((2, 2*1024))
+    last_spectrum = np.zeros((2, spectrum_points))
+    last_spectrum_data = np.zeros((2, 2*spectrum_points))
     spectra = []
     cuton_f = 0.0
     cutoff_f = np.inf
