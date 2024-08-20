@@ -58,6 +58,9 @@ class MainWindow(FormUI, WindowUI):
     hz_sweep_n = 0
     rhz_array = []
     rhz_x_array = []
+    transm_array = np.zeros(100000)
+    transm_array_x = np.zeros(100000)
+    transm_i = 0
     
     def __del__(self):
         print("closing all")
@@ -196,7 +199,7 @@ class MainWindow(FormUI, WindowUI):
         # self.spectrumGraph.addWidget(self.graphToolbar_spec)
         self.spectrumGraph.addWidget(self.graph_spec)
         self.graph_spec_ax = self.figure_spec.add_subplot()
-        self.graph_spec_img = self.graph_spec_ax.imshow([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [1.0, 1.0, 1.0]], aspect="auto",
+        self.graph_spec_img = self.graph_spec_ax.imshow(np.array([[1.0, 0.5, 0.0], [1.0, 0.5, 0.0], [1.0, 0.5, 0.0]]).T, aspect="auto",
                                                         extent=(0.0, 1.0, 0.0, 1.0), interpolation='spline36', origin="lower")
         self.graph_spec_ax.set_xlabel("Pulled Dist. (mm)")
         self.graph_spec_ax.set_ylabel("Frequency (1/mm)")
@@ -334,7 +337,7 @@ class MainWindow(FormUI, WindowUI):
         self.data.daq.max_scale = self.daqmaxvSpin.value()
         self.data.daq.clock_source = self.daqClockCombo.currentText()
         self.data.daq.term_config = self.daqConfCombo.currentText()
-        self.data.spectrogram_samples = self.specsamplesSpin.value()
+        self.data.spectrum_points = self.specsamplesSpin.value()
         self.data.responsivity = self.responSpin.value()
         self.data.impedance = self.impedanceSpin.value()
     
@@ -345,9 +348,9 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.brusher.set_acceleration(self.brusherAccelSpin.value())
         self.core.brusher_x0 = self.brusherInitPosSpin.value()
         if self.revdirCheck.isChecked():
-            self.core.brusher_dir = -1
+            self.core.brusher_dir0 = -1
         else:
-            self.core.brusher_dir = 1
+            self.core.brusher_dir0 = 1
             
         # In/Out
         self.core.motors.flame_io.serial = self.flameIOSerialText.text()
@@ -522,6 +525,9 @@ class MainWindow(FormUI, WindowUI):
         self.hotzoneIndSpin.setValue(0.0)
         self.rhz_array = []
         self.rhz_x_array = []
+        transm_array = np.zeros(100000)
+        transm_array_x = np.zeros(100000)
+        transm_i = 0
         self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
         self.hz_sweep_n = 0
 
@@ -641,7 +647,7 @@ class MainWindow(FormUI, WindowUI):
         time_left = pull_left/(2*self.pullerPullVelSpin.value())
         total_time = self.total_to_pull/(2*self.pullerPullVelSpin.value())
         self.timeleftLabel.setText(f"Time left: {time_left:.2f} s")
-        self.timeleftBar.setValue(int(100.0*(1 - time_left/total_time)))
+        self.timeleftBar.setValue(int(1000.0*(1 - time_left/total_time)))
         
         # Update est. values
         tp = self.core.total_pulled
@@ -669,8 +675,33 @@ class MainWindow(FormUI, WindowUI):
             self.hz_sweep_n += 1
             
         # Update transmission
-        # TODO: Update transmission plots
-    
+        if self.core.pulling:
+            self.transm_array[self.transm_i] = self.data.get_last_power(db=False)
+            self.transm_array_x[self.transm_i] = tp
+            self.transm_i = int(self.transm_i + 1)
+            self.update_graph(np.array([self.transm_array_x[:self.transm_i], self.transm_array[:self.transm_i]]), 
+                            self.graph_pow_line, self.graph_pow_ax, self.graph_pow)
+            
+        # Update Spectrogram
+        if self.core.pulling:
+            if not self.data.spectrogram_running:
+                self.data.start_spectrogram()
+            
+            if len(self.data.spectra) > 0:
+                self.graph_spec_img.set_data(np.array(self.data.spectra)[:, 1].T)
+                freqs = self.data.spectra[0][0]
+                self.graph_spec_img.set_extent((0.0, tp, freqs[0], freqs[-1]))
+                # graph_ax.relim()
+                # graph_ax.autoscale()
+                self.graph_spec.draw()
+                self.graph_spec.flush_events()
+        
+        
+        # Check if ended
+        if self.core.standby:
+            self.pullLoop_timer.stop()
+            self.stop_pulling()
+        
     # DAQ functions
     def daq_init(self):
         self.set_daq_params()
@@ -751,12 +782,14 @@ class MainWindow(FormUI, WindowUI):
         self.pullLoop_timer.start()
         
     def stop_pulling(self):
+        self.pullLoop_timer.stop()
+        if self.data.spectrogram_running:
+            self.data.stop_spectrogram()
         self.enable_controls()
         self.core.motors.flame_io.go_to(0.0)
+        self.core.stop_pulling()
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
-        self.core.stop_pulling()
-        self.pullLoop_timer.stop()
         self.timeleftBar.setValue(0)
         self.timeleftLabel.setText(f"Time left: 0.0 s")
         
