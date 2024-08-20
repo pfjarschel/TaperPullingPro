@@ -49,16 +49,17 @@ class TaperPullingData:
     
     monitor_loop = None
     monitor_interval = 1  # ms
-    monitor_buffer_size = 1024
-    monitor_buffer = np.zeros(1024)
+    monitor_buffer_size = 10240
+    monitor_buffer = np.zeros(10240)
     
     impedance = 1e4  # Ohms
     responsivity = 1.0  # A/W
     
     spectrogram_loop = None
-    spectrogram_interval = 10  # ms
-    spectrogram_samples = 128
+    spectrogram_interval = 100  # ms
     spectrum_points = 1024
+    spectrogram_from_buffer = True
+    spectrogram_running = False
     last_spectrum = np.zeros((2, 1024))
     last_spectrum_data = np.zeros((2, 2*1024))
     spectra = []
@@ -81,8 +82,8 @@ class TaperPullingData:
         self.cuton_f = cuton_f
         self.cutoff_f = cutoff_f
         
-        self.spectrogram_loop = self.Loop(self.spectrogram_interval/1000.0, self.build_spectrogram)
-        self.monitor_loop = self.Loop(self.monitor_interval/1000.0, self.monitor)
+        self.spectrogram_loop = None
+        self.monitor_loop = None
         
     def init_daq_as_default(self, simulate=False):
         while self.daq_busy:
@@ -124,7 +125,7 @@ class TaperPullingData:
         if self.daq.ok:
             self.init_daq_as_default()
             
-    def set_monitor_buffer(self, n: int=1024):
+    def set_monitor_buffer(self, n: int=10240):
         while self.daq_busy:
             pass
         self.monitor_buffer_size = n
@@ -181,11 +182,14 @@ class TaperPullingData:
         else:
             return pwr
     
-    def perform_fft(self, x_data, y_data, smooth=0.01, window=False, beta=1.0):
+    def perform_fft(self, x_data, y_data, smooth=0.01, window=False, sigma=0.15):
         yf = []
         n = len(y_data)
         if window:
-            w = windows.kaiser(n, beta)
+            if np.abs(sigma) > 1.0: sigma = 1.0
+            if np.abs(sigma) < 0.0: sigma = 0.0
+            sigma = len(y_data)*sigma
+            w = windows.gaussian(n, sigma)
             yf = fft(y_data*w)
         else:
             yf = fft(y_data)
@@ -195,16 +199,24 @@ class TaperPullingData:
         
         yf_real = (2.0/n)*np.abs(yf[:n//2])
         smooth_f = int(len(yf_real)*smooth)
+        if smooth_f < 3: smooth_f = 3
+        
         yf_real = savgol_filter(yf_real, smooth_f, 1)
 
-        return xf[:n//2], yf_real, xf, yf
+        return xf[:n//2], yf_real
     
-    def get_spectrum(self, smooth=0.01, window=False, beta=1.0, wait = False):
+    def get_spectrum(self, smooth=0.01, window=True, sigma=0.15, wait = False):
         data_n = 2*self.spectrum_points
-        data_y = self.get_transmission_points(data_n, wait)
-        data_x = np.linspace(0, data_n/self.sampling_rate, data_n)
         
-        spec_x, spec_y, = self.perform_fft(data_x, data_y, smooth, window, beta)
+        if self.spectrogram_from_buffer:
+            if data_n > self.monitor_buffer_size: data_n = self.monitor_buffer_size
+            data_y = self.monitor_buffer[-data_n:]
+            data_x = np.linspace(0, data_n*self.monitor_interval/1000.0, data_n)
+        else:
+            data_y = self.get_transmission_points(data_n, wait)
+            data_x = np.linspace(0, data_n/self.sampling_rate, data_n)
+        
+        spec_x, spec_y = self.perform_fft(data_x, data_y, smooth, window, sigma)
         
         self.last_spectrum_data[0] = data_x
         self.last_spectrum_data[1] = data_y
@@ -217,6 +229,8 @@ class TaperPullingData:
         self.spectra = []
     
     def start_monitor(self):
+        self.monitor_loop = None
+        self.monitor_loop = self.Loop(self.monitor_interval/1000.0, self.monitor)
         self.set_monitor_buffer(self.monitor_buffer_size)
         self.monitor_loop.start()
     
@@ -226,16 +240,23 @@ class TaperPullingData:
             
     def stop_monitor(self):
         self.monitor_loop.cancel()
+        self.monitor_loop = None
             
-    def spectrogram_start(self):
+    def start_spectrogram(self, from_buffer=True):
+        self.spectrogram_running = True
+        self.spectrogram_from_buffer = from_buffer
         self.clear_spectrogram()
+        self.spectrogram_loop = None
+        self.spectrogram_loop = self.Loop(self.spectrogram_interval/1000.0, self.build_spectrogram)
         self.spectrogram_loop.start()
-            
+        
     def build_spectrogram(self):
         if not self.daq_busy:
             spec_x, spec_y = self.get_spectrum()
             self.spectra.append([spec_x, spec_y])
     
     def stop_spectrogram(self):
+        self.spectrogram_running = False
         self.spectrogram_loop.cancel()
+        self.spectrogram_loop = None
         
