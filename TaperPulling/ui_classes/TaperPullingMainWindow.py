@@ -14,6 +14,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import numpy as np
 import json
+import cv2
 
 # Import taper pulling classes
 from TaperPulling.TaperShape import TaperShape
@@ -37,6 +38,8 @@ class MainWindow(FormUI, WindowUI):
     data = None
     
     # General variables
+    max_tpts = 1024
+    max_spectra = 1024
     temp_settings_file = f"{rootpath}/config/temp_settings.json"
     default_settings_file = f"{confpath}/PyTaper_default_settings.json"
     factory_settings_file = f"{confpath}/PyTaper_factory_settings.json"
@@ -58,8 +61,7 @@ class MainWindow(FormUI, WindowUI):
     hz_sweep_n = 0
     rhz_array = []
     rhz_x_array = []
-    transm_array = np.zeros(100000)
-    transm_array_x = np.zeros(100000)
+    transm_array = np.zeros((60000, 2))
     transm_i = 0
     
     def __del__(self):
@@ -168,6 +170,12 @@ class MainWindow(FormUI, WindowUI):
             }}"
         )
         
+        # Colormaps
+        for cmap in plt.colormaps():
+            if not "_r" in cmap:
+                self.cmapCombo.addItem(cmap)
+        self.cmapCombo.setCurrentText('PRGn')
+        
         # Plots
         SMALL_SIZE = 7
         MEDIUM_SIZE = 8
@@ -199,8 +207,8 @@ class MainWindow(FormUI, WindowUI):
         # self.spectrumGraph.addWidget(self.graphToolbar_spec)
         self.spectrumGraph.addWidget(self.graph_spec)
         self.graph_spec_ax = self.figure_spec.add_subplot()
-        self.graph_spec_img = self.graph_spec_ax.imshow(np.array([[1.0, 0.5, 0.0], [1.0, 0.5, 0.0], [1.0, 0.5, 0.0]]).T, aspect="auto",
-                                                        extent=(0.0, 1.0, 0.0, 1.0), interpolation='spline36', origin="lower")
+        self.graph_spec_img = self.graph_spec_ax.imshow(np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]).T, aspect="auto",
+                                                        extent=(0.0, 1.0, 0.0, 1.0), origin="lower", cmap='PRGn', interpolation='none')
         self.graph_spec_ax.set_xlabel("Pulled Dist. (mm)")
         self.graph_spec_ax.set_ylabel("Frequency (1/mm)")
         self.graph_spec_ax.grid(False)
@@ -263,7 +271,6 @@ class MainWindow(FormUI, WindowUI):
         self.responSpin.valueChanged.connect(self.daq_init)
         self.impedanceSpin.valueChanged.connect(self.daq_init)
         self.specsamplesSpin.valueChanged.connect(self.daq_init)
-        self.set0powBut.clicked.connect(self.set_ref_power)
         
         # Motors connections
         self.resetmotorsBut.clicked.connect(self.init_motors)
@@ -296,6 +303,11 @@ class MainWindow(FormUI, WindowUI):
         self.corenSpin.valueChanged.connect(self.set_fiber_params)
         self.wlSpin.valueChanged.connect(self.set_fiber_params)
         self.mednSpin.valueChanged.connect(self.set_fiber_params)
+        
+        # Misc. connections
+        self.set0powBut.clicked.connect(self.set_ref_power)
+        self.cmapCombo.currentTextChanged.connect(self.set_cmap)
+        self.cmapRevCheck.clicked.connect(self.set_cmap)
         
          # Menu connections
         self.actionSave_Data.triggered.connect(self.action_save_data)
@@ -511,7 +523,8 @@ class MainWindow(FormUI, WindowUI):
             combos[i].setEnabled(False)
         
         self.emerBut.setEnabled(True)
-        self.cologradSpin.setEnabled(True)
+        self.cmapCombo.setEnabled(True)
+        self.cmapRevCheck.setEnabled(True)
         self.stopBut.setEnabled(True)
         
     def reset_pull_stats(self):
@@ -525,9 +538,8 @@ class MainWindow(FormUI, WindowUI):
         self.hotzoneIndSpin.setValue(0.0)
         self.rhz_array = []
         self.rhz_x_array = []
-        transm_array = np.zeros(100000)
-        transm_array_x = np.zeros(100000)
-        transm_i = 0
+        self.transm_array = np.zeros((60000, 2))
+        self.transm_i = 0
         self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
         self.hz_sweep_n = 0
 
@@ -676,26 +688,41 @@ class MainWindow(FormUI, WindowUI):
             
         # Update transmission
         if self.core.pulling:
-            self.transm_array[self.transm_i] = self.data.get_last_power(db=False)
-            self.transm_array_x[self.transm_i] = tp
-            self.transm_i = int(self.transm_i + 1)
-            self.update_graph(np.array([self.transm_array_x[:self.transm_i], self.transm_array[:self.transm_i]]), 
-                            self.graph_pow_line, self.graph_pow_ax, self.graph_pow)
+            self.transm_array[self.transm_i][0] = tp
+            self.transm_array[self.transm_i][1] = self.data.get_last_power(db=False)
+            self.transm_i += 1
+            tdata = self.transm_array[:self.transm_i]
+            if self.transm_i > self.max_tpts:
+                idxs = np.linspace(1, self.transm_i - 2, self.max_tpts - 2, dtype=int)
+                tdata = np.concatenate(([tdata[0]], tdata[idxs], [tdata[-1]]))
+                
+            self.update_graph(tdata.T, self.graph_pow_line, self.graph_pow_ax, self.graph_pow,
+                              None, [0.0, 1.2*(10.0**(self.refpowIndSpin.value()/10.0))])
             
         # Update Spectrogram
         if self.core.pulling:
             if not self.data.spectrogram_running:
-                self.data.start_spectrogram()
+                self.data.cutoff_f = self.pullerPullVelSpin.value()*1000
+                # self.data.cutoff_f = self.data.sampling_rate
+                # self.data.cutoff_f = 100
+                self.data.start_spectrogram(True, 0.0, True, 0.15, True)
             
             if len(self.data.spectra) > 0:
-                self.graph_spec_img.set_data(np.array(self.data.spectra)[:, 1].T)
-                freqs = self.data.spectra[0][0]
-                self.graph_spec_img.set_extent((0.0, tp, freqs[0], freqs[-1]))
-                # graph_ax.relim()
-                # graph_ax.autoscale()
+                tp_arr = np.linspace(0.0, tp, len(self.data.spectra))
+                if len(self.data.spectra) > self.max_spectra:
+                    data = np.array(self.data.spectra[-self.max_spectra:]).T
+                    tp0 = tp_arr[-self.max_spectra]
+                else:
+                    data = np.array(self.data.spectra).T
+                    tp0 = 0.0
+                freqs = self.data.spectra_freqs
+                if data.shape[1] > self.graph_spec.width():
+                    data = cv2.resize(data, (self.graph_spec.width(), len(freqs)))
+                self.graph_spec_img.set_data(data)
+                self.graph_spec_img.set_extent((tp0, tp, freqs[0], 1/(freqs[-1]*self.pullerPullVelSpin.value())))
+                self.graph_spec_img.set_clim(data.min(), data.max())
                 self.graph_spec.draw()
                 self.graph_spec.flush_events()
-        
         
         # Check if ended
         if self.core.standby:
@@ -841,13 +868,36 @@ class MainWindow(FormUI, WindowUI):
         
         self.total_to_pull = x0
         
-    def update_graph(self, data, graph_line, graph_ax, graph_canvas):
+    def update_graph(self, data, graph_line, graph_ax, graph_canvas, xlims=None, ylims=None):
         graph_line.set_xdata(data[0])
         graph_line.set_ydata(data[1])
-        graph_ax.relim()
-        graph_ax.autoscale()
+        
+        if xlims == None and ylims == None:
+            graph_ax.relim()
+            graph_ax.autoscale(True)
+        else:
+            if isinstance(xlims, list) and isinstance(ylims, list):
+                graph_ax.set_xlim(xlims)
+                graph_ax.set_ylim(ylims)
+                graph_ax.autoscale(False)
+            elif isinstance(xlims, list):
+                graph_ax.relim()
+                graph_ax.set_xlim(xlims)
+                graph_ax.autoscale(True, axis='y')
+            elif isinstance(ylims, list):
+                graph_ax.relim()
+                graph_ax.set_ylim(ylims)
+                graph_ax.autoscale(True, axis='x')
         graph_canvas.draw()
         graph_canvas.flush_events()
+        
+    def set_cmap(self):
+        cmap = self.cmapCombo.currentText()
+        if self.cmapRevCheck.isChecked():
+            cmap = f"{cmap}_r"
+        self.graph_spec_img.set_cmap(cmap)
+        self.graph_spec.draw()
+        self.graph_spec.flush_events()
         
     def update_minimum_hz(self):
         self.min_hz = self.fSizeSpin.value() + self.brusherMinSpanSpin.value()

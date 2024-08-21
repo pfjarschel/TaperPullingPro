@@ -23,6 +23,7 @@ from scipy.signal import windows
 from scipy.fft import fft, fftfreq
 from scipy.signal import savgol_filter
 from threading import Timer
+import cv2
 
 from .TaperPullingDAQ import TaperPullingDAQ
 
@@ -58,22 +59,26 @@ class TaperPullingData:
     spectrogram_loop = None
     spectrogram_interval = 100  # ms
     spectrum_points = 1024
+    spectra_points = 1000000000  # A high value to disable this
+    max_spectra_points = 2*spectra_points  # Will downsample when this value is reached
+    
     spectrogram_from_buffer = True
     spectrogram_running = False
     last_spectrum = np.zeros((2, spectrum_points))
     last_spectrum_data = np.zeros((2, 2*spectrum_points))
     spectra = []
+    spectra_freqs = []
     cuton_f = 0.0
     cutoff_f = np.inf
        
-    def __init__(self, sampling_rate: float=1e3, cuton_f: float=0.0, cutoff_f: float=np.inf):
+    def __init__(self, sampling_rate: float=1e3, cuton_f: float=0.0, cutoff_f: float=1e6):
         """
         This class is responsible for acquiring and processing the 
         fabrication process data.
         
         Args:
             cuton_f: Crop results below this frequency. Default is 0.0 (no crop).
-            cutoff_f: Crop results above this frequency. Default is infinity (no crop).
+            cutoff_f: Crop results above this frequency. Default is 1e6 (hopefully no crop).
         """
         
         self.daq = TaperPullingDAQ()
@@ -224,7 +229,6 @@ class TaperPullingData:
         self.last_spectrum_data[1] = data_y
         self.last_spectrum[0] = spec_x
         self.last_spectrum[1] = spec_y
-        
         return spec_x, spec_y
     
     def clear_spectrogram(self):
@@ -261,7 +265,13 @@ class TaperPullingData:
             spec_x, spec_y = self.get_spectrum(smooth, window, sigma, wait)
             cuton_i = np.abs(spec_x - self.cuton_f).argmin()
             cutoff_i = np.abs(spec_x - self.cutoff_f).argmin()
-            self.spectra.append([spec_x[cuton_i:cutoff_i], spec_y[cuton_i:cutoff_i]])
+            self.spectra.append(spec_y[cuton_i:cutoff_i])
+            self.spectra_freqs = spec_x[cuton_i:cutoff_i]
+            
+            # Downsample data, creates issues with the x axis (newer data occupies more space).
+            # It is better to downsample the entire dataset before plotting, not here
+            if len(self.spectra) >= self.max_spectra_points:
+                self.spectra = cv2.resize(np.array(self.spectra), (len(self.spectra_freqs), self.spectra_points)).tolist()
     
     def stop_spectrogram(self):
         self.spectrogram_running = False

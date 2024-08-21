@@ -118,7 +118,7 @@ class TaperPullingDAQ:
         elif self.simulate and not self.paused:
             avg = (self.min_scale + self.max_scale)/2
             span = np.abs(self.max_scale - self.min_scale)
-            return avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000), n)/2000000.0
+            return avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000), n)/50000.0
         else:
             return np.zeros(n)
         
