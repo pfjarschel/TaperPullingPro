@@ -110,6 +110,12 @@ class TaperPullingCore:
     pl_a0 = [0.0, 0.0]
     pr_v0 = [0.0, 0.0]
     pr_a0 = [0.0, 0.0]
+    loop_dist = 1.0
+    loop_started = False
+    loop_tensioned = False
+    loop_looped = False
+    loop_loosing = False
+    loop_loosed = False
     
     def __init__(self):
         """
@@ -306,10 +312,6 @@ class TaperPullingCore:
             self.standby = True
             print("stopped")
     
-    def perform_loop(self):
-        # TODO: Code to (partially) perform the loop procedure automatically
-        print("loop")
-    
     def perform_cleave(self):
         if not self.cleave_started:
             self.pl_a0 = [self.motors.right_puller.accel, self.motors.right_puller.max_accel]
@@ -348,6 +350,41 @@ class TaperPullingCore:
             self.motors.left_puller.set_velocity(self.pl_v0[0], self.pl_v0[1])
             self.motors.right_puller.set_acceleration(self.pr_a0[0], self.pr_a0[1])
             self.motors.right_puller.set_velocity(self.pr_v0[0], self.pr_v0[1])
+            
+    def perform_loop(self):
+        if not self.loop_started:
+            self.loop_started = True
+            self.motors.left_puller.go_to(self.puller_left_pos + self.puller_left_dir*self.loop_dist)
+            self.motors.right_puller.go_to(self.puller_right_pos + self.puller_right_dir*self.loop_dist)
+        elif not self.loop_tensioned:
+            lok = False
+            rok = False
+            if self.motors.left_puller.moving == self.motors.left_puller.MoveDirection.STOPPED:
+                lok = True
+            if self.motors.right_puller.moving == self.motors.right_puller.MoveDirection.STOPPED:
+                rok = True
+            if lok and rok:
+                self.loop_tensioned = True
+        elif self.loop_looped and not self. loop_loosing:
+            self.motors.left_puller.go_to(self.puller_left_pos - self.puller_left_dir*self.loop_dist)
+            self.motors.right_puller.go_to(self.puller_right_pos - self.puller_right_dir*self.loop_dist)
+            self.loop_loosing = True
+        elif self.loop_loosing and not self.loop_loosed:
+            lok = False
+            rok = False
+            if self.motors.left_puller.moving == self.motors.left_puller.MoveDirection.STOPPED:
+                lok = True
+            if self.motors.right_puller.moving == self.motors.right_puller.MoveDirection.STOPPED:
+                rok = True
+            if lok and rok:
+                self.loop_loosed = True
+        elif self.loop_loosed:
+            self.looping = False
+            self.loop_started = False
+            self.loop_tensioned = False
+            self.loop_looped = False
+            self.loop_loosing = False
+            self.loop_loosed = False
         
     def start_process(self, hotzone_function: list[list[float]]|np.ndarray):
         """
