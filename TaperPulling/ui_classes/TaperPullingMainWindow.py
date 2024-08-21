@@ -654,6 +654,8 @@ class MainWindow(FormUI, WindowUI):
             self.busy = False
             if all(connected + homed):
                 self.initLoop_timer.stop()
+                self.core.running_process = True
+                self.core.standby = True
     
     def pullLoop(self):
         # Update time
@@ -823,38 +825,42 @@ class MainWindow(FormUI, WindowUI):
         self.timeleftLabel.setText(f"Time left: 0.0 s")
         
     def cleave(self):
-        text = "Caution: this procedure is a gamble, and results are not guaranteed.\n" + \
-               "The puller motors will move 10 mm back at 0.5 m/s, accelerating with 0.5g. " + \
-               "This should, in theory, break the taper as smoothly as possible right in the middle.\n" + \
-               "If you are able, a very tiny scratch can help achieve good a result."
-        QMessageBox.information(self, "About to cleave", text, QMessageBox.StandardButton.Ok)
-        self.core.cleaving = True
+        if self.core.standby:
+            text = "Caution: this procedure is a gamble, and results are not guaranteed.\n" + \
+                "The puller motors will move 10 mm back at 0.5 m/s, accelerating with 0.5g. " + \
+                "This should, in theory, break the taper as smoothly as possible right in the middle.\n" + \
+                "If you are able, a very tiny scratch can help achieve good a result."
+            QMessageBox.information(self, "About to cleave", text, QMessageBox.StandardButton.Ok)
+            self.core.cleaving = True
         
     def loop(self):
-        text = f"The loop wizard will now start.\n" + \
-                "The puller motors will move {1} mm back (each), to provide some tension.\n\n" + \
-                "Click 'Ok' to continue."
-        QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
-        
-        self.core.looping = True        
-        while not self.core.loop_tensioned:
-            time.sleep(0.1)
+        if self.core.standby:
+            loop_mb = self.loopmbSpin.value()
+            text = "The loop wizard will now start.\n" + \
+                    f"The puller motors will move {loop_mb:.2f} mm back (each), to provide some tension.\n\n" + \
+                    "Click 'Ok' to continue."
+            QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
+            
+            self.core.loop_dist = loop_mb
+            self.core.looping = True
+            while not self.core.loop_tensioned:
+                time.sleep(0.1)
 
-        text = "Now twist the taper as needed.\n\n" + \
-               "Click 'Ok' to continue when done."
-        QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
-        
-        text = "The puller motors will now relax the taper back to the initial position.\n\n" + \
-               "Click 'Ok' to continue."
-        QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
-        
-        self.core.loop_looped = True
-        while self.core.looping:
-            time.sleep(0.1)
-        
-        text = "Thats it! Your loop should be complete!\n\n" + \
-               "Click 'Ok' to end the wizard."
-        QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
+            text = "Now twist the taper as needed.\n\n" + \
+                "Click 'Ok' to continue when done."
+            QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
+            
+            text = "The puller motors will now relax the taper back to the initial position.\n\n" + \
+                "Click 'Ok' to continue."
+            QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
+            
+            self.core.loop_looped = True
+            while self.core.looping:
+                time.sleep(0.1)
+            
+            text = "Thats it! Your loop should be complete!\n\n" + \
+                "Click 'Ok' to end the wizard."
+            QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
     
     # Taper params functions
     def recalc_params(self):
