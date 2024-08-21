@@ -278,6 +278,7 @@ class MainWindow(FormUI, WindowUI):
         self.startBut.clicked.connect(self.start_pulling)
         self.stopBut.clicked.connect(self.stop_pulling)
         self.cleaveBut.clicked.connect(self.cleave)
+        self.loopBut.clicked.connect(self.loop)
         self.emerBut.clicked.connect(self.stop_all_motors)
         self.flameIOPosSpin.valueChanged.connect(self.fio_move2)
         self.brusherPosSpin.valueChanged.connect(self.fb_move2)
@@ -821,8 +822,17 @@ class MainWindow(FormUI, WindowUI):
         self.timeleftLabel.setText(f"Time left: 0.0 s")
         
     def cleave(self):
-        #TODO: cleave function
-        print("cleaved")
+        text = "Caution: this procedure is a gamble, and results are not guaranteed.\n" + \
+        "The puller motors will move 10 mm back at 0.5 m/s, accelerating with 0.5g. " + \
+        "This should, in theory, break the taper as smoothly as possible right in the middle.\n" + \
+        "If you are able, a very tiny scratch can help achieve good a result."
+        QMessageBox.information(self, "About to cleave", text, QMessageBox.StandardButton.Ok)
+        print("did")
+        self.core.cleaving = True
+        
+    def loop(self):
+        pass
+        # self.core.cleaving = True
     
     # Taper params functions
     def recalc_params(self):

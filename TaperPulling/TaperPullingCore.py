@@ -100,6 +100,16 @@ class TaperPullingCore:
     right_puller_x0 = 84.0  # mm
     pullers_adaptive_vel = True  # Slows down pulling if flame span is too large
     
+    # Other vars
+    cleave_dist = 5.0
+    cleave_l = 0.0
+    cleave_r = 0.0
+    cleave_started = False
+    cleave_ended = False
+    pl_v0 = [0.0, 0.0]
+    pl_a0 = [0.0, 0.0]
+    pr_v0 = [0.0, 0.0]
+    pr_a0 = [0.0, 0.0]
     
     def __init__(self):
         """
@@ -136,8 +146,8 @@ class TaperPullingCore:
         self.pulling = False            # Stage 3
         self.stopping = False           # Stage 4
         self.standby = False            # Stage 5
-        self.cleaving = False           # Opt. Stage 6
         self.looping = False            # Opt. Stage 6
+        self.cleaving = False           # Opt. Stage 6
         
         # Process variables
         self.time_now = 0.0
@@ -198,7 +208,7 @@ class TaperPullingCore:
                 # Process stages
                 # Convert all stage switches to 7-bit number
                 stage_array = [self.flame_approaching, self.flame_holding, self.pulling, 
-                            self.stopping, self.standby, self.cleaving, self.looping]
+                            self.stopping, self.standby, self.looping, self.cleaving]
                 stage = sum(map(lambda x: x[1] << x[0], enumerate(stage_array)))
                 
                 if stage == 0:
@@ -301,8 +311,43 @@ class TaperPullingCore:
         print("loop")
     
     def perform_cleave(self):
-        # TODO: Code to perform the cleaving procedure automatically
-        print("cleave")
+        if not self.cleave_started:
+            self.pl_a0 = [self.motors.right_puller.accel, self.motors.right_puller.max_accel]
+            self.pl_v0 = [self.motors.right_puller.vel, self.motors.right_puller.max_vel]
+            self.pr_a0 = [self.motors.right_puller.accel, self.motors.right_puller.max_accel]
+            self.pr_v0 = [self.motors.right_puller.vel, self.motors.right_puller.max_vel]
+            
+            self.motors.left_puller.set_acceleration(5000, 5000)
+            self.motors.left_puller.set_velocity(500, 500)
+            self.motors.right_puller.set_acceleration(5000, 5000)
+            self.motors.right_puller.set_velocity(500, 500)
+            
+            self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
+            self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
+            
+            self.cleave_l = self.puller_left_pos + self.cleave_dist*self.puller_left_dir
+            self.cleave_r = self.puller_right_pos + self.cleave_dist*self.puller_right_dir
+            
+            self.cleave_started = True
+        elif not self.cleave_ended:
+            lok = False
+            rok = False
+            if (self.puller_left_pos - self.cleave_l)*self.puller_left_dir >= 0.0:
+                self.motors.left_puller.stop()
+                lok = True
+            if (self.puller_right_pos - self.cleave_r)*self.puller_right_dir >= 0.0:
+                self.motors.right_puller.stop()
+                rok = True
+            if lok and rok:
+                self.cleave_ended = True
+        elif self.cleave_ended:
+            self.cleaving = False
+            self.cleave_started = False
+            self.cleave_ended = False
+            self.motors.left_puller.set_acceleration(self.pl_a0[0], self.pl_a0[1])
+            self.motors.left_puller.set_velocity(self.pl_v0[0], self.pl_v0[1])
+            self.motors.right_puller.set_acceleration(self.pr_a0[0], self.pr_a0[1])
+            self.motors.right_puller.set_velocity(self.pr_v0[0], self.pr_v0[1])
         
     def start_process(self, hotzone_function: list[list[float]]|np.ndarray):
         """
