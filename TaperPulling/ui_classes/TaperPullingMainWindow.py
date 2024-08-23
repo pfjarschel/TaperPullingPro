@@ -673,8 +673,11 @@ class MainWindow(FormUI, WindowUI):
         self.transLengthIndSpin.setValue((tp + self.hz_function[1][0] - curr_hz)/2)
         
         # Update est. diameter
-        x_ind = np.abs(self.hz_function[0] - tp).argmin()
-        curr_d = 2000*self.profile[1][x_ind]
+        if tp <= self.total_to_pull:
+            x_ind = np.abs(self.hz_function[0] - tp).argmin()
+            curr_d = 2000*self.profile[1][x_ind]
+        else:  # Manual stop can go beyond the stipulated value
+            curr_d = 2000*self.profile[1][-1]*np.exp(-np.abs(self.total_to_pull - tp)/(2*self.hz_function[1][-1]))
         self.waistDiamIndSpin.setValue(curr_d)
         
         # Update real hotzone
@@ -803,12 +806,16 @@ class MainWindow(FormUI, WindowUI):
         
     def start_pulling(self):
         self.disable_controls()
+        self.core.force_hz_edge = self.edgeStopCheck.isChecked()
         self.core.motors.flame_io.go_to(self.flameIOMovSpin.value())
         self.core.motors.left_puller.set_velocity(self.pullerPullVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerPullVelSpin.value())
         
         self.reset_pull_stats()
         
+        hz_function = self.hz_function
+        if self.manualStopCheck.isChecked():
+            hz_function[0][-1] = 200.0
         self.core.start_process(self.hz_function)
         self.pullLoop_timer.start()
         
@@ -836,12 +843,14 @@ class MainWindow(FormUI, WindowUI):
     def loop(self):
         if self.core.standby:
             loop_mb = self.loopmbSpin.value()
+            loop_mf = self.loopmfSpin.value()
             text = "The loop wizard will now start.\n" + \
                     f"The puller motors will move {loop_mb:.2f} mm back (each), to provide some tension.\n\n" + \
                     "Click 'Ok' to continue."
             QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
             
-            self.core.loop_dist = loop_mb
+            self.core.loop_dist_bw = loop_mb
+            self.core.loop_dist_fw = loop_mf
             self.core.looping = True
             while not self.core.loop_tensioned:
                 time.sleep(0.1)
@@ -850,7 +859,7 @@ class MainWindow(FormUI, WindowUI):
                 "Click 'Ok' to continue when done."
             QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
             
-            text = "The puller motors will now relax the taper back to the initial position.\n\n" + \
+            text = f"The puller motors will now move {loop_mf:.2f} mm back (each), to relax the taper.\n\n" + \
                 "Click 'Ok' to continue."
             QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
             

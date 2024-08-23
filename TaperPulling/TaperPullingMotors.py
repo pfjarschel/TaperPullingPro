@@ -72,7 +72,10 @@ class GenericTLMotor:
         self.close()
         
     def close(self):
-        self.go_to_loop.cancel()
+        try:
+            self.go_to_loop.cancel()
+        except:
+            pass
     
     def connect(self, serial="", simulate=False):
         """

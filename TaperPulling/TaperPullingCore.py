@@ -110,7 +110,8 @@ class TaperPullingCore:
     pl_a0 = [0.0, 0.0]
     pr_v0 = [0.0, 0.0]
     pr_a0 = [0.0, 0.0]
-    loop_dist = 1.0
+    loop_dist_bw = 1.0
+    loop_dist_fw = 1.0
     loop_started = False
     loop_tensioned = False
     loop_looped = False
@@ -300,8 +301,8 @@ class TaperPullingCore:
     def check_stopping(self):
         stop_ok = False
         if self.force_hz_edge:
-            l = self.brusher_x0 + self.hotzone_function[1][-1]/2.0
-            r = self.brusher_x0 - self.hotzone_function[1][-1]/2.0
+            l = self.brusher_x0 - self.hotzone_function[1][-1]/2.0
+            r = self.brusher_x0 + self.hotzone_function[1][-1]/2.0
             if (self.brusher_pos <= l  or self.brusher_pos >= r):
                 stop_ok = True
         else:
@@ -354,8 +355,8 @@ class TaperPullingCore:
     def perform_loop(self):
         if not self.loop_started:
             self.loop_started = True
-            self.motors.left_puller.go_to(self.puller_left_pos + self.puller_left_dir*self.loop_dist)
-            self.motors.right_puller.go_to(self.puller_right_pos + self.puller_right_dir*self.loop_dist)
+            self.motors.left_puller.go_to(self.puller_left_pos + self.puller_left_dir*self.loop_dist_bw)
+            self.motors.right_puller.go_to(self.puller_right_pos + self.puller_right_dir*self.loop_dist_bw)
         elif not self.loop_tensioned:
             lok = False
             rok = False
@@ -366,8 +367,8 @@ class TaperPullingCore:
             if lok and rok:
                 self.loop_tensioned = True
         elif self.loop_looped and not self. loop_loosing:
-            self.motors.left_puller.go_to(self.puller_left_pos - self.puller_left_dir*self.loop_dist)
-            self.motors.right_puller.go_to(self.puller_right_pos - self.puller_right_dir*self.loop_dist)
+            self.motors.left_puller.go_to(self.puller_left_pos - self.puller_left_dir*self.loop_dist_fw)
+            self.motors.right_puller.go_to(self.puller_right_pos - self.puller_right_dir*self.loop_dist_fw)
             self.loop_loosing = True
         elif self.loop_loosing and not self.loop_loosed:
             lok = False

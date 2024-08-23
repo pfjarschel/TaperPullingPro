@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1116</width>
-    <height>823</height>
+    <height>820</height>
    </rect>
   </property>
   <property name="minimumSize">
@@ -70,7 +70,7 @@
           <enum>QTabWidget::North</enum>
          </property>
          <property name="currentIndex">
-          <number>2</number>
+          <number>3</number>
          </property>
          <property name="elideMode">
           <enum>Qt::ElideRight</enum>
@@ -981,7 +981,7 @@
                   <double>100.000000000000000</double>
                  </property>
                  <property name="value">
-                  <double>-10.000000000000000</double>
+                  <double>0.000000000000000</double>
                  </property>
                 </widget>
                </item>
@@ -1198,7 +1198,7 @@
                 <enum>Qt::RightToLeft</enum>
                </property>
                <property name="text">
-                <string>Rev.</string>
+                <string>Invert</string>
                </property>
               </widget>
              </item>
@@ -1309,7 +1309,7 @@
         </layout>
        </item>
        <item row="4" column="1">
-        <widget class="QCheckBox" name="manualStopRadio">
+        <widget class="QCheckBox" name="manualStopCheck">
          <property name="text">
           <string>Manual Stop</string>
          </property>
@@ -3350,7 +3350,7 @@ margin: -10px -76px;
               <number>0</number>
              </property>
              <item>
-              <spacer name="verticalSpacer_23">
+              <spacer name="verticalSpacer_6">
                <property name="orientation">
                 <enum>Qt::Vertical</enum>
                </property>
@@ -3363,24 +3363,58 @@ margin: -10px -76px;
               </spacer>
              </item>
              <item>
-              <widget class="QLabel" name="label_74">
-               <property name="text">
-                <string>Loop move back (mm)</string>
+              <layout class="QVBoxLayout" name="verticalLayout_42">
+               <property name="spacing">
+                <number>6</number>
                </property>
-              </widget>
+               <property name="topMargin">
+                <number>0</number>
+               </property>
+               <item>
+                <widget class="QLabel" name="label_74">
+                 <property name="text">
+                  <string>Loop move back (mm)</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QDoubleSpinBox" name="loopmbSpin">
+                 <property name="singleStep">
+                  <double>0.100000000000000</double>
+                 </property>
+                 <property name="value">
+                  <double>1.000000000000000</double>
+                 </property>
+                </widget>
+               </item>
+              </layout>
              </item>
              <item>
-              <widget class="QDoubleSpinBox" name="loopmbSpin">
-               <property name="singleStep">
-                <double>0.100000000000000</double>
+              <layout class="QVBoxLayout" name="verticalLayout_72">
+               <property name="spacing">
+                <number>6</number>
                </property>
-               <property name="value">
-                <double>1.000000000000000</double>
+               <property name="topMargin">
+                <number>0</number>
                </property>
-              </widget>
+               <item>
+                <widget class="QLabel" name="label_75">
+                 <property name="text">
+                  <string>Loop move fwd (mm)</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QDoubleSpinBox" name="loopmfSpin">
+                 <property name="value">
+                  <double>0.900000000000000</double>
+                 </property>
+                </widget>
+               </item>
+              </layout>
              </item>
              <item>
-              <spacer name="verticalSpacer_6">
+              <spacer name="verticalSpacer_24">
                <property name="orientation">
                 <enum>Qt::Vertical</enum>
                </property>
