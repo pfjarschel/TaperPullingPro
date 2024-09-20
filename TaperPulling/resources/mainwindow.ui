@@ -70,7 +70,7 @@
           <enum>QTabWidget::North</enum>
          </property>
          <property name="currentIndex">
-          <number>3</number>
+          <number>0</number>
          </property>
          <property name="elideMode">
           <enum>Qt::ElideRight</enum>
@@ -223,10 +223,16 @@
            </item>
            <item row="3" column="0">
             <layout class="QVBoxLayout" name="verticalLayout_53">
+             <property name="spacing">
+              <number>0</number>
+             </property>
              <item>
-              <widget class="QLabel" name="label_50">
+              <widget class="QCheckBox" name="enhanceHZCheck">
                <property name="text">
-                <string/>
+                <string>Enhanced edge precision</string>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
                </property>
               </widget>
              </item>

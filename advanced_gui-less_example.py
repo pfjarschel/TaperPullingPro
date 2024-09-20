@@ -70,7 +70,11 @@ final_shape = savgol_filter(sim_r_arrs[-1], int(len(sim_r_arrs[-1])/50), 1)
 
 # Initialize core
 core = TaperPullingCore()
-core.init_motors_as_default(simulate=True)
+core.init_brusher_as_default(simulate=True)
+core.init_flameio_as_default(simulate=True)
+core.init_puller_l_as_default(simulate=True)
+core.init_puller_r_as_default(simulate=True)
+
 
 # Initialize Data acquisition and processing
 data_manager = TaperPullingData()

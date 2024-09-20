@@ -98,7 +98,8 @@ class TaperPullingCore:
     
     left_puller_x0 = 84.0  # mm
     right_puller_x0 = 84.0  # mm
-    pullers_adaptive_vel = True  # Slows down pulling if flame span is too large
+    pullers_adaptive_vel = True  # Slows down pulling if flame span is too large and/or when brusher is slower
+    brusher_enhance_edge = True  # Use acceleration information to improve HZ edges
     
     # Other vars
     cleave_dist = 5.0
@@ -290,8 +291,11 @@ class TaperPullingCore:
         if self.motors.brusher.moving == self.motors.brusher.MoveDirection.STOPPED:
             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
-        l = self.brusher_x0 - hz/2.0
-        r = self.brusher_x0 + hz/2.0
+        if self.brusher_enhance_edge and False:
+            pass
+        else:
+            l = self.brusher_x0 - hz/2.0
+            r = self.brusher_x0 + hz/2.0
         if (self.brusher_pos < l and self.brusher_dir == -1) or \
             self.brusher_pos > r and self.brusher_dir == 1:
             self.rhz_edges.append(self.brusher_pos)

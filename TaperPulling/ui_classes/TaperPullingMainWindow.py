@@ -807,6 +807,7 @@ class MainWindow(FormUI, WindowUI):
     def start_pulling(self):
         self.disable_controls()
         self.core.force_hz_edge = self.edgeStopCheck.isChecked()
+        self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
         self.core.motors.flame_io.go_to(self.flameIOMovSpin.value())
         self.core.motors.left_puller.set_velocity(self.pullerPullVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerPullVelSpin.value())
