@@ -18,7 +18,16 @@ motors.
 from enum import Enum
 import time
 from threading import Timer
+from ctypes import *
+import os
+import numpy as np
 
+class MotorType(Enum):
+    """
+    Enum for motor types
+    """
+    TCUBE_DCSERVO = 0
+    TCUBE_BRUSHLESS = 1
 
 class GenericTLMotor:
     """
@@ -41,6 +50,7 @@ class GenericTLMotor:
             while not self.finished.wait(self.interval):
                 self.function(*self.args, **self.kwargs)
         
+    # Movement
     vel = 1.0
     max_vel = 1.0
     accel = 1.0
@@ -49,35 +59,58 @@ class GenericTLMotor:
     target_pos = 0.0
     min_pos = 0.0
     max_pos = 100.0
+    
+    # Flow control
     initing = False
     homing = False
     homed = False
-    connected = False
     ok = False
-    simok = False
     error = False
     busy = False
-    serial = ""
-    moving = MoveDirection.STOPPED
-    going_to = False
-    simulate = False
-    sim_last_t = 0.0
-    sim_last_pos = 0.0
-    monitor_interval = 1  # ms
+    moving = False
+    movement = MoveDirection.STOPPED
     
-    def __init__(self):
-        self.go_to_loop = None
+    # Device
+    motor_type = None
+    serial = ""
+    serial_c = c_char_p()
+    simulate = False
+    kinesis_poll = 100  # ms. Less than this is problematic
+    lib_prfx = ""
+    monitor_interval = 50  # ms
+    lib = None
+    libok = False
+    unit_cal = False
+    units = [0, 0, 0]
+    units_mult = 100.0
+    messageType = c_ushort()
+    messageId = c_ushort()
+    messageData = c_uint32()
+    
+    def __init__(self, motor_type: MotorType):
+        self.move_loop = None
+        self.home_loop = None
+        self.motor_type = motor_type
+            
+        try:
+            os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
+            if motor_type == MotorType.TCUBE_DCSERVO:
+                self.lib_prfx = "CC"
+                self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.DCServo.dll")
+            elif motor_type == MotorType.TCUBE_BRUSHLESS:
+                self.lib_prfx = "BMC"
+                self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.BrushlessMotor.dll")
+            else:
+                raise Exception("Motor type invalid or not implemented.")
+            self.libok = True
+        except Exception as e:
+            print("Error: Thorlabs library not found. See traceback below:")
+            print(e)
     
     def __del__(self):
         self.close()
         
-    def close(self):
-        try:
-            self.go_to_loop.cancel()
-        except:
-            pass
-    
-    def connect(self, serial="", simulate=False):
+    def connect(self, serial="", poll_ms=100, simulate=False):
         """
         Connect to motor
         
@@ -85,147 +118,181 @@ class GenericTLMotor:
             serial (str, optional): Serial number to connect. Defaults to "".
             simulate (bool, optional): Simulate this motor. Defaults to False.
         """
+        
         self.simulate = simulate
         if serial != "":
             self.serial = serial
-        if serial != "" and not simulate:
-            # TODO: add specific code to connect to a ThorLabs motor
-            self.connected = True
+            self.serial_c = c_char_p(bytes(serial, "utf-8"))
         
-    def disconnect(self):
+        if self.simulate:
+                self.lib.TLI_InitializeSimulations()
+            
+        if serial != "":
+            # Open the device
+            self.kinesis_poll = poll_ms
+            if self.libok:
+                if self.lib.TLI_BuildDeviceList() == 0:
+                    err = eval(f"self.lib.{self.lib_prfx}_Open(self.serial_c)")
+                    if err == 0:
+                        time.sleep(0.5)
+                        if poll_ms >= 10:
+                            eval(f"self.lib.{self.lib_prfx}_StartPolling(self.serial_c, c_int(poll_ms))")
+                        eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
+                        eval(f"self.lib.{self.lib_prfx}_LoadSettings(self.serial_c)")
+                        eval(f"self.lib.{self.lib_prfx}_EnableChannel(self.serial_c)")
+                        time.sleep(0.5)
+                        eval(f"self.lib.{self.lib_prfx}_RequestSettings(self.serial_c)")      
+                        
+                        self.ok = True
+                    else:
+                        print("Error connecting to the device:", err)
+                else:
+                    print("Error: No devices found")
+        
+    def close(self):
+        try:
+            self.move_loop.cancel()
+        except:
+            pass
+        try:
+            self.home_loop.cancel()
+        except:
+            pass
+        
+        self.disconnect()
+        
+    def disconnect(self, disable=False):
         """
-        Disconnect to motor
+        Disconnect from the motor
         """
-        # TODO: Code to disconnect
-        self.connected = False
+
+        if self.ok:
+            if disable:
+                eval(f"self.lib.{self.lib_prfx}_DisableChannel(self.serial_c)")
+            eval(f"self.lib.{self.lib_prfx}_StopPolling(self.serial_c)")
+            eval(f"self.lib.{self.lib_prfx}_Close(self.serial_c)")
+        
+            if self.simulate:
+                self.lib.TLI_UninitializeSimulations()
+        
         self.ok = False
         
-    def set_velocity(self, vel: float=-1.0, max_vel: float=-1.0):
+    def get_status_bits(self):
+        status_bits = eval(f"self.lib.{self.lib_prfx}_GetStatusBits(self.serial_c)")
+        return status_bits
+        
+    def calibrate_units(self, mult=100.0):
+        if self.ok:
+            self.units_mult = mult
+            real = c_double(mult)
+            dev_x = c_int()
+            dev_v = c_int()
+            dev_a = c_int()
+            eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(dev_x), 0)")
+            time.sleep(0.1)
+            eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(dev_v), 1)")
+            time.sleep(0.1)
+            eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(dev_a), 2)")
+            time.sleep(0.1)
+            self.units[0] = dev_x.value
+            self.units[1] = dev_v.value
+            self.units[2] = dev_a.value
+            self.unit_cal = True
+
+    def real2dev(self, real_val, mode=0):
+        if self.ok:
+            if self.unit_cal:
+                if mode > 2: mode = 0
+                dev = int(np.round((real_val/self.units_mult)*self.units[mode]))
+            else:
+                dev = c_int()
+                real = c_double(real_val)
+                eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(dev), mode)")
+                dev = dev.value
+            return dev
+        return 0
+    
+    def dev2real(self, dev_val, mode=0):
+        if self.ok:
+            if self.unit_cal:
+                if mode > 2: mode = 0
+                real = float((dev_val)/float(self.units[mode]))*self.units_mult
+            else:
+                dev = c_int(dev_val)
+                real = c_double()
+                eval(f"self.lib.{self.lib_prfx}_GetRealValueFromDeviceUnit(self.serial_c, dev, byref(real), mode)")
+                real = real.value
+            return real
+        return 0.0
+    
+    def get_max_pos(self):
+        if self.ok:
+            max_dev = eval(f"self.lib.{self.lib_prfx}_GetNumberPositions(self.serial_c)")
+            return self.dev2real(max_dev, 0)
+        return 0.0
+    
+    def get_max_vel_params(self):
+        if self.ok:
+            max_v = c_double()
+            max_a = c_double()
+            eval(f"self.lib.{self.lib_prfx}_GetMotorVelocityLimits(self.serial_c, byref(max_v), byref(max_a))")
+            return max_v.value, max_a.value
+        return 0.0, 0.0
+    
+    def initialize(self):
+        self.calibrate_units()
+        self.max_pos = self.get_max_pos()
+        self.max_vel, self.max_accel = self.get_max_vel_params()
+        self.pos = self.get_position()
+    
+    def get_vel_params(self):
+        if self.ok:
+            max_vel_dev = c_int()
+            accel_dev = c_int()
+            eval(f"self.lib.{self.lib_prfx}_GetVelParams(self.serial_c, byref(accel_dev), byref(max_vel_dev))")
+            max_vel_real = self.dev2real(max_vel_dev.value, 1)
+            accel_real = self.dev2real(accel_dev.value, 2)
+            
+            return max_vel_real, accel_real
+        return 0.0, 0.0
+    
+    def set_vel_params(self, vel, accel):
+        if self.ok:
+            max_vel_dev = c_int(self.real2dev(vel, 1))
+            accel_dev = c_int(self.real2dev(accel, 2))
+            
+            eval(f"self.lib.{self.lib_prfx}_SetVelParams(self.serial_c, accel_dev, max_vel_dev)")
+      
+    def set_velocity(self, vel: float):
         """
         Set motor velocity. If a value is not provided, it is not changed.
 
         Args:
-            vel (float): Standard velocity. Defaults to -1.0, which does nothing.
-            max_vel (float, optional): Maximum velocity. Defaults to -1.0, which does nothing.
+            vel (float): Standard velocity.
         """
-        if max_vel > 0.0:
-            self.max_vel = max_vel
-        if vel > 0.0:
+        if self.ok:
+            if vel < 0.1: vel = 0.1
+            if vel > self.max_vel: vel = self.max_vel
+            curr_v, curr_a = self.get_vel_params()
+            curr_v = vel
+            self.set_vel_params(curr_v, curr_a)
             self.vel = vel
             
-    def set_acceleration(self, accel: float=-1.0, max_accel: float=-1.0):
+    def set_acceleration(self, accel: float):
         """
         Set motor acceleration. If a value is not provided, it is not changed.
 
         Args:
-            accel (float): Standard acceleration. Defaults to -1.0, which does nothing.
-            max_accel (float, optional): Maximum acceleration. Defaults to -1.0, which sets standard value.
+            accel (float): Standard acceleration.
         """
-        if max_accel > 0.0:
-            self.max_accel = max_accel
-        if accel > 0.0:
+        if self.ok:
+            if accel < 0.0: accel = 0.0
+            if accel > self.max_accel: accel = self.max_accel
+            curr_v, curr_a = self.get_vel_params()
+            curr_a = accel
+            self.set_vel_params(curr_v, curr_a)
             self.accel = accel
-    
-    def home(self):
-        """
-        Perform homing procedure
-        """
-        if not self.get_homed() and (self.connected or self.simulate):
-            self.start_home()
             
-            i = 0
-            while not self.homed and i < 600:
-                time.sleep(0.1)
-                self.homed = self.get_homed()
-                i += 1
-                
-    def start_home(self):
-        if self.connected:
-            self.homing = True
-            # TODO: code to home motor
-            pass
-        elif self.simulate:
-            self.homing = True
-            # self.pos = self.max_pos/2.0
-            self.sim_last_pos = self.pos
-            self.go_to(0.0)
-    
-    def go_to(self, pos:float):
-        """
-        Go to position
-        
-        Args:
-            pos (float): target position
-        """
-        self.target_pos = pos
-        if self.connected:
-            # TODO: code to go to position 
-            pass
-        elif self.simulate:
-            self.sim_last_pos = self.get_position()
-            self.sim_last_t = time.time()
-            if self.sim_last_pos < pos:
-                self.move(self.MoveDirection.POSITIVE)
-            elif self.sim_last_pos > pos:
-                self.move(self.MoveDirection.NEGATIVE)
-            if not self.going_to:
-                self.going_to = True
-                self.go_to_loop = None
-                self.go_to_loop = self.Loop(self.monitor_interval/1000.0, self.go_to_loop_function)
-                self.go_to_loop.start()          
-            
-    def go_to_loop_function(self):
-        if not self.busy:
-            self.busy = True
-            
-            pos = self.get_position()
-            done = False
-            if self.moving == self.MoveDirection.POSITIVE:
-                if pos >= self.target_pos:
-                    done = True
-            if self.moving == self.MoveDirection.NEGATIVE:
-                if pos <= self.target_pos:
-                    done = True
-            if self.moving == self.MoveDirection.STOPPED:
-                done = True
-            
-            self.busy = False
-            if done:
-                self.stop()
-                self.going_to = False
-                self.pos = self.target_pos
-                self.sim_last_pos = self.pos
-                self.go_to_loop.cancel()
-            
-    def move(self, dir:MoveDirection):
-        """
-        Move continuously in a certain direction
-
-        Args:
-            dir (MoveDirection): Direction to move
-        """
-        if self.connected:
-            # TODO: code to move
-            pass
-        elif self.simulate:
-            self.pos = self.get_position()
-            self.sim_last_pos = self.pos
-            self.sim_last_t = time.time()
-            self.moving = dir
-    
-    def stop(self):
-        """
-        Stop movement
-        """
-        if self.connected:
-            # TODO: code to stop
-            pass
-        elif self.simulate:
-            self.pos = self.get_position()
-            self.sim_last_pos = self.pos
-            self.sim_last_t = time.time()
-            self.moving = self.MoveDirection.STOPPED
-    
     def get_homed(self) -> bool:
         """
         Get the motor's homing status
@@ -233,15 +300,15 @@ class GenericTLMotor:
         Returns:
             bool: Wheter the motor is homed
         """
-        if self.connected:
-            # TODO: code to get homed status
-            pass
-        elif self.simulate:
-            if self.pos <= 0.0:
-                self.pos = 0.0
-                self.sim_last_pos = 0.0
-                self.homed = True
-                self.homing = False
+        if self.ok:
+            # self.homed = bool(eval(f"self.lib.{self.lib_prfx}_CanMoveWithoutHomingFirst(self.serial_c)"))
+            # This one is supposedly deprecated, but the other (above) is not found in the DLL ¯\_(ツ)_/¯
+            # self.homed = not bool(eval(f"self.lib.{self.lib_prfx}_NeedsHoming(self.serial_c)"))
+            
+            # In fact, none of these are appropriate. It is best to use the status bits for this.
+            status_bits = self.get_status_bits()
+            self.homed = bool(status_bits & 0x00000400)
+            
         return self.homed
     
     def get_position(self) -> float:
@@ -251,15 +318,190 @@ class GenericTLMotor:
         Returns:
             float: The position
         """
-        if self.connected:
-            # TODO: code to get position
-            pass
-        elif self.simulate:
-            new_pos = self.sim_last_pos + self.vel*self.moving.value*(time.time() - self.sim_last_t)
-            self.pos = new_pos
-            self.sim_last_pos = self.pos
-            self.sim_last_t = time.time()
+        if self.ok:
+            if self.kinesis_poll < 10:
+                eval(f"self.lib.{self.lib_prfx}_RequestPosition(self.serial_c)")
+                time.sleep(0.1)
+            dev_pos = c_int(eval(f"self.lib.{self.lib_prfx}_GetPosition(self.serial_c)"))
+            self.pos = self.dev2real(dev_pos.value, 0)
         return self.pos
+    
+    def home(self, force=False):
+        """
+        Perform homing procedure
+        """
+        if self.ok:
+            self.homed = self.get_homed()
+            if not self.homed or force:
+                self.stop(0)
+                eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
+                eval(f"self.lib.{self.lib_prfx}_Home(self.serial_c)")
+                
+                self.start_home_loop()
+                
+    def home_loop_function(self):
+        if not self.busy:
+            self.busy = True
+            
+            done = False
+            eval(f"self.lib.{self.lib_prfx}_WaitForMessage(self.serial_c, byref(self.messageType), byref(self.messageId), byref(self.messageData))")
+            if (self.messageType.value == 2 and self.messageId.value == 0):
+                done = True
+            
+            if done:
+                time.sleep(1.0)
+                self.homing = False
+                self.homed = self.get_homed()
+                self.pos = self.get_position()
+                self.home_loop.cancel()
+            
+            self.busy = False
+                
+    def wait_for_home(self, to=120):
+        t0 = time.time()
+        while self.homing:
+            t1 = time.time()
+            if (t1 - t0) > to:
+                return 1
+            time.sleep(self.monitor_interval/1000.0)
+        return 0
+                
+    def start_home_loop(self):
+        if not self.homing and self.ok:
+            self.homing = True
+            self.home_loop = None
+            self.home_loop = self.Loop(self.monitor_interval/1000.0,self.home_loop_function)
+            self.messageType = c_ushort(999)
+            self.messageId = c_uint32(999)
+            self.messageData = c_uint32(999)
+            self.home_loop.start()       
+        
+    def move_loop_function(self):
+        if not self.busy:
+            self.busy = True
+            
+            done = False
+            eval(f"self.lib.{self.lib_prfx}_WaitForMessage(self.serial_c, byref(self.messageType), byref(self.messageId), byref(self.messageData))")
+            if (self.messageType.value == 2 and self.messageId.value == 1):
+                done = True
+            
+            if done:
+                self.moving = False
+                self.pos = self.get_position()
+                self.move_loop.cancel()
+            
+            self.busy = False
+                
+    def start_move_loop(self):
+        if (not self.moving) and (not self.homing) and self.ok:
+            self.moving = True
+            self.move_loop = None
+            self.move_loop = self.Loop(self. monitor_interval/1000.0,self.move_loop_function)
+            self.messageType = c_ushort(999)
+            self.messageId = c_uint32(999)
+            self.messageData = c_uint32(999)
+            self.move_loop.start()       
+            
+    def go_to(self, pos:float, stop=True, stop_mode=0):
+        """
+        Go to position
+        
+        Args:
+            pos (float): target position
+        """
+        self.target_pos = pos
+        if self.ok:
+            if pos > self.max_pos:
+                pos = self.max_pos
+            if pos < 0:
+                pos = 0.0
+            new_pos_dev = self.real2dev(pos, 0)
+            eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
+            
+            if stop and self.moving:
+                self.stop(stop_mode)
+
+            eval(f"self.lib.{self.lib_prfx}_MoveToPosition(self.serial_c, new_pos_dev)")
+            if pos < self.get_position():
+                self.movement = self.MoveDirection.NEGATIVE
+            else:
+                self.movement = self.MoveDirection.POSITIVE
+            
+            self.start_move_loop()        
+    
+    def move_relative(self, dist, stop=True, stop_mode=0):
+        if self.ok:
+            pos = self.get_position()
+            final = pos + dist
+
+            if final > self.max_pos:
+                dist = self.max_pos - pos
+            if final < 0:
+                dist = -pos
+            final = pos + dist
+            self.target_pos = final
+            
+            dist_dev = self.real2dev(dist, 0)
+            eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
+            
+            if stop and self.moving:
+                self.stop(stop_mode)
+
+            eval(f"self.lib.{self.lib_prfx}_MoveRelative(self.serial_c, dist_dev)")
+            if dist < 0:
+                self.movement = self.MoveDirection.NEGATIVE
+            else:
+                self.movement = self.MoveDirection.POSITIVE
+            
+            self.start_move_loop()   
+    
+    def move(self, dir:MoveDirection, stop=True, stop_mode=0):
+        """
+        Move continuously in a certain direction
+
+        Args:
+            dir (MoveDirection): Direction to move
+        """
+        if self.ok:
+            if dir == self.MoveDirection.NEGATIVE:
+                dist = -1000
+            elif dir == self.MoveDirection.POSITIVE:
+                dist = 1000
+            else:
+                dist = 0.0
+            
+            self.move_relative(dist, stop, stop_mode)
+            
+    def wait_for_movement(self, to=60):
+        t0 = time.time()
+        while self.moving:
+            t1 = time.time()
+            if (t1 - t0) > to:
+                return 1
+            time.sleep(self.monitor_interval/1000.0)
+        return 0
+    
+    def stop(self, stop_mode=0):
+        """
+        Stop movement
+        """
+        if self.ok:
+            try:
+                self.move_loop.cancel()
+            except:
+                pass
+            try:
+                self.home_loop.cancel()
+            except:
+                pass
+            
+            if stop_mode == 1:
+                eval(f"self.lib.{self.lib_prfx}_StopProfiled(self.serial_c)")
+            else:
+                eval(f"self.lib.{self.lib_prfx}_StopImmediate(self.serial_c)")
+            self.movement = self.MoveDirection.STOPPED
+            self.moving = False
+            
     
 class Brusher(GenericTLMotor):
     """
@@ -274,7 +516,7 @@ class Brusher(GenericTLMotor):
     max_pos = 50.0  # mm
     
     def __init__(self):
-        super().__init__()
+        super().__init__(MotorType.TCUBE_DCSERVO)
 
 class FlameIO(GenericTLMotor):
     """
@@ -289,7 +531,7 @@ class FlameIO(GenericTLMotor):
     max_pos = 25.0  # mm
     
     def __init__(self):
-        super().__init__()
+        super().__init__(MotorType.TCUBE_DCSERVO)
         
 class LeftPuller(GenericTLMotor):
     """
@@ -304,7 +546,7 @@ class LeftPuller(GenericTLMotor):
     max_pos = 100.0  # mm
     
     def __init__(self):
-        super().__init__()
+        super().__init__(MotorType.TCUBE_BRUSHLESS)
         
 class RightPuller(GenericTLMotor):
     """
@@ -319,7 +561,7 @@ class RightPuller(GenericTLMotor):
     max_pos = 100.0  # mm
     
     def __init__(self):
-        super().__init__()
+        super().__init__(MotorType.TCUBE_BRUSHLESS)
 
 class TaperPullingMotors:
     """
@@ -334,14 +576,6 @@ class TaperPullingMotors:
         FLAME_IO = 1
         LEFT_PULLER = 2
         RIGHT_PULLER = 3
-        
-    class Loop(Timer):
-        """
-        Class that manages a threaded loop.
-        """
-        def run(self):
-            while not self.finished.wait(self.interval):
-                self.function(*self.args, **self.kwargs)
     
     def __init__(self):
         """
@@ -353,10 +587,6 @@ class TaperPullingMotors:
         self.left_puller = LeftPuller()
         self.right_puller = RightPuller()
         
-        self.init_loop = None
-        self.init_busy = False
-        self.init_running = False
-        
     def __del__(self):
         self.close()
         
@@ -364,15 +594,12 @@ class TaperPullingMotors:
         """
         Shutdown procedures
         """
-        # Stop thread
-        if self.init_running:
-            self.init_running = False
-            self.init_loop.cancel()
+        self.brusher.close()
+        self.flame_io.close()
+        self.left_puller.close()
+        self.right_puller.close()
         
-    def initialize_motor(self, motor_type: MotorTypes, serial: str="", 
-                         vel: float=-1.0, accel: float=-1.0,
-                         max_vel: float=-1.0, max_accel: float=-1.0, 
-                         simulate=False):
+    def initialize_motor(self, motor_type: MotorTypes, serial: str="", poll_ms=100, simulate=False):
         """
         Connect to, configure, and home (if needed) a motor.
         If a parameter is not given, its current value (default at initialization) is used
@@ -380,10 +607,6 @@ class TaperPullingMotors:
         Args:
             motor_type (MotorTypes): Type of the motor to be initialized
             serial (str): Serial number. Defaults to empty.
-            vel (float): Standard velocity. Defaults to -1.0.
-            accel (float): Standard acceleration. Defaults to -1.0.
-            max_vel (float, optional): Maximum velocity. Defaults to -1.0.
-            max_accel (float, optional): Maximum acceleration. Defaults to -1.0.
             simulate (bool, optional): Simulate this motor. Defaults to False.
         """
         motor = None
@@ -400,82 +623,8 @@ class TaperPullingMotors:
                 return 0
         
         motor.initing = True
-        motor.connect(serial, simulate)
-        motor.set_velocity(vel, max_vel)
-        motor.set_acceleration(accel, max_accel)
-        motor.home()
+        motor.connect(serial, poll_ms, simulate)
+        motor.initialize()
         motor.initing = False
-        
-        if (motor.connected or motor.simulate) and motor.homed:
-            motor.ok = True
             
         return motor.ok
-    
-    def initialize_motor_async(self, motor_type: MotorTypes, serial: str="", 
-                         vel: float=-1.0, accel: float=-1.0,
-                         max_vel: float=-1.0, max_accel: float=-1.0, 
-                         simulate=False):
-        """
-        Connect to, configure, and home (if needed) a motor.
-        If a parameter is not given, its current value (default at initialization) is used
-
-        Args:
-            motor_type (MotorTypes): Type of the motor to be initialized
-            serial (str): Serial number. Defaults to empty.
-            vel (float): Standard velocity. Defaults to -1.0.
-            accel (float): Standard acceleration. Defaults to -1.0.
-            max_vel (float, optional): Maximum velocity. Defaults to -1.0.
-            max_accel (float, optional): Maximum acceleration. Defaults to -1.0.
-            simulate (bool, optional): Simulate this motor. Defaults to False.
-        """
-        motor = None
-        match motor_type:
-            case self.MotorTypes.BRUSHER:
-                motor = self.brusher
-            case self.MotorTypes.FLAME_IO: 
-                motor = self.flame_io
-            case self.MotorTypes.LEFT_PULLER:
-                motor = self.left_puller
-            case self.MotorTypes.RIGHT_PULLER:
-                motor = self.right_puller
-            case _:  # Default case. Does nothing if a valid motor type is not specified.
-                return 0
-        
-        motor.initing = True
-        motor.connect(serial, simulate)
-        motor.set_velocity(vel, max_vel)
-        motor.set_acceleration(accel, max_accel)
-        if not self.init_running:
-            self.init_running = True
-            self.init_loop = None
-            self.init_loop = self.Loop(0.1, self.init_loop_function)
-            self.init_loop.start()
-        
-    def init_loop_function(self):
-        if not self.init_busy:
-            self.init_busy = True
-            self.init_running = True
-            
-            motors = [self.brusher, self.flame_io, self.left_puller, self.right_puller]
-            finish = [False]*len(motors)
-            for i, motor in enumerate(motors):
-                connected = (motor.connected or motor.simulate)
-                if motor.initing and connected and not motor.homing:
-                    motor.start_home()
-                
-                if motor.initing and connected and motor.homing and not motor.homed:
-                    motor.get_homed()
-                    
-                if motor.initing and connected and motor.homed:
-                    motor.ok = True
-                    
-                if motor.ok or motor.error:
-                    finish[i] = True
-                    motor.initing = False
-                else:
-                    finish[i] = False
-            
-            self.init_busy = False
-            if all(finish):
-                self.init_running = False
-                self.init_loop.cancel()
