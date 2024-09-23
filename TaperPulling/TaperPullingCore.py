@@ -46,10 +46,11 @@ class TaperPullingCore:
     standby = False             # Stage 5
     cleaving = False            # Opt. Stage 6
     looping = False             # Opt. Stage 6
-    pos_check_precision = 0.01   # Precision expected when checking for positions (mm)
+    pos_check_precision = 0.1   # Precision expected when checking for positions (mm)
     
     # Devices to control
     motors = None
+    all_motors_ok = False
     
     # Current data (for convenience)
     brusher_pos = 0.0
@@ -127,11 +128,6 @@ class TaperPullingCore:
         
         self.update_loop = self.Loop(self.poll_interval/1000.0, self.update_function)
         self.update_loop.start()
-        # self.update_loop.moveToThread(self)
-        # self.update_loop.setInterval(self.poll_interval)
-        # self.update_loop.timeout.connect(self.update_function)
-        # self.update_loop.start()
-        # self.exec()
         
     def __del__(self):
         self.close()
@@ -174,29 +170,33 @@ class TaperPullingCore:
         self.current_profile_step = 0
         self.last_total_pulled = 0.0
     
-    def init_brusher_as_default(self, simulate=False):
-        return self.motors.initialize_motor(self.motors.MotorTypes.BRUSHER, simulate=simulate)
+    def init_brusher_as_default(self, poll_ms=100, simulate=False):
+        return self.motors.initialize_motor(self.motors.MotorTypes.BRUSHER, poll_ms, simulate=simulate)
     
-    def init_flameio_as_default(self, simulate=False):
-        return self.motors.initialize_motor(self.motors.MotorTypes.FLAME_IO, simulate=simulate)
+    def init_flameio_as_default(self, poll_ms=100, simulate=False):
+        return self.motors.initialize_motor(self.motors.MotorTypes.FLAME_IO, poll_ms, simulate=simulate)
     
-    def init_puller_l_as_default(self, simulate=False):
-        return self.motors.initialize_motor(self.motors.MotorTypes.LEFT_PULLER, simulate=simulate)
+    def init_puller_l_as_default(self, poll_ms=100, simulate=False):
+        return self.motors.initialize_motor(self.motors.MotorTypes.LEFT_PULLER, poll_ms, simulate=simulate)
         
-    def init_puller_r_as_default(self, simulate=False):
-        return self.motors.initialize_motor(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
+    def init_puller_r_as_default(self, poll_ms=100, simulate=False):
+        return self.motors.initialize_motor(self.motors.MotorTypes.RIGHT_PULLER, poll_ms, simulate=simulate)
     
-    def init_brusher_as_default_async(self, simulate=False):
-        return self.motors.initialize_motor_async(self.motors.MotorTypes.BRUSHER, simulate=simulate)
+    def init_all_motors_as_default(self, poll_ms=100, simulate=False):
+        bok = self.init_brusher_as_default(poll_ms, simulate)
+        fok = self.init_flameio_as_default(poll_ms, simulate)
+        lok = self.init_puller_l_as_default(poll_ms, simulate)
+        rok = self.init_puller_r_as_default(poll_ms, simulate)
+        self.all_motors_ok = bok and fok and lok and rok
+        return self.all_motors_ok
     
-    def init_flameio_as_default_async(self, simulate=False):
-        return self.motors.initialize_motor_async(self.motors.MotorTypes.FLAME_IO, simulate=simulate)
-    
-    def init_puller_l_as_default_async(self, simulate=False):
-        return self.motors.initialize_motor_async(self.motors.MotorTypes.LEFT_PULLER, simulate=simulate)
-        
-    def init_puller_r_as_default_async(self, simulate=False):
-        return self.motors.initialize_motor_async(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
+    def check_all_motors_ok(self):
+        bok = self.motors.brusher.ok
+        fok = self.motors.flame_io.ok
+        lok = self.motors.left_puller.ok
+        rok = self.motors.right_puller.ok
+        self.all_motors_ok = bok and fok and lok and rok
+        return self.all_motors_ok
             
     def update_function(self):
         if not self.busy:
@@ -391,6 +391,16 @@ class TaperPullingCore:
             self.loop_loosing = False
             self.loop_loosed = False
         
+    def go_to_start(self):
+        if self.check_all_motors_ok:
+            self.motors.brusher.go_to(self.brusher_x0)
+            self.motors.brusher.wait_for_movement()
+            self.motors.left_puller.go_to(self.left_puller_x0)
+            self.motors.right_puller.go_to(self.right_puller_x0)
+            self.motors.left_puller.wait_for_movement()
+            self.motors.right_puller.wait_for_movement()
+            self.motors.flame_io.go_to(self.flame_io_x0)
+    
     def start_process(self, hotzone_function: list[list[float]]|np.ndarray):
         """
         Starts the pulling process.
@@ -403,25 +413,25 @@ class TaperPullingCore:
         # Reset
         self.reset_pull_stats()
         
-        # Go to starting positions
-        self.motors.brusher.go_to(self.brusher_x0)
-        self.motors.flame_io.go_to(self.flame_io_x0)
-        self.motors.left_puller.go_to(self.left_puller_x0)
-        self.motors.right_puller.go_to(self.right_puller_x0)
-        
-        # Set hotzone function
-        try:
-            self.hotzone_function = np.array(hotzone_function)
-        except:
-            raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
-        if self.hotzone_function.shape[0] >= 2:
-            self.running_process = True
+        if self.check_all_motors_ok:
+            # Go to starting positions
+            self.go_to_start()
+            
+            # Set hotzone function
+            try:
+                self.hotzone_function = np.array(hotzone_function)
+            except:
+                raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
+            if self.hotzone_function.shape[0] >= 2:
+                self.running_process = True
+            else:
+                raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
+            
+            # Set initial time
+            self.time_init = time.time()
+            self.time_now = time.time()
         else:
-            raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
-        
-        # Set initial time
-        self.time_init = time.time()
-        self.time_now = time.time()
+            print("Error: not all motors initialized correctly.")
         
     def stop_pulling(self):
         self.standby = True
