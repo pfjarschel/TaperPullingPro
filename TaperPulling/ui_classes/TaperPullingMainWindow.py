@@ -92,6 +92,9 @@ class MainWindow(FormUI, WindowUI):
             "Are you sure to exit?", QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
+            self.pullLoop_timer.stop()
+            self.mainLoop_timer.stop()
+            self.initLoop_timer.stop()
             self.data.stop_monitor()
             self.core.stop_pulling()
             self.core.close()
@@ -379,10 +382,10 @@ class MainWindow(FormUI, WindowUI):
         # Pullers
         self.core.motors.left_puller.serial = self.pullerLeftSerialText.text()
         self.core.motors.right_puller.serial = self.pullerRightSerialText.text()
-        self.core.motors.left_puller.set_acceleration(self.pullerAccelSpin.value(), self.pullerAccelSpin.value())
-        self.core.motors.right_puller.set_acceleration(self.pullerAccelSpin.value(), self.pullerAccelSpin.value())
-        self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value(), self.pullerVelSpin.value())
-        self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value(), self.pullerVelSpin.value())
+        self.core.motors.left_puller.set_acceleration(self.pullerAccelSpin.value())
+        self.core.motors.right_puller.set_acceleration(self.pullerAccelSpin.value())
+        self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
+        self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
         self.core.left_puller_x0 = self.pullerInitPosSpin.value()
         self.core.right_puller_x0 = self.pullerInitPosSpin.value()
         
@@ -609,50 +612,61 @@ class MainWindow(FormUI, WindowUI):
             connected = [False]*4
             homed = [False]*4
             
-            if self.core.motors.brusher.connected or self.core.motors.brusher.simulate:
-                self.brInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+            if self.core.motors.brusher.ok:
+                # self.brInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[0] = True
-            elif self.core.motors.brusher.error:
-                self.brInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
-            if self.core.motors.flame_io.connected or self.core.motors.flame_io.simulate:
-                self.fioInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+            # elif self.core.motors.brusher.error:
+            #     self.brInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            if self.core.motors.flame_io.ok:
+                # self.fioInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[1] = True
-            elif self.core.motors.flame_io.error:
-                self.fioInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
-            if self.core.motors.left_puller.connected or self.core.motors.left_puller.simulate:
-                self.leftInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+            # elif self.core.motors.flame_io.error:
+            #     self.fioInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            if self.core.motors.left_puller.ok:
+                # self.leftInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[2] = True
-            elif self.core.motors.left_puller.error:
-                self.leftInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
-            if self.core.motors.right_puller.connected or self.core.motors.right_puller.simulate:
-                self.rightInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+            # elif self.core.motors.left_puller.error:
+            #     self.leftInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            if self.core.motors.right_puller.ok:
+                # self.rightInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[3] = True
-            elif self.core.motors.right_puller.error:
-                self.rightInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
+            # elif self.core.motors.right_puller.error:
+            #     self.rightInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
             if self.core.motors.brusher.homed:
                 self.brHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 homed[0] = True
             elif self.core.motors.brusher.homing:
                 self.brHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            else:
+                self.core.motors.brusher.home()
             if self.core.motors.flame_io.homed:
                 self.fioHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 homed[1] = True
             elif self.core.motors.flame_io.homing:
                 self.fioHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            else:
+                self.core.motors.flame_io.home()
             if self.core.motors.left_puller.homed:
                 self.leftHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 homed[2] = True
             elif self.core.motors.left_puller.homing:
                 self.leftHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            else:
+                self.core.motors.left_puller.home()
             if self.core.motors.right_puller.homed:
                 self.rightHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 homed[3] = True
             elif self.core.motors.right_puller.homing:
                 self.rightHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            else:
+                self.core.motors.right_puller.home()
 
+            print(connected, homed)
+            
             self.busy = False
             if all(connected + homed):
+                print("opa")
                 self.initLoop_timer.stop()
                 self.core.running_process = True
                 self.core.standby = True
@@ -792,12 +806,13 @@ class MainWindow(FormUI, WindowUI):
         self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
         self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
         
-        brOk = self.core.init_brusher_as_default_async(self.brSimCheck.isChecked())
-        fioOk = self.core.init_flameio_as_default_async(self.fioSimCheck.isChecked())
-        leftOk = self.core.init_puller_l_as_default_async(self.leftSimCheck.isChecked())
-        rightOk = self.core.init_puller_r_as_default_async(self.rightSimCheck.isChecked())
-        
         self.initLoop_timer.start()
+        
+        self.core.init_brusher_as_default(self.brSimCheck.isChecked())
+        self.core.init_flameio_as_default(self.fioSimCheck.isChecked())
+        self.core.init_puller_l_as_default(self.leftSimCheck.isChecked())
+        self.core.init_puller_r_as_default(self.rightSimCheck.isChecked())
+        
         
     def go2start(self):
         self.core.motors.brusher.go_to(self.brusherInitPosSpin.value())

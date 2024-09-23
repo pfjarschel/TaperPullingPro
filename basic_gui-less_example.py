@@ -21,7 +21,8 @@ from TaperPulling.TaperPullingData import TaperPullingData
 
 # Initialize core
 core = TaperPullingCore()
-core.init_motors_as_default(simulate=True)
+if core.init_all_motors_as_default(simulate=True):
+    core.start_update()
 
 # Initialize Data acquisition and processing
 data_manager = TaperPullingData()
@@ -38,9 +39,9 @@ times = []
 vals = []
 
 # Hotzone function: a 2 point line
-# Will pull 40 mm (20 on each side)
+# Will pull 20 mm (10 on each side)
 # Hot zone will grow from 2 mm to 10 mm
-hz_function = [[0.0, 40.0], [2.0, 10.0]]
+hz_function = [[0.0, 20.0], [2.0, 10.0]]
 
 # Initialize list to hold measured hz lengths
 hz_points = [[0.0, hz_function[1][0]]]
@@ -48,6 +49,22 @@ hz = np.array(hz_points).T
 
 # Start monitoring
 data_manager.start_monitor()
+print("Homing...")
+core.motors.brusher.home()
+core.motors.flame_io.home()
+core.motors.left_puller.home()
+core.motors.right_puller.home()
+
+core.motors.left_puller.wait_for_home()
+core.motors.right_puller.wait_for_home()
+core.motors.flame_io.wait_for_home()
+core.motors.brusher.wait_for_home()
+print("Homed")
+
+core.brusher_x0 = 33.0
+core.flame_io_x0 = 14.1
+core.left_puller_x0 = 84.0
+core.right_puller_x0 = 84.0
 
 # Start process
 core.start_process(hz_function)
@@ -118,7 +135,7 @@ while not core.standby:
     figure.canvas.flush_events()
     
     # Just some progress info
-    if i % int(1/tsleep) == 0:
+    if i % int(1/tsleep) == 0 and core.total_pulled > 0.0:
         el_time = time.time() - t0
         ratio = core.total_pulled/hz_function[0][-1]
         total_time = el_time/ratio
@@ -131,7 +148,7 @@ while not core.standby:
 
 # Show final plot and block execution
 plt.ioff()
-plt.show()  
+plt.show()
 
 # Shut down
 data_manager.stop_monitor()

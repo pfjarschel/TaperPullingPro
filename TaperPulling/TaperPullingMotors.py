@@ -22,12 +22,80 @@ from ctypes import *
 import os
 import numpy as np
 
+        
+
 class MotorType(Enum):
     """
     Enum for motor types
     """
     TCUBE_DCSERVO = 0
     TCUBE_BRUSHLESS = 1
+
+class KinesisDLL:
+    lib = None
+    motor_type = None
+    lib_prfx = ""
+    libok = False
+    error = False
+    
+    def __init__(self, motor_type: MotorType):
+        self.motor_type = motor_type
+            
+        try:
+            os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
+            if motor_type == MotorType.TCUBE_DCSERVO:
+                self.lib_prfx = "CC"
+                self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.DCServo.dll")
+            elif motor_type == MotorType.TCUBE_BRUSHLESS:
+                self.lib_prfx = "BMC"
+                self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.BrushlessMotor.dll")
+            else:
+                raise Exception("Motor type invalid or not implemented.")
+            self.libok = True
+        except Exception as e:
+            print("Error: Thorlabs library not found. See traceback below:")
+            print(e)
+            self.error = True
+
+# Some interfaces for DLL structures    
+class TLI_DeviceInfo(Structure):
+    # enum MOT_MotorTypes
+    MOT_NotMotor = c_int(0)
+    MOT_DCMotor = c_int(1)
+    MOT_StepperMotor = c_int(2)
+    MOT_BrushlessMotor = c_int(3)
+    MOT_CustomMotor = c_int(100)
+    MOT_MotorTypes = c_int
+    
+    _fields_ = [("typeID", c_ulong),
+                ("description", (65 * c_char)),
+                ("serialNo", (9 * c_char)),
+                ("PID", c_ushort),
+                ("isKnownType", c_bool),
+                ("motorType", MOT_MotorTypes),
+                ("isPiezoDevice", c_bool),
+                ("isLaser", c_bool),
+                ("isCustomType", c_bool),
+                ("isRack", c_bool),
+                ("maxChannels", c_short)]
+
+class MOT_HomingParameters(Structure):
+        # enum MOT_TravelDirection
+    MOT_TravelDirectionUndefined = c_short(0x00)
+    MOT_Forwards = c_short(0x01)
+    MOT_Reverse = c_short(0x02)
+    MOT_TravelDirection = c_short
+
+    # enum MOT_HomeLimitSwitchDirection
+    MOT_LimitSwitchDirectionUndefined = c_short(0x00)
+    MOT_ReverseLimitSwitch = c_short(0x01)
+    MOT_ForwardLimitSwitch = c_short(0x04)
+    MOT_HomeLimitSwitchDirection = c_short
+    
+    _fields_ = [("direction", MOT_TravelDirection),
+                ("limitSwitch", MOT_HomeLimitSwitchDirection),
+                ("velocity", c_uint),
+                ("offsetDistance", c_uint)]
 
 class GenericTLMotor:
     """
@@ -50,109 +118,79 @@ class GenericTLMotor:
             while not self.finished.wait(self.interval):
                 self.function(*self.args, **self.kwargs)
     
-    # Some interfaces for DLL structures    
-    class TLI_DeviceInfo(Structure):
-        # enum MOT_MotorTypes
-        MOT_NotMotor = c_int(0)
-        MOT_DCMotor = c_int(1)
-        MOT_StepperMotor = c_int(2)
-        MOT_BrushlessMotor = c_int(3)
-        MOT_CustomMotor = c_int(100)
-        MOT_MotorTypes = c_int
+    def __init__(self, motor_type: MotorType, kinesis_dll_lib=None):
+        # Movement
+        self.vel = 1.0
+        self.max_vel = 1.0
+        self.accel = 1.0
+        self.max_accel = 1.0
+        self.pos = 0.0
+        self.target_pos = 0.0
+        self.min_pos = 0.0
+        self.max_pos = 100.0
         
-        _fields_ = [("typeID", c_ulong),
-                    ("description", (65 * c_char)),
-                    ("serialNo", (9 * c_char)),
-                    ("PID", c_ushort),
-                    ("isKnownType", c_bool),
-                    ("motorType", MOT_MotorTypes),
-                    ("isPiezoDevice", c_bool),
-                    ("isLaser", c_bool),
-                    ("isCustomType", c_bool),
-                    ("isRack", c_bool),
-                    ("maxChannels", c_short)]
-    
-    class MOT_HomingParameters(Structure):
-         # enum MOT_TravelDirection
-        MOT_TravelDirectionUndefined = c_short(0x00)
-        MOT_Forwards = c_short(0x01)
-        MOT_Reverse = c_short(0x02)
-        MOT_TravelDirection = c_short
-
-        # enum MOT_HomeLimitSwitchDirection
-        MOT_LimitSwitchDirectionUndefined = c_short(0x00)
-        MOT_ReverseLimitSwitch = c_short(0x01)
-        MOT_ForwardLimitSwitch = c_short(0x04)
-        MOT_HomeLimitSwitchDirection = c_short
+        # Flow control
+        self.initing = False
+        self.homing = False
+        self.homed = False
+        self.ok = False
+        self.error = False
+        self.busy = False
+        self.moving = False
+        self.movement = self.MoveDirection.STOPPED
         
-        _fields_ = [("direction", MOT_TravelDirection),
-                    ("limitSwitch", MOT_HomeLimitSwitchDirection),
-                    ("velocity", c_uint),
-                    ("offsetDistance", c_uint)]
-        
-    # Movement
-    vel = 1.0
-    max_vel = 1.0
-    accel = 1.0
-    max_accel = 1.0
-    pos = 0.0
-    target_pos = 0.0
-    min_pos = 0.0
-    max_pos = 100.0
-    
-    # Flow control
-    initing = False
-    homing = False
-    homed = False
-    ok = False
-    error = False
-    busy = False
-    moving = False
-    movement = MoveDirection.STOPPED
-    
-    # Device
-    motor_type = None
-    serial = ""
-    serial_c = c_char_p()
-    simulate = False
-    kinesis_poll = 100  # ms. Less than this is problematic
-    lib_prfx = ""
-    monitor_interval = 50  # ms
-    lib = None
-    libok = False
-    unit_cal = False
-    units = [0, 0, 0]
-    units_mult = 100.0
-    messageType = c_ushort()
-    messageId = c_ushort()
-    messageData = c_uint32()
-    device_info = TLI_DeviceInfo()
-    homing_params = MOT_HomingParameters()
-    
-    def __init__(self, motor_type: MotorType):
+        # Device
+        self.motor_type = None
+        self.serial = ""
+        self.serial_c = None
+        self.simulate = False
+        self.kinesis_poll = 200  # ms. Less than this is problematic
+        self.lib_prfx = ""
+        self.monitor_interval = 200  # ms
+        self.lib = None
+        self.libok = False
+        self.unit_cal = False
+        self.units = [0, 0, 0]
+        self.units_mult = 100.0
+        self.messageType = c_ushort(0)
+        self.messageId = c_ushort(0)
+        self.messageData = c_uint32(0)
+        self.device_info = None
+        self.homing_params = None
         self.move_loop = None
         self.home_loop = None
         self.motor_type = motor_type
-            
-        try:
-            os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
-            if motor_type == MotorType.TCUBE_DCSERVO:
-                self.lib_prfx = "CC"
-                self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.DCServo.dll")
-            elif motor_type == MotorType.TCUBE_BRUSHLESS:
-                self.lib_prfx = "BMC"
-                self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.BrushlessMotor.dll")
-            else:
-                raise Exception("Motor type invalid or not implemented.")
-            self.libok = True
-        except Exception as e:
-            print("Error: Thorlabs library not found. See traceback below:")
-            print(e)
+        
+        self.device_info = TLI_DeviceInfo()
+        self.homing_params = MOT_HomingParameters()
+        
+        if kinesis_dll_lib == None:
+            try:
+                os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
+                if motor_type == MotorType.TCUBE_DCSERVO:
+                    self.lib_prfx = "CC"
+                    self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.DCServo.dll")
+                elif motor_type == MotorType.TCUBE_BRUSHLESS:
+                    self.lib_prfx = "BMC"
+                    self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.BrushlessMotor.dll")
+                else:
+                    raise Exception("Motor type invalid or not implemented.")
+                self.libok = True
+            except Exception as e:
+                print("Error: Thorlabs library not found. See traceback below:")
+                print(e)
+                self.error = True
+        else:
+            self.motor_type = kinesis_dll_lib.motor_type
+            self.lib = kinesis_dll_lib.lib
+            self.lib_prfx = kinesis_dll_lib.lib_prfx
+            self.libok = kinesis_dll_lib.libok
+            self.error = kinesis_dll_lib.error
     
     def __del__(self):
         self.close()
         
-    def connect(self, serial="", poll_ms=100, simulate=False):
+    def connect(self, serial="", poll_ms=200, simulate=False):
         """
         Connect to motor
         
@@ -165,40 +203,45 @@ class GenericTLMotor:
         if serial != "":
             self.serial = serial
             self.serial_c = c_char_p(bytes(serial, "utf-8"))
-        
         if self.simulate:
                 self.lib.TLI_InitializeSimulations()
-            
-        if serial != "":
+
+        if self.serial != "":
             # Open the device
             self.kinesis_poll = poll_ms
+            self.monitor_interval = poll_ms
             if self.libok:
                 if self.lib.TLI_BuildDeviceList() == 0:
                     err = eval(f"self.lib.{self.lib_prfx}_Open(self.serial_c)")
                     if err == 0:
-                        time.sleep(0.5)
-                        if poll_ms >= 10:
-                            eval(f"self.lib.{self.lib_prfx}_StartPolling(self.serial_c, c_int(poll_ms))")
+                        time.sleep(1.0)
                         eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
                         eval(f"self.lib.{self.lib_prfx}_LoadSettings(self.serial_c)")
-                        eval(f"self.lib.{self.lib_prfx}_EnableChannel(self.serial_c)")
                         time.sleep(0.5)
+                        eval(f"self.lib.{self.lib_prfx}_EnableChannel(self.serial_c)")
+                        time.sleep(1.0)
                         eval(f"self.lib.{self.lib_prfx}_RequestSettings(self.serial_c)")      
-                        self.lib.TLI_GetDeviceInfo(self.serial_c, byref(self.device_info))
+                        time.sleep(0.5)
                         eval(f"self.lib.{self.lib_prfx}_RequestHomingParams(self.serial_c)")
-                        time.sleep(0.1)
+                        time.sleep(0.5)
                         eval(f"self.lib.{self.lib_prfx}_GetHomingParamsBlock(self.serial_c, byref(self.homing_params))")
+                        time.sleep(0.5)
                         # Force homing direction to reverse (towards 0)
                         if self.homing_params.direction != 2:
                             self.homing_params.direction = c_short(0x02)
-                            eval(f"self.lib.{self.lib_prfx}_SetHomingParamsBlock(self.serial_c, byref(self.homing_params))")
-                            time.sleep(0.5)
+                        eval(f"self.lib.{self.lib_prfx}_SetHomingParamsBlock(self.serial_c, byref(self.homing_params))")
+                        time.sleep(0.5)
                         
+                        # Start polling 
+                        if poll_ms >= 10:
+                            eval(f"self.lib.{self.lib_prfx}_StartPolling(self.serial_c, c_int(poll_ms))")
                         self.ok = True
                     else:
                         print("Error connecting to the device:", err)
+                        self.error = True
                 else:
                     print("Error: No devices found")
+                    self.error = True
         
     def close(self):
         try:
@@ -235,20 +278,34 @@ class GenericTLMotor:
     def calibrate_units(self, mult=100.0):
         if self.ok:
             self.units_mult = mult
+            self.units = [0, 0, 0]
             real = c_double(mult)
-            dev_x = c_int()
-            dev_v = c_int()
-            dev_a = c_int()
-            eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(dev_x), 0)")
-            time.sleep(0.1)
-            eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(dev_v), 1)")
-            time.sleep(0.1)
-            eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(dev_a), 2)")
-            time.sleep(0.1)
-            self.units[0] = dev_x.value
-            self.units[1] = dev_v.value
-            self.units[2] = dev_a.value
+            self.dev_x = c_int(0)
+            self.dev_v = c_int(0)
+            self.dev_a = c_int(0)
+
+            tries = 0
+            while not all(self.units):
+                eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_x), 0)")
+                time.sleep(0.5)
+                eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_v), 1)")
+                time.sleep(0.5)
+                eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_a), 2)")
+                time.sleep(0.5)
+                self.units[0] = self.dev_x.value
+                self.units[1] = self.dev_v.value
+                self.units[2] = self.dev_a.value
+                
+                if not all(self.units):
+                    tries += 1
+                    time.sleep(1.0)
+                if tries > 10:
+                    self.error = True
+                    self.ok = False
+                    return False
+                
             self.unit_cal = True
+        return self.unit_cal
 
     def real2dev(self, real_val, mode=0):
         if self.ok:
@@ -256,7 +313,7 @@ class GenericTLMotor:
                 if mode > 2: mode = 0
                 dev = int(np.round((real_val/self.units_mult)*self.units[mode]))
             else:
-                dev = c_int()
+                dev = c_int(0)
                 real = c_double(real_val)
                 eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(dev), mode)")
                 dev = dev.value
@@ -270,7 +327,7 @@ class GenericTLMotor:
                 real = float((dev_val)/float(self.units[mode]))*self.units_mult
             else:
                 dev = c_int(dev_val)
-                real = c_double()
+                real = c_double(0)
                 eval(f"self.lib.{self.lib_prfx}_GetRealValueFromDeviceUnit(self.serial_c, dev, byref(real), mode)")
                 real = real.value
             return real
@@ -280,26 +337,27 @@ class GenericTLMotor:
         if self.ok:
             max_dev = eval(f"self.lib.{self.lib_prfx}_GetNumberPositions(self.serial_c)")
             return self.dev2real(max_dev, 0)
-        return 0.0
+        return 100.0
     
     def get_max_vel_params(self):
         if self.ok:
-            max_v = c_double()
-            max_a = c_double()
+            max_v = c_double(0)
+            max_a = c_double(0)
             eval(f"self.lib.{self.lib_prfx}_GetMotorVelocityLimits(self.serial_c, byref(max_v), byref(max_a))")
             return max_v.value, max_a.value
-        return 0.0, 0.0
+        return 1.0, 1.0
     
     def initialize(self):
         self.calibrate_units()
+        self.get_homed()
         self.max_pos = self.get_max_pos()
         self.max_vel, self.max_accel = self.get_max_vel_params()
         self.pos = self.get_position()
     
     def get_vel_params(self):
         if self.ok:
-            max_vel_dev = c_int()
-            accel_dev = c_int()
+            max_vel_dev = c_int(0)
+            accel_dev = c_int(0)
             eval(f"self.lib.{self.lib_prfx}_GetVelParams(self.serial_c, byref(accel_dev), byref(max_vel_dev))")
             max_vel_real = self.dev2real(max_vel_dev.value, 1)
             accel_real = self.dev2real(accel_dev.value, 2)
@@ -381,13 +439,12 @@ class GenericTLMotor:
         """
         Perform homing procedure
         """
-        if self.ok:            
+        if self.ok:           
             self.homed = self.get_homed()
             if not self.homed or force:
                 self.stop(0)
                 eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
                 eval(f"self.lib.{self.lib_prfx}_Home(self.serial_c)")
-                
                 self.start_home_loop()
                 
     def home_loop_function(self):
@@ -466,6 +523,11 @@ class GenericTLMotor:
                 pos = self.max_pos
             if pos < 0:
                 pos = 0.0
+            if pos < self.get_position():
+                self.movement = self.MoveDirection.NEGATIVE
+            else:
+                self.movement = self.MoveDirection.POSITIVE
+            
             new_pos_dev = self.real2dev(pos, 0)
             eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
             
@@ -473,10 +535,6 @@ class GenericTLMotor:
                 self.stop(stop_mode)
 
             eval(f"self.lib.{self.lib_prfx}_MoveToPosition(self.serial_c, new_pos_dev)")
-            if pos < self.get_position():
-                self.movement = self.MoveDirection.NEGATIVE
-            else:
-                self.movement = self.MoveDirection.POSITIVE
             
             self.start_move_loop()        
     
@@ -492,6 +550,11 @@ class GenericTLMotor:
             final = pos + dist
             self.target_pos = final
             
+            if dist < 0:
+                self.movement = self.MoveDirection.NEGATIVE
+            else:
+                self.movement = self.MoveDirection.POSITIVE
+                
             dist_dev = self.real2dev(dist, 0)
             eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
             
@@ -499,10 +562,6 @@ class GenericTLMotor:
                 self.stop(stop_mode)
 
             eval(f"self.lib.{self.lib_prfx}_MoveRelative(self.serial_c, dist_dev)")
-            if dist < 0:
-                self.movement = self.MoveDirection.NEGATIVE
-            else:
-                self.movement = self.MoveDirection.POSITIVE
             
             self.start_move_loop()   
     
@@ -553,66 +612,96 @@ class GenericTLMotor:
             self.movement = self.MoveDirection.STOPPED
             self.moving = False
             
+    def measure_movement_start_time(self):
+        if self.ok:
+            pos = self.get_position()
+            
+            if pos <= 2:
+                new_pos = pos + 1.0
+            else:
+                new_pos = pos - 1.0
+            t0 = time.time()
+            self.go_to(new_pos)
+
+            prev_pos = pos
+            to = 10.0
+            t1 = time.time()
+            while pos == prev_pos and (t1 - t0) < to:
+                prev_pos = pos
+                pos = self.get_position()
+                t1 = time.time()
+                time.sleep(self.monitor_interval/1000.0)
+            t1 = time.time()
+            move_time = t1 - t0
+
+            return move_time
+            
     
 class Brusher(GenericTLMotor):
     """
     Class for the flame brusher motor. Inherits the generic ThorLabs motors class.
     """
-    # Default parameters
-    vel = 2.5  # mm/s
-    accel = 4.5  # mm/s2
-    max_vel = vel # mm/s
-    max_accel = accel # mm/s2
-    serial = "83837733"
-    max_pos = 50.0  # mm
-    
-    def __init__(self):
-        super().__init__(MotorType.TCUBE_DCSERVO)
+        
+    def __init__(self, kinesis_dll_lib=None):
+        super().__init__(MotorType.TCUBE_DCSERVO, kinesis_dll_lib)
+        
+        # Default parameters
+        self.vel = 2.5  # mm/s
+        self.accel = 4.5  # mm/s2
+        self.max_vel = self.vel # mm/s
+        self.max_accel = self.accel # mm/s2
+        self.serial = "83837733"
+        self.max_pos = 50.0  # mm
 
 class FlameIO(GenericTLMotor):
     """
     Class for the flame in/out motor. Inherits the generic ThorLabs motors class.
     """
-    # Default parameters
-    vel = 2.0  # mm/s
-    accel = 2.0  # mm/s2
-    max_vel = vel # mm/s
-    max_accel = accel # mm/s2
-    serial = "83837788"
-    max_pos = 25.0  # mm
     
-    def __init__(self):
-        super().__init__(MotorType.TCUBE_DCSERVO)
+    def __init__(self, kinesis_dll_lib=None):
+        super().__init__(MotorType.TCUBE_DCSERVO, kinesis_dll_lib)
+        
+        # Default parameters
+        self.vel = 2.0  # mm/s
+        self.accel = 2.0  # mm/s2
+        self.max_vel = self.vel # mm/s
+        self.max_accel = self.accel # mm/s2
+        self.serial = "83837788"
+        self.max_pos = 25.0  # mm
         
 class LeftPuller(GenericTLMotor):
     """
     Class for the left puller. Inherits the generic ThorLabs motors class.
     """
-    # Default parameters
-    vel = 0.125  # mm/s
-    accel = 50.0  # mm/s2
-    max_vel = 20.0  # mm/s
-    max_accel = accel # mm/s2
-    pullers_l_serial = "67838837"
-    max_pos = 100.0  # mm
     
-    def __init__(self):
-        super().__init__(MotorType.TCUBE_BRUSHLESS)
+    def __init__(self, kinesis_dll_lib=None):
+        super().__init__(MotorType.TCUBE_BRUSHLESS, kinesis_dll_lib)
+        
+        # Default parameters
+        self.vel = 40.0  # mm/s
+        self.pull_vel = 0.125  # mm/s
+        self.accel = 100.0  # mm/s2
+        self.max_vel = 500.0  # mm/s
+        self.max_accel = 5000.0 # mm/s2
+        self.serial = "67838837"
+        self.max_pos = 100.0  # mm
         
 class RightPuller(GenericTLMotor):
     """
     Class for the left puller. Inherits the generic ThorLabs motors class.
     """
-    # Default parameters
-    vel = 0.125  # mm/s
-    accel = 50.0  # mm/s2
-    max_vel = 20.0  # mm/s
-    max_accel = accel # mm/s2
-    pullers_l_serial = "67839254"
-    max_pos = 100.0  # mm
     
-    def __init__(self):
-        super().__init__(MotorType.TCUBE_BRUSHLESS)
+    def __init__(self, kinesis_dll_lib=None):
+        super().__init__(MotorType.TCUBE_BRUSHLESS, kinesis_dll_lib)
+        
+        # Default parameters
+        self.vel = 40.0  # mm/s
+        self.pull_vel = 0.125  # mm/s
+        self.accel = 100.0  # mm/s2
+        self.max_vel = 500.0  # mm/s
+        self.max_accel = 5000.0 # mm/s2
+        self.serial = "67839254"
+        self.max_pos = 100.0  # mm
 
 class TaperPullingMotors:
     """
@@ -633,10 +722,12 @@ class TaperPullingMotors:
         This class contains the motors relevant to the taper pulling process.
         Initialization does not connect to any device.
         """
-        self.brusher = Brusher()
-        self.flame_io = FlameIO()
-        self.left_puller = LeftPuller()
-        self.right_puller = RightPuller()
+        self.lib_tdc = KinesisDLL(MotorType.TCUBE_DCSERVO)
+        self.lib_tbm = KinesisDLL(MotorType.TCUBE_BRUSHLESS)
+        self.brusher = Brusher(self.lib_tdc)
+        self.flame_io = FlameIO(self.lib_tdc)
+        self.left_puller = LeftPuller(self.lib_tbm)
+        self.right_puller = RightPuller(self.lib_tbm)
         
     def __del__(self):
         self.close()
@@ -650,7 +741,7 @@ class TaperPullingMotors:
         self.left_puller.close()
         self.right_puller.close()
         
-    def initialize_motor(self, motor_type: MotorTypes, serial: str="", poll_ms=100, simulate=False):
+    def initialize_motor(self, motor_type: MotorTypes, serial: str="", poll_ms=200, simulate=False):
         """
         Connect to, configure, and home (if needed) a motor.
         If a parameter is not given, its current value (default at initialization) is used
@@ -677,9 +768,13 @@ class TaperPullingMotors:
         if serial == "":
             serial = motor.serial
         
+        print(f"Initializing {motor_type.name}...")
         motor.initing = True
         motor.connect(serial, poll_ms, simulate)
         motor.initialize()
+        motor.set_velocity(motor.vel)
+        motor.set_acceleration(motor.accel)
         motor.initing = False
+        print(f"{motor_type.name} initialization OK: {motor.ok}")
             
         return motor.ok
