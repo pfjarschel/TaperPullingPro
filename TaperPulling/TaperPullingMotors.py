@@ -660,6 +660,7 @@ class TaperPullingMotors:
             serial (str): Serial number. Defaults to empty.
             simulate (bool, optional): Simulate this motor. Defaults to False.
         """
+        
         motor = None
         match motor_type:
             case self.MotorTypes.BRUSHER:
@@ -672,6 +673,9 @@ class TaperPullingMotors:
                 motor = self.right_puller
             case _:  # Default case. Does nothing if a valid motor type is not specified.
                 return 0
+            
+        if serial == "":
+            serial = motor.serial
         
         motor.initing = True
         motor.connect(serial, poll_ms, simulate)
