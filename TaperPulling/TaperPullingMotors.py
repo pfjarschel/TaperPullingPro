@@ -49,6 +49,46 @@ class GenericTLMotor:
         def run(self):
             while not self.finished.wait(self.interval):
                 self.function(*self.args, **self.kwargs)
+    
+    # Some interfaces for DLL structures    
+    class TLI_DeviceInfo(Structure):
+        # enum MOT_MotorTypes
+        MOT_NotMotor = c_int(0)
+        MOT_DCMotor = c_int(1)
+        MOT_StepperMotor = c_int(2)
+        MOT_BrushlessMotor = c_int(3)
+        MOT_CustomMotor = c_int(100)
+        MOT_MotorTypes = c_int
+        
+        _fields_ = [("typeID", c_ulong),
+                    ("description", (65 * c_char)),
+                    ("serialNo", (9 * c_char)),
+                    ("PID", c_ushort),
+                    ("isKnownType", c_bool),
+                    ("motorType", MOT_MotorTypes),
+                    ("isPiezoDevice", c_bool),
+                    ("isLaser", c_bool),
+                    ("isCustomType", c_bool),
+                    ("isRack", c_bool),
+                    ("maxChannels", c_short)]
+    
+    class MOT_HomingParameters(Structure):
+         # enum MOT_TravelDirection
+        MOT_TravelDirectionUndefined = c_short(0x00)
+        MOT_Forwards = c_short(0x01)
+        MOT_Reverse = c_short(0x02)
+        MOT_TravelDirection = c_short
+
+        # enum MOT_HomeLimitSwitchDirection
+        MOT_LimitSwitchDirectionUndefined = c_short(0x00)
+        MOT_ReverseLimitSwitch = c_short(0x01)
+        MOT_ForwardLimitSwitch = c_short(0x04)
+        MOT_HomeLimitSwitchDirection = c_short
+        
+        _fields_ = [("direction", MOT_TravelDirection),
+                    ("limitSwitch", MOT_HomeLimitSwitchDirection),
+                    ("velocity", c_uint),
+                    ("offsetDistance", c_uint)]
         
     # Movement
     vel = 1.0
@@ -86,6 +126,8 @@ class GenericTLMotor:
     messageType = c_ushort()
     messageId = c_ushort()
     messageData = c_uint32()
+    device_info = TLI_DeviceInfo()
+    homing_params = MOT_HomingParameters()
     
     def __init__(self, motor_type: MotorType):
         self.move_loop = None
@@ -142,6 +184,15 @@ class GenericTLMotor:
                         eval(f"self.lib.{self.lib_prfx}_EnableChannel(self.serial_c)")
                         time.sleep(0.5)
                         eval(f"self.lib.{self.lib_prfx}_RequestSettings(self.serial_c)")      
+                        self.lib.TLI_GetDeviceInfo(self.serial_c, byref(self.device_info))
+                        eval(f"self.lib.{self.lib_prfx}_RequestHomingParams(self.serial_c)")
+                        time.sleep(0.1)
+                        eval(f"self.lib.{self.lib_prfx}_GetHomingParamsBlock(self.serial_c, byref(self.homing_params))")
+                        # Force homing direction to reverse (towards 0)
+                        if self.homing_params.direction != 2:
+                            self.homing_params.direction = c_short(0x02)
+                            eval(f"self.lib.{self.lib_prfx}_SetHomingParamsBlock(self.serial_c, byref(self.homing_params))")
+                            time.sleep(0.5)
                         
                         self.ok = True
                     else:
@@ -330,7 +381,7 @@ class GenericTLMotor:
         """
         Perform homing procedure
         """
-        if self.ok:
+        if self.ok:            
             self.homed = self.get_homed()
             if not self.homed or force:
                 self.stop(0)
