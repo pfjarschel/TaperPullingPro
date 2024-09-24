@@ -60,8 +60,7 @@ class TaperPullingDAQ:
         """
         Gets all NI DAQ devices present in the system.
         """
-        if self.local_system == None:
-            self.local_system = nidaqmx.system.System.local()
+        self.local_system = nidaqmx.system.System.local()
         for device in self.local_system.devices:
             self.devices.append(device)
             self.devices_names.append(device.name)

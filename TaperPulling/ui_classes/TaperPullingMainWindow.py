@@ -267,14 +267,14 @@ class MainWindow(FormUI, WindowUI):
         
         # DAQ connections
         self.srateSpin.valueChanged.connect(self.daq_init)
-        self.daqChannelCombo.currentIndexChanged.connect(self.daq_init)
+        self.daqChannelCombo.currentIndexChanged.connect(self.update_daq_combos)
         self.daqConfCombo.currentIndexChanged.connect(self.daq_init)
-        self.daqClockCombo.currentIndexChanged.connect(self.daq_init)
-        self.daqminvSpin.valueChanged.connect(self.daq_init)
-        self.daqmaxvSpin.valueChanged.connect(self.daq_init)
+        self.daqmodeCombo.currentIndexChanged.connect(self.daq_init)
+        self.daqvrangeSpin.valueChanged.connect(self.daq_init)
         self.responSpin.valueChanged.connect(self.daq_init)
         self.impedanceSpin.valueChanged.connect(self.daq_init)
         self.specsamplesSpin.valueChanged.connect(self.daq_init)
+        self.daqbufferSpin.valueChanged.connect(self.daq_init)
         
         # Motors connections
         self.resetmotorsBut.clicked.connect(self.init_motors)
@@ -350,13 +350,16 @@ class MainWindow(FormUI, WindowUI):
     def set_daq_params(self):
         self.data.daq.sampling_rate = self.srateSpin.value()
         self.data.daq.device_channel = self.daqChannelCombo.currentText()
-        self.data.daq.min_scale = self.daqminvSpin.value()
-        self.data.daq.max_scale = self.daqmaxvSpin.value()
-        self.data.daq.clock_source = self.daqClockCombo.currentText()
         self.data.daq.term_config = self.daqConfCombo.currentText()
+        self.data.daq.mode = self.daqmodeCombo.currentText()
         self.data.spectrum_points = self.specsamplesSpin.value()
         self.data.responsivity = self.responSpin.value()
         self.data.impedance = self.impedanceSpin.value()
+        self.data.set_monitor_buffer(self.daqbufferSpin.value())
+        
+        volt_ranges = self.data.daq.get_volt_ranges()
+        closest_v_i = np.abs(volt_ranges - self.daqvrangeSpin.value()).argmin()
+        self.data.daq.scale = volt_ranges[closest_v_i]
     
     def set_motors_params(self):
         # Brusher
@@ -754,6 +757,46 @@ class MainWindow(FormUI, WindowUI):
             self.data.init_daq_as_default(simulate=True)
         else:
             self.data.init_daq_as_default(simulate=False)
+    
+    def update_daq_combos(self):
+        self.data.daq.get_devices()
+        self.data.daq.get_ai_channels()
+        volt_ranges = self.data.daq.get_volt_ranges()
+        
+        prev_devch = self.daqChannelCombo.currentText()
+        prev_term = self.daqConfCombo.currentText()
+        
+        self.daqChannelCombo.clear()
+        for channel in self.data.daq.channels_names:
+            self.daqChannelCombo.addItem(channel)
+        self.daqChannelCombo.addItem("Simulation")
+        
+        if prev_devch in self.data.daq.channels_names:
+            self.daqChannelCombo.setCurrentText(prev_devch)
+        elif prev_devch == "Simulation":
+            self.daqChannelCombo.setCurrentText("Simulation")
+        else:
+            self.daqChannelCombo.setCurrentText(self.data.daq.channels_names[0])
+        
+        if self.daqChannelCombo.currentText() != "Simulation":
+            try:
+                chan_i = self.data.daq.channels_names.index(self.daqChannelCombo.currentText())
+            except:
+                chan_i = -1
+            
+            if chan_i >= 0:
+                confs = self.data.daq.get_term_configs(self.data.daq.channels[chan_i])   
+                self.daqConfCombo.clear()
+                self.daqConfCombo.addItem("DEFAULT")
+                conf_names = []
+                for conf in confs:
+                    conf_name = conf.name
+                    conf_names.append(conf_name)
+                    self.daqConfCombo.addItem(conf_name)
+                if prev_term in conf_names:
+                    self.daqConfCombo.setCurrentText(prev_term)
+            
+        self.daq_init()
     
     def set_ref_power(self):
         self.refpowIndSpin.setValue(self.transpowIndSpin.value())

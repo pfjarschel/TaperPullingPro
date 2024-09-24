@@ -141,7 +141,7 @@ class TaperPullingData:
             pass
         self.monitor_buffer_size = n
         self.monitor_buffer = np.zeros(n)
-        self.daq.buffer_size = self.init_daq_as_default(self.daq.simulate)
+        self.daq.buffer_size = n
             
     def get_single_transmission(self, wait=False):
         if wait:

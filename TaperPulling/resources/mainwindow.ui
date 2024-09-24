@@ -70,7 +70,7 @@
           <enum>QTabWidget::North</enum>
          </property>
          <property name="currentIndex">
-          <number>0</number>
+          <number>3</number>
          </property>
          <property name="elideMode">
           <enum>Qt::ElideRight</enum>
@@ -785,7 +785,7 @@
               <widget class="QComboBox" name="daqConfCombo">
                <item>
                 <property name="text">
-                 <string>default</string>
+                 <string>DEFAULT</string>
                 </property>
                </item>
                <item>
@@ -837,15 +837,20 @@
              <item>
               <widget class="QLabel" name="label_49">
                <property name="text">
-                <string>Clock Source</string>
+                <string>Mode</string>
                </property>
               </widget>
              </item>
              <item>
-              <widget class="QComboBox" name="daqClockCombo">
+              <widget class="QComboBox" name="daqmodeCombo">
                <item>
                 <property name="text">
-                 <string>OnboardClock</string>
+                 <string>FINITE</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>CONTINUOUS</string>
                 </property>
                </item>
               </widget>
@@ -971,23 +976,23 @@
                <item>
                 <widget class="QLabel" name="label_51">
                  <property name="text">
-                  <string>Min (V)</string>
+                  <string>V Range (V)</string>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="QDoubleSpinBox" name="daqminvSpin">
+                <widget class="QDoubleSpinBox" name="daqvrangeSpin">
                  <property name="keyboardTracking">
                   <bool>false</bool>
                  </property>
                  <property name="minimum">
-                  <double>-100.000000000000000</double>
+                  <double>1.000000000000000</double>
                  </property>
                  <property name="maximum">
-                  <double>100.000000000000000</double>
+                  <double>20.000000000000000</double>
                  </property>
                  <property name="value">
-                  <double>0.000000000000000</double>
+                  <double>1.000000000000000</double>
                  </property>
                 </widget>
                </item>
@@ -998,23 +1003,23 @@
                <item>
                 <widget class="QLabel" name="label_56">
                  <property name="text">
-                  <string>Max (V)</string>
+                  <string>Buffer</string>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="QDoubleSpinBox" name="daqmaxvSpin">
+                <widget class="QSpinBox" name="daqbufferSpin">
                  <property name="keyboardTracking">
                   <bool>false</bool>
                  </property>
-                 <property name="minimum">
-                  <double>-100.000000000000000</double>
-                 </property>
                  <property name="maximum">
-                  <double>100.000000000000000</double>
+                  <number>1000000</number>
+                 </property>
+                 <property name="singleStep">
+                  <number>100</number>
                  </property>
                  <property name="value">
-                  <double>10.000000000000000</double>
+                  <number>10000</number>
                  </property>
                 </widget>
                </item>
