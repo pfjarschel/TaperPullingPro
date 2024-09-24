@@ -741,7 +741,7 @@ class TaperPullingMotors:
         self.left_puller.close()
         self.right_puller.close()
         
-    def initialize_motor(self, motor_type: MotorTypes, serial: str="", poll_ms=200, simulate=False):
+    def initialize_motor(self, motor_type: MotorTypes, serial: str="", poll_ms=50, simulate=False):
         """
         Connect to, configure, and home (if needed) a motor.
         If a parameter is not given, its current value (default at initialization) is used

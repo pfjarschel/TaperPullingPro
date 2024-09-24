@@ -834,7 +834,6 @@ class MainWindow(FormUI, WindowUI):
         if self.data.spectrogram_running:
             self.data.stop_spectrogram()
         self.enable_controls()
-        self.core.motors.flame_io.go_to(0.0)
         self.core.stop_pulling()
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())

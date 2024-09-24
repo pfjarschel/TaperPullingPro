@@ -47,6 +47,10 @@ class TaperPullingCore:
     cleaving = False            # Opt. Stage 6
     looping = False             # Opt. Stage 6
     pos_check_precision = 0.1   # Precision expected when checking for positions (mm)
+    print_lps = False
+    loop_i = 0
+    max_i = 100
+    loop_time = 0.0
     
     # Devices to control
     motors = None
@@ -199,6 +203,7 @@ class TaperPullingCore:
     
     def start_update(self):
         self.stop_update()
+        self.loop_i = 0
         self.update_loop = None
         self.update_loop = self.Loop(self.poll_interval/1000.0, self.update_function)
         self.update_loop.start()
@@ -216,6 +221,15 @@ class TaperPullingCore:
             # Get current time
             self.time_bef = self.time_now
             self.time_now = time.time()
+            
+            if self.print_lps:
+                if self.loop_i == 0:
+                    self.loop_time = self.time_now
+                elif self.loop_i >= self.max_i:
+                    print("Loops per second:", int(self.max_i/(time.time() - self.loop_time)))
+                    self.loop_i = 0
+                    self.loop_time = self.time_now
+                self.loop_i += 1
             
             # Get current positions
             self.brusher_pos = self.motors.brusher.get_position()
@@ -340,10 +354,10 @@ class TaperPullingCore:
             self.pr_a0 = self.motors.right_puller.accel
             self.pr_v0 = self.motors.right_puller.vel
             
-            self.motors.left_puller.set_acceleration(5000)
-            self.motors.left_puller.set_velocity(500)
-            self.motors.right_puller.set_acceleration(5000)
-            self.motors.right_puller.set_velocity(500)
+            self.motors.left_puller.set_acceleration(900)
+            self.motors.left_puller.set_velocity(100)
+            self.motors.right_puller.set_acceleration(900)
+            self.motors.right_puller.set_velocity(100)
             
             self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
             self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
@@ -455,9 +469,9 @@ class TaperPullingCore:
         
         # Stop all motors
         self.motors.brusher.stop()
-        self.motors.flame_io.stop()
         self.motors.left_puller.stop()
         self.motors.right_puller.stop()
+        time.sleep(0.5)
         
         # Retract Flame I/O
         self.motors.flame_io.go_to(0.0)
