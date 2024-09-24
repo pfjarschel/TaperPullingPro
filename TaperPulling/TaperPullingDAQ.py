@@ -16,7 +16,9 @@ board.
 # =============================================================================
 
 import numpy as np
-#TODO: NI DAQ imports
+
+import nidaqmx
+from nidaqmx.constants import AcquisitionType, TerminalConfiguration
 
 class TaperPullingDAQ:
     """
@@ -24,66 +26,127 @@ class TaperPullingDAQ:
     It can scan and select devices and channels for measurement
     """
     # Control
+    local_system = None
     devices = []
+    devices_names = []
     channels = []
+    channels_names = []
+    task = None
     
     # Measurement
     sampling_rate = 1000.0  # Hz
     device_channel = "Dev 1/ai0"
-    term_config = "default"
-    clock_source = "OnboardClock"
-    min_scale = -10.0  # V
-    max_scale = 10.0  # V
+    term_config = "Default"
+    scale = 10.0  # V
+    mode = AcquisitionType.FINITE
+    buffer_size = 10000
     paused = False
+    task_running = False
     ok = False
     simulate = False # Simulate DAQ acquisition
     
     def __init__(self):
         """
         This class contains the code to connect to and use our NI DAQ.
-        Nothing is done directly at instantiation.
+        Nothing is done directly at instantiation, except getting system info.
         """
-        #TODO: code to initialize the class
-        print("TaperDAQ loaded")
+        
+        self.local_system = nidaqmx.system.System.local()
+        
+    def __del__(self):
+        self.stop_measuring()
         
     def get_devices(self):
         """
         Gets all NI DAQ devices present in the system.
         """
-        #TODO: code to get devices
-        self.devices = ["Dev 1"]
+        if self.local_system == None:
+            self.local_system = nidaqmx.system.System.local()
+        for device in self.local_system.devices:
+            self.devices.append(device)
+            self.devices_names.append(device.name)
+            
+        return self.devices
         
-    def get_ai_channels(self):
+    def get_ai_channels(self, dev=None):
         """
-        Gets all analog in channels from all NI DAQ boards present in the system.
+        Gets all analog in channels from a device (or all).
         """
-        #TODO: code to get channels
-        self.channels = ["ai0"]
+        channels = []
+        if dev != None:
+            for channel in dev.ai_physical_chans:
+                self.channels.append(channel)
+                self.channels_names.append(channel.name)
+        else:
+            for dev in self.devices:
+                for channel in dev.ai_physical_chans:
+                    self.channels.append(channel)
+                    self.channels_names.append(channel.name)
+            
+        return self.channels
+    
+    def get_volt_ranges(self, dev):
+        """
+        Gets the AI voltage ranges for a device.
+        """
+        ranges = []
+        dev_ranges = dev.ai_voltage_rngs
+        for i in range(len(dev_ranges)//2):
+            ranges.append(np.abs(dev_ranges[i*2]))
+            
+        return ranges
+    
+    def get_term_configs(self, channel):
+        """
+        Gets the terminal configs for a channel.
+        """
+        configs = []
+        chan_configs = channel.ai_term_cfgs
+        for conf in chan_configs:
+            configs.append(conf)
+            
+        return configs
         
-    def setup_daq(self, srate: float, dev_ch: str, min_v: float, max_v: float, term="default", clock="OnboardClock", simulate=False):
+    def setup_daq(self, srate: float, dev_ch: str, scale: float, term="DEFAULT", 
+                  mode="FINITE", buffer_size=10000, simulate=False):
         """
         Sets up DAQ device and channel for measurement
         
         Args:
             srate (float): Sampling rate
             dev_ch (str): Device and channel in the form of "Dev #/ai#"
-            min_v (float): Minmum voltage scale
-            max_v (float): Maximum voltage scale
-            term (str, optional): Terminals configuration. Defaults to "default".
-            clock (str, optional): Clock source. Defaults to "OnboardClock".
+            scale (float): Voltage scale (from -X to X)
+            term (TerminalConfiguration name, optional): Terminals configuration. Defaults to DEFAULT.
+            mode (AcquisitionType name, optional): Acquisition mode. Defaults to FINITE.
+            buffer_size (int, optional): Device buffer size Can't read more than this in one go.
             simulate (bool, optional): Simulate DAQ acquisition. Defaults to False.
         """
         self.sampling_rate = srate
         self.device_channel = dev_ch
-        self.min_scale = min_v
-        self.max_scale = max_v
-        self.term_config = term
-        self.clock_source = clock
+        self.scale = scale
+        self.term_config = TerminalConfiguration[term]
+        self.mode = AcquisitionType[mode]
+        self.buffer_size = buffer_size
         self.simulate = simulate
         
         if not self.simulate:
-            #TODO: code to setup daq
-            self.ok = True
+            try:
+                if self.task_running:
+                    self.task.stop()
+            except:
+                pass
+            try:
+                self.task = nidaqmx.Task()
+                self.task.ai_channels.add_ai_voltage_chan(dev_ch, min_val=-1*scale, max_val=scale,
+                                                          terminal_config=self.term_config)
+                self.task.timing.cfg_samp_clk_timing(srate, sample_mode=self.mode, 
+                                                     samps_per_chan=buffer_size + 1)
+                self.ok = True
+                self.start_measuring()
+            except Exception as e:
+                print("Error starting DAQ task!")
+                print(e)
+                self.ok = False
             
     def read_single(self) -> float:
         """
@@ -94,12 +157,12 @@ class TaperPullingDAQ:
             float: Value read.
         """
         if self.ok and not self.paused:
-            # TODO: code to read a single value
-            return 0.0
+            return self.task.read()
         elif self.simulate and not self.paused:
-            avg = (self.min_scale + self.max_scale)/2
-            span = np.abs(self.max_scale - self.min_scale)
-            return avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000))/2000000.0
+            avg = 0.0
+            offs = 1.0
+            span = 2*self.scale
+            return offs + avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000))/2000000.0
         else:
             return 0.0
         
@@ -113,22 +176,42 @@ class TaperPullingDAQ:
             np.ndarray: Array of values read.
         """
         if self.ok and not self.paused:
-            # TODO: code to read multiple values
-            return np.zeros(n)
+            return np.array(self.task.read(n))
         elif self.simulate and not self.paused:
-            avg = (self.min_scale + self.max_scale)/2
-            span = np.abs(self.max_scale - self.min_scale)
-            return avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000), n)/50000.0
+            avg = 0.0
+            offs = 1.0
+            span = 2*self.scale
+            return offs + avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000), n)/2000000.0
         else:
             return np.zeros(n)
         
+    def start_measuring(self):
+        """
+        Starts DAQ operation, if mode is continuous.
+        """
+        if self.ok:
+            if self.mode == AcquisitionType.CONTINUOUS:
+                self.task_running = True
+                self.task.start()
+                
+    def stop_measuring(self):
+        """
+        Starts DAQ operation, if mode is continuous.
+        """
+        try:
+            if self.task_running:
+                self.task.stop()
+        except:
+            pass
+    
     def pause(self):
         """
         Pauses DAQ operation.
         """
         if self.ok and not self.paused:
-            #TODO: code to pause DAQ
-            pass
+            self.task.stop()
+            self.task_running = False
+            self.paused = True
         elif self.simulate and not self.paused:
             self.paused = True
     
@@ -137,8 +220,10 @@ class TaperPullingDAQ:
         Resumes DAQ operation.
         """
         if self.ok and self.paused:
-            #TODO: code to resume DAQ
-            pass
+            if self.mode == AcquisitionType.CONTINUOUS:
+                self.task.start()
+                self.task_running = True
+            self.paused = False
         elif self.simulate and self.paused:
             self.paused = False
         
