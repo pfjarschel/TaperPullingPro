@@ -661,12 +661,9 @@ class MainWindow(FormUI, WindowUI):
                 self.rightHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             else:
                 self.core.motors.right_puller.home()
-
-            print(connected, homed)
             
             self.busy = False
             if all(connected + homed):
-                print("opa")
                 self.initLoop_timer.stop()
                 self.core.running_process = True
                 self.core.standby = True
@@ -823,9 +820,6 @@ class MainWindow(FormUI, WindowUI):
         self.disable_controls()
         self.core.force_hz_edge = self.edgeStopCheck.isChecked()
         self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
-        self.core.motors.flame_io.go_to(self.flameIOMovSpin.value())
-        self.core.motors.left_puller.set_velocity(self.pullerPullVelSpin.value())
-        self.core.motors.right_puller.set_velocity(self.pullerPullVelSpin.value())
         
         self.reset_pull_stats()
         

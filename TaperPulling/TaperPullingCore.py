@@ -126,7 +126,7 @@ class TaperPullingCore:
         """        
         self.motors = TaperPullingMotors()
         
-        self.update_loop = self.Loop(self.poll_interval/1000.0, self.update_function)
+        self.start_update()
         
     def __del__(self):
         self.close()
@@ -271,7 +271,6 @@ class TaperPullingCore:
             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
             self.motors.flame_io.go_to(self.flame_io_x0)
             self.flame_approaching = True
-            print("Starting positions OK")
             print("Flame approaching...")
             print("Started brushing")
     
@@ -417,6 +416,7 @@ class TaperPullingCore:
             self.motors.right_puller.go_to(self.right_puller_x0)
             self.motors.left_puller.wait_for_movement()
             self.motors.right_puller.wait_for_movement()
+            print("Starting positions OK")
     
     def start_process(self, hotzone_function: list[list[float]]|np.ndarray):
         """
