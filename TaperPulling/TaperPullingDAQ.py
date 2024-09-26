@@ -55,6 +55,10 @@ class TaperPullingDAQ:
         
     def __del__(self):
         self.stop_measuring()
+        try:
+            self.task.close()
+        except:
+            pass
         
     def get_devices(self):
         """
@@ -83,6 +87,15 @@ class TaperPullingDAQ:
                     self.channels_names.append(channel.name)
             
         return self.channels
+    
+    def get_dev_from_name(self, dev_chan: str):
+        try:
+            dev_str = dev_chan.split("/")[0]
+            dev_idx = self.devices_names.index(dev_str)
+            return self.devices[dev_idx]
+        except:
+            print(f"Device from {dev_chan} not found")
+            return None
     
     def get_volt_ranges(self, dev):
         """
@@ -130,8 +143,8 @@ class TaperPullingDAQ:
         
         if not self.simulate:
             try:
-                if self.task_running:
-                    self.task.stop()
+                self.task.stop()
+                self.task.close()
             except:
                 pass
             try:

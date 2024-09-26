@@ -252,8 +252,11 @@ class TaperPullingData:
             self.get_single_transmission()
             
     def stop_monitor(self):
-        self.monitor_loop.cancel()
-        self.monitor_loop = None
+        try:
+            self.monitor_loop.cancel()
+            self.monitor_loop = None
+        except:
+            pass
             
     def start_spectrogram(self, from_buffer=True, smooth=0.01, window=True, sigma=0.15, wait=True):
         self.spectrogram_running = True
@@ -279,6 +282,8 @@ class TaperPullingData:
             # It is better to downsample the entire dataset before plotting, not here
             if len(self.spectra) >= self.max_spectra_points:
                 self.spectra = cv2.resize(np.array(self.spectra), (len(self.spectra_freqs), self.spectra_points)).tolist()
+                
+            print("spec")
     
     def stop_spectrogram(self):
         self.spectrogram_running = False

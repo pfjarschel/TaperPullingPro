@@ -49,6 +49,7 @@ class MainWindow(FormUI, WindowUI):
     # Flow control variables
     done_loading = False
     busy = False
+    daq_busy = False
     wait_switch = False
     main_to = 100  # ms
     
@@ -96,6 +97,7 @@ class MainWindow(FormUI, WindowUI):
             self.mainLoop_timer.stop()
             self.initLoop_timer.stop()
             self.data.stop_monitor()
+            self.data.close()
             self.core.stop_pulling()
             self.core.close()
             self.core.motors.close()
@@ -344,12 +346,15 @@ class MainWindow(FormUI, WindowUI):
         self.recalc_params()
         self.set_fiber_params()
         
+        self.update_daq_combos()
         self.daq_init()
         self.data.start_monitor()
         
     def set_daq_params(self):
+        daq_dev_chan = self.daqChannelCombo.currentText()
+        
         self.data.daq.sampling_rate = self.srateSpin.value()
-        self.data.daq.device_channel = self.daqChannelCombo.currentText()
+        self.data.daq.device_channel = daq_dev_chan
         self.data.daq.term_config = self.daqConfCombo.currentText()
         self.data.daq.mode = self.daqmodeCombo.currentText()
         self.data.spectrum_points = self.specsamplesSpin.value()
@@ -357,9 +362,12 @@ class MainWindow(FormUI, WindowUI):
         self.data.impedance = self.impedanceSpin.value()
         self.data.set_monitor_buffer(self.daqbufferSpin.value())
         
-        volt_ranges = self.data.daq.get_volt_ranges()
-        closest_v_i = np.abs(volt_ranges - self.daqvrangeSpin.value()).argmin()
-        self.data.daq.scale = volt_ranges[closest_v_i]
+        if daq_dev_chan != "Simulation":
+            volt_ranges = self.data.daq.get_volt_ranges(self.data.daq.get_dev_from_name(daq_dev_chan))
+            closest_v_i = np.abs(np.array(volt_ranges) - self.daqvrangeSpin.value()).argmin()
+            self.data.daq.scale = volt_ranges[closest_v_i]
+        else:
+            self.data.daq.scale = self.daqvrangeSpin.value()
     
     def set_motors_params(self):
         # Brusher
@@ -752,51 +760,67 @@ class MainWindow(FormUI, WindowUI):
         
     # DAQ functions
     def daq_init(self):
-        self.set_daq_params()
-        if self.daqChannelCombo.currentText() == "Simulation":
-            self.data.init_daq_as_default(simulate=True)
-        else:
-            self.data.init_daq_as_default(simulate=False)
+        if not self.daq_busy:
+            self.daq_busy = True
+            self.set_daq_params()
+            if self.daqChannelCombo.currentText() == "Simulation":
+                self.data.init_daq_as_default(simulate=True)
+            else:
+                self.data.init_daq_as_default(simulate=False)
+            self.daq_busy = False
     
     def update_daq_combos(self):
-        self.data.daq.get_devices()
-        self.data.daq.get_ai_channels()
-        volt_ranges = self.data.daq.get_volt_ranges()
-        
-        prev_devch = self.daqChannelCombo.currentText()
-        prev_term = self.daqConfCombo.currentText()
-        
-        self.daqChannelCombo.clear()
-        for channel in self.data.daq.channels_names:
-            self.daqChannelCombo.addItem(channel)
-        self.daqChannelCombo.addItem("Simulation")
-        
-        if prev_devch in self.data.daq.channels_names:
-            self.daqChannelCombo.setCurrentText(prev_devch)
-        elif prev_devch == "Simulation":
-            self.daqChannelCombo.setCurrentText("Simulation")
-        else:
-            self.daqChannelCombo.setCurrentText(self.data.daq.channels_names[0])
-        
-        if self.daqChannelCombo.currentText() != "Simulation":
-            try:
-                chan_i = self.data.daq.channels_names.index(self.daqChannelCombo.currentText())
-            except:
-                chan_i = -1
+        if not self.daq_busy:
+            self.daq_busy = True
+            self.data.daq.get_devices()
+            self.data.daq.get_ai_channels()
             
-            if chan_i >= 0:
-                confs = self.data.daq.get_term_configs(self.data.daq.channels[chan_i])   
-                self.daqConfCombo.clear()
-                self.daqConfCombo.addItem("DEFAULT")
-                conf_names = []
-                for conf in confs:
-                    conf_name = conf.name
-                    conf_names.append(conf_name)
-                    self.daqConfCombo.addItem(conf_name)
-                if prev_term in conf_names:
-                    self.daqConfCombo.setCurrentText(prev_term)
+            daq_dev_chan = self.daqChannelCombo.currentText()
             
-        self.daq_init()
+            prev_devch = self.daqChannelCombo.currentText()
+            prev_term = self.daqConfCombo.currentText()
+            
+            self.daqChannelCombo.clear()
+            for channel in self.data.daq.channels_names:
+                self.daqChannelCombo.addItem(channel)
+            self.daqChannelCombo.addItem("Simulation")
+            
+            if prev_devch in self.data.daq.channels_names:
+                self.daqChannelCombo.setCurrentText(prev_devch)
+            elif prev_devch == "Simulation":
+                self.daqChannelCombo.setCurrentText("Simulation")
+            else:
+                self.daqChannelCombo.setCurrentText(self.data.daq.channels_names[0])
+            
+            if self.daqChannelCombo.currentText() != "Simulation":
+                try:
+                    chan_i = self.data.daq.channels_names.index(self.daqChannelCombo.currentText())
+                except:
+                    chan_i = -1
+                
+                if chan_i >= 0:
+                    confs = self.data.daq.get_term_configs(self.data.daq.channels[chan_i])   
+                    self.daqConfCombo.clear()
+                    self.daqConfCombo.addItem("DEFAULT")
+                    conf_names = []
+                    for conf in confs:
+                        conf_name = conf.name
+                        conf_names.append(conf_name)
+                        self.daqConfCombo.addItem(conf_name)
+                    if prev_term in conf_names:
+                        self.daqConfCombo.setCurrentText(prev_term)
+                        
+            if daq_dev_chan != "Simulation":
+                volt_ranges = self.data.daq.get_volt_ranges(self.data.daq.get_dev_from_name(daq_dev_chan))
+            else:
+                volt_ranges = [0.01, 100]
+            self.daqvrangeSpin.setMinimum(volt_ranges[0])
+            self.daqvrangeSpin.setMaximum(volt_ranges[-1])
+                
+            self.daq_busy = False
+            
+            self.daq_init()
+            
     
     def set_ref_power(self):
         self.refpowIndSpin.setValue(self.transpowIndSpin.value())
