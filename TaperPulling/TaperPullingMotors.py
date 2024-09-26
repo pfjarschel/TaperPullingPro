@@ -277,34 +277,35 @@ class GenericTLMotor:
         
     def calibrate_units(self, mult=100.0):
         if self.ok:
-            self.units_mult = mult
-            self.units = [0, 0, 0]
-            real = c_double(mult)
-            self.dev_x = c_int(0)
-            self.dev_v = c_int(0)
-            self.dev_a = c_int(0)
+            if not self.unit_cal:
+                self.units_mult = mult
+                self.units = [0, 0, 0]
+                real = c_double(mult)
+                self.dev_x = c_int(0)
+                self.dev_v = c_int(0)
+                self.dev_a = c_int(0)
 
-            tries = 0
-            while not all(self.units):
-                eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_x), 0)")
-                time.sleep(0.5)
-                eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_v), 1)")
-                time.sleep(0.5)
-                eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_a), 2)")
-                time.sleep(0.5)
-                self.units[0] = self.dev_x.value
-                self.units[1] = self.dev_v.value
-                self.units[2] = self.dev_a.value
-                
-                if not all(self.units):
-                    tries += 1
-                    time.sleep(1.0)
-                if tries > 10:
-                    self.error = True
-                    self.ok = False
-                    return False
-                
-            self.unit_cal = True
+                tries = 0
+                while not all(self.units):
+                    eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_x), 0)")
+                    time.sleep(0.5)
+                    eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_v), 1)")
+                    time.sleep(0.5)
+                    eval(f"self.lib.{self.lib_prfx}_GetDeviceUnitFromRealValue(self.serial_c, real, byref(self.dev_a), 2)")
+                    time.sleep(0.5)
+                    self.units[0] = self.dev_x.value
+                    self.units[1] = self.dev_v.value
+                    self.units[2] = self.dev_a.value
+                    
+                    if not all(self.units):
+                        tries += 1
+                        time.sleep(1.0)
+                    if tries > 10:
+                        self.error = True
+                        self.ok = False
+                        return False
+                    
+                self.unit_cal = True
         return self.unit_cal
 
     def real2dev(self, real_val, mode=0):
@@ -652,6 +653,9 @@ class Brusher(GenericTLMotor):
         self.max_accel = self.accel # mm/s2
         self.serial = "83837733"
         self.max_pos = 50.0  # mm
+        self.units = [3455496, 77296962, 26384]
+        self.units_mult = 100.0
+        self.unit_cal = True
 
 class FlameIO(GenericTLMotor):
     """
@@ -668,6 +672,9 @@ class FlameIO(GenericTLMotor):
         self.max_accel = self.accel # mm/s2
         self.serial = "83837788"
         self.max_pos = 25.0  # mm
+        self.units = [3455496, 77296962, 26384]
+        self.units_mult = 100.0
+        self.unit_cal = True
         
 class LeftPuller(GenericTLMotor):
     """
@@ -685,6 +692,9 @@ class LeftPuller(GenericTLMotor):
         self.max_accel = 5000.0 # mm/s2
         self.serial = "67838837"
         self.max_pos = 100.0  # mm
+        self.units = [200000, 1342157, 137]
+        self.units_mult = 100.0
+        self.unit_cal = True
         
 class RightPuller(GenericTLMotor):
     """
@@ -702,6 +712,9 @@ class RightPuller(GenericTLMotor):
         self.max_accel = 5000.0 # mm/s2
         self.serial = "67839254"
         self.max_pos = 100.0  # mm
+        self.units = [200000, 1342157, 137]
+        self.units_mult = 100.0
+        self.unit_cal = True
 
 class TaperPullingMotors:
     """
