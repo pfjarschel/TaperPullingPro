@@ -344,7 +344,6 @@ class TaperPullingCore:
             print("Stopped")
     
     def perform_cleave(self):
-        if not self.cleave_started:
             self.pl_a0 = self.motors.right_puller.accel
             self.pl_v0 = self.motors.right_puller.vel
             self.pr_a0 = self.motors.right_puller.accel
