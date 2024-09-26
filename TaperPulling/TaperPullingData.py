@@ -90,6 +90,12 @@ class TaperPullingData:
         self.spectrogram_loop = None
         self.monitor_loop = None
         
+    def __del__(self):
+        self.close()
+        
+    def close(self):
+        self.daq.stop_measuring()
+        
     def init_daq_as_default(self, simulate=False):
         while self.daq_busy:
             pass
@@ -100,24 +106,24 @@ class TaperPullingData:
         if len(self.daq.channels) > 0 or simulate:
             self.daq.setup_daq(self.daq.sampling_rate,
                                self.daq.device_channel,
-                               self.daq.min_scale,
-                               self.daq.max_scale,
+                               self.daq.scale,
                                self.daq.term_config,
-                               self.daq.clock_source,
+                               self.daq.mode,
+                               self.monitor_buffer_size,
                                simulate)
             self.sampling_rate = self.daq.sampling_rate
         self.daq_busy = False
             
-    def init_daq(self, srate: float, dev_ch: str, min_v: float, max_v: float, term: str = "default",
-                 clock: str = "OnboardClock", simulate: bool = False):
+    def init_daq(self, srate: float, dev_ch: str, scale: float, term="DEFAULT", 
+                  mode="CONTINUOUS", buffer_size=10000, simulate=False):
         while self.daq_busy:
             pass
         self.daq_busy = True
         self.daq.get_devices()
         if len(self.daq.devices) > 0:
             self.daq.get_ai_channels()
-        if len(self.daq.channels) > 0:
-            self.daq.setup_daq(srate, dev_ch, min_v, max_v, term, clock, simulate)
+        if len(self.daq.channels) > 0 and (dev_ch in self.daq.channels_names):
+            self.daq.setup_daq(srate, dev_ch, scale, term, mode, buffer_size, simulate)
             self.sampling_rate = self.daq.sampling_rate
         self.daq_busy = False
             
@@ -128,13 +134,14 @@ class TaperPullingData:
         self.clear_spectrogram()
         
         if self.daq.ok:
-            self.init_daq_as_default()
+            self.init_daq_as_default(self.daq.simulate)
             
     def set_monitor_buffer(self, n: int=10240):
         while self.daq_busy:
             pass
         self.monitor_buffer_size = n
         self.monitor_buffer = np.zeros(n)
+        self.daq.buffer_size = n
             
     def get_single_transmission(self, wait=False):
         if wait:
@@ -245,8 +252,11 @@ class TaperPullingData:
             self.get_single_transmission()
             
     def stop_monitor(self):
-        self.monitor_loop.cancel()
-        self.monitor_loop = None
+        try:
+            self.monitor_loop.cancel()
+            self.monitor_loop = None
+        except:
+            pass
             
     def start_spectrogram(self, from_buffer=True, smooth=0.01, window=True, sigma=0.15, wait=True):
         self.spectrogram_running = True
@@ -272,6 +282,8 @@ class TaperPullingData:
             # It is better to downsample the entire dataset before plotting, not here
             if len(self.spectra) >= self.max_spectra_points:
                 self.spectra = cv2.resize(np.array(self.spectra), (len(self.spectra_freqs), self.spectra_points)).tolist()
+                
+            print("spec")
     
     def stop_spectrogram(self):
         self.spectrogram_running = False
