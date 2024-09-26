@@ -108,10 +108,6 @@ class TaperPullingCore:
     
     # Other vars
     cleave_dist = 5.0
-    cleave_l = 0.0
-    cleave_r = 0.0
-    cleave_started = False
-    cleave_ended = False
     pl_v0 = [0.0, 0.0]
     pl_a0 = [0.0, 0.0]
     pr_v0 = [0.0, 0.0]
@@ -359,32 +355,16 @@ class TaperPullingCore:
             self.motors.right_puller.set_acceleration(900)
             self.motors.right_puller.set_velocity(100)
             
-            self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
-            self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
+            self.motors.left_puller.move_relative(-self.cleave_dist)
+            self.motors.right_puller.move_relative(-self.cleave_dist)
+            time.sleep(2.0)
             
-            self.cleave_l = self.puller_left_pos + self.cleave_dist*self.puller_left_dir
-            self.cleave_r = self.puller_right_pos + self.cleave_dist*self.puller_right_dir
-            
-            self.cleave_started = True
-        elif not self.cleave_ended:
-            lok = False
-            rok = False
-            if (self.puller_left_pos - self.cleave_l)*self.puller_left_dir >= 0.0:
-                self.motors.left_puller.stop()
-                lok = True
-            if (self.puller_right_pos - self.cleave_r)*self.puller_right_dir >= 0.0:
-                self.motors.right_puller.stop()
-                rok = True
-            if lok and rok:
-                self.cleave_ended = True
-        elif self.cleave_ended:
-            self.cleaving = False
-            self.cleave_started = False
-            self.cleave_ended = False
             self.motors.left_puller.set_acceleration(self.pl_a0)
             self.motors.left_puller.set_velocity(self.pl_v0)
             self.motors.right_puller.set_acceleration(self.pr_a0)
             self.motors.right_puller.set_velocity(self.pr_v0)
+            
+            self.cleaving = False
             
     def perform_loop(self):
         if not self.loop_started:
