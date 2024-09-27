@@ -278,7 +278,6 @@ class TaperPullingCore:
         brusher = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
                (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
         if left and right and brusher:
-            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
             self.motors.flame_io.go_to(self.flame_io_x0)
             self.flame_approaching = True
             print("Flame approaching...")
@@ -313,24 +312,26 @@ class TaperPullingCore:
             print("Pulling ended")
     
     def check_brushing(self):
-        if self.motors.brusher.moving == self.motors.brusher.MoveDirection.STOPPED:
-            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
-        if self.brusher_enhance_edge and False:
-            pass
-        else:
-            l = self.brusher_x0 - hz/2.0
-            r = self.brusher_x0 + hz/2.0
-        if (self.brusher_pos < l and self.brusher_dir == -1) or \
-            self.brusher_pos > r and self.brusher_dir == 1:
-            self.rhz_edges.append(self.brusher_pos)
-            self.brusher_dir = -1*self.brusher_dir
-            self.motors.brusher.stop(0)
-            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+        if hz >= self.motors.brusher.min_span:
+            if self.motors.brusher.moving == self.motors.brusher.MoveDirection.STOPPED:
+                self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+            if self.brusher_enhance_edge and False:
+                pass
+            else:
+                l = self.brusher_x0 - hz/2.0
+                r = self.brusher_x0 + hz/2.0
+            if (self.brusher_pos < l and self.brusher_dir == -1) or \
+                self.brusher_pos > r and self.brusher_dir == 1:
+                self.rhz_edges.append(self.brusher_pos)
+                self.brusher_dir = -1*self.brusher_dir
+                self.motors.brusher.stop(0)
+                self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
     
     def check_stopping(self):
         stop_ok = False
-        if self.force_hz_edge:
+        hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
+        if self.force_hz_edge and hz >= self.motors.brusher.min_span:
             l = self.brusher_x0 - self.hotzone_function[1][-1]/2.0
             r = self.brusher_x0 + self.hotzone_function[1][-1]/2.0
             if (self.brusher_pos <= l  or self.brusher_pos >= r):

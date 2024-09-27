@@ -658,6 +658,7 @@ class Brusher(GenericTLMotor):
         self.units = [3455496, 77296962, 26384]
         self.units_mult = 100.0
         self.unit_cal = True
+        self.min_span = 0.1
 
 class FlameIO(GenericTLMotor):
     """

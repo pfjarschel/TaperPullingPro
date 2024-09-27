@@ -373,6 +373,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.brusher.set_velocity(self.brusherVelSpin.value())
         self.core.motors.brusher.set_acceleration(self.brusherAccelSpin.value())
         self.core.brusher_x0 = self.brusherInitPosSpin.value()
+        self.core.motors.brusher.min_span = self.brusherMinSpanSpin.value()
         if self.revdirCheck.isChecked():
             self.core.brusher_dir0 = -1
         else:
@@ -1007,6 +1008,7 @@ class MainWindow(FormUI, WindowUI):
         self.graph_spec.flush_events()
         
     def update_minimum_hz(self):
+        self.core.motors.brusher.min_span = self.brusherMinSpanSpin.value()
         self.min_hz = self.fSizeSpin.value() + self.brusherMinSpanSpin.value()
         self.update_graph(np.array([[0.0, self.total_to_pull], [self.min_hz, self.min_hz]]), 
                           self.graph_hz_minline, self.graph_hz_ax, self.graph_hz)
