@@ -624,25 +624,13 @@ class MainWindow(FormUI, WindowUI):
             homed = [False]*4
             
             if self.core.motors.brusher.ok:
-                # self.brInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[0] = True
-            # elif self.core.motors.brusher.error:
-            #     self.brInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             if self.core.motors.flame_io.ok:
-                # self.fioInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[1] = True
-            # elif self.core.motors.flame_io.error:
-            #     self.fioInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             if self.core.motors.left_puller.ok:
-                # self.leftInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[2] = True
-            # elif self.core.motors.left_puller.error:
-            #     self.leftInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             if self.core.motors.right_puller.ok:
-                # self.rightInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[3] = True
-            # elif self.core.motors.right_puller.error:
-            #     self.rightInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
             if self.core.motors.brusher.homed:
                 self.brHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
@@ -732,8 +720,6 @@ class MainWindow(FormUI, WindowUI):
         if self.core.pulling:
             if not self.data.spectrogram_running:
                 self.data.cutoff_f = self.pullerPullVelSpin.value()*1000
-                # self.data.cutoff_f = self.data.sampling_rate
-                # self.data.cutoff_f = 100
                 self.data.start_spectrogram(True, 0.0, True, 0.15, True)
             
             if len(self.data.spectra) > 0:
