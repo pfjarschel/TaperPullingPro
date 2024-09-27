@@ -586,30 +586,30 @@ class MainWindow(FormUI, WindowUI):
             self.pullRightIndSlider.setValue(int(1000.0*r_pos/self.core.motors.right_puller.max_pos))
             
             # Update leds
-            if self.core.motors.brusher.ok and self.core.motors.brusher.moving == self.core.motors.brusher.MoveDirection.STOPPED:
+            if self.core.motors.brusher.ok and self.core.motors.brusher.movement == self.core.motors.brusher.MoveDirection.STOPPED:
                 self.brInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-            elif self.core.motors.brusher.ok and self.core.motors.brusher.moving != self.core.motors.brusher.MoveDirection.STOPPED:
+            elif self.core.motors.brusher.ok and self.core.motors.brusher.movement != self.core.motors.brusher.MoveDirection.STOPPED:
                 self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             elif self.core.motors.brusher.error:
                 self.brInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
-            if self.core.motors.flame_io.ok and self.core.motors.flame_io.moving == self.core.motors.flame_io.MoveDirection.STOPPED:
+            if self.core.motors.flame_io.ok and self.core.motors.flame_io.movement == self.core.motors.flame_io.MoveDirection.STOPPED:
                 self.fioInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-            elif self.core.motors.flame_io.ok and self.core.motors.flame_io.moving != self.core.motors.flame_io.MoveDirection.STOPPED:
+            elif self.core.motors.flame_io.ok and self.core.motors.flame_io.movement != self.core.motors.flame_io.MoveDirection.STOPPED:
                 self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             elif self.core.motors.flame_io.error:
                 self.fioInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
-            if self.core.motors.left_puller.ok and self.core.motors.left_puller.moving == self.core.motors.left_puller.MoveDirection.STOPPED:
+            if self.core.motors.left_puller.ok and self.core.motors.left_puller.movement == self.core.motors.left_puller.MoveDirection.STOPPED:
                 self.leftInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-            elif self.core.motors.left_puller.ok and self.core.motors.left_puller.moving != self.core.motors.left_puller.MoveDirection.STOPPED:
+            elif self.core.motors.left_puller.ok and self.core.motors.left_puller.movement != self.core.motors.left_puller.MoveDirection.STOPPED:
                 self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             elif self.core.motors.left_puller.error:
                 self.leftInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
-            if self.core.motors.right_puller.ok and self.core.motors.right_puller.moving == self.core.motors.right_puller.MoveDirection.STOPPED:
+            if self.core.motors.right_puller.ok and self.core.motors.right_puller.movement == self.core.motors.right_puller.MoveDirection.STOPPED:
                 self.rightInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-            elif self.core.motors.right_puller.ok and self.core.motors.right_puller.moving != self.core.motors.right_puller.MoveDirection.STOPPED:
+            elif self.core.motors.right_puller.ok and self.core.motors.right_puller.movement != self.core.motors.right_puller.MoveDirection.STOPPED:
                 self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             elif self.core.motors.right_puller.error:
                 self.rightInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))

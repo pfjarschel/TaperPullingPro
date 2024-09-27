@@ -496,6 +496,7 @@ class GenericTLMotor:
             
             if done:
                 self.moving = False
+                self.movement = self.MoveDirection.STOPPED
                 self.pos = self.get_position()
                 self.move_loop.cancel()
             
@@ -590,6 +591,7 @@ class GenericTLMotor:
             if (t1 - t0) > to:
                 return 1
             time.sleep(self.monitor_interval/1000.0)
+        self.movement = self.MoveDirection.STOPPED
         return 0
     
     def stop(self, stop_mode=0):
