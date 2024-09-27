@@ -108,6 +108,7 @@ class TaperPullingCore:
     
     # Other vars
     cleave_dist = 5.0
+    fio_v0 = [0.0, 0.0]
     pl_v0 = [0.0, 0.0]
     pl_a0 = [0.0, 0.0]
     pr_v0 = [0.0, 0.0]
@@ -255,6 +256,7 @@ class TaperPullingCore:
                     # Stage 3: Pulling
                     self.check_pulling()
                     self.check_brushing()
+                    self.check_io_mb()
                 elif stage < 16:
                     # Stage 4: Stopping
                     self.check_stopping()
@@ -327,6 +329,10 @@ class TaperPullingCore:
                 self.brusher_dir = -1*self.brusher_dir
                 self.motors.brusher.stop(0)
                 self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+                
+    def check_io_mb(self):
+        self.fio_v0 = self.motors.flame_io.get_velocity()
+        
     
     def check_stopping(self):
         stop_ok = False
@@ -345,10 +351,10 @@ class TaperPullingCore:
             print("Stopped")
     
     def perform_cleave(self):
-            self.pl_a0 = self.motors.right_puller.accel
-            self.pl_v0 = self.motors.right_puller.vel
-            self.pr_a0 = self.motors.right_puller.accel
-            self.pr_v0 = self.motors.right_puller.vel
+            self.pl_a0 = self.motors.right_puller.get_acceleration()
+            self.pl_v0 = self.motors.right_puller.get_velocity()
+            self.pr_a0 = self.motors.right_puller.get_acceleration()
+            self.pr_v0 = self.motors.right_puller.get_velocity()
             
             self.motors.left_puller.set_acceleration(900)
             self.motors.left_puller.set_velocity(100)
