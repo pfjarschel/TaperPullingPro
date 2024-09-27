@@ -81,7 +81,7 @@ class TaperPullingCore:
     flameIO_zeroed = False
     brusher_zeroed = False
     pullers_zeroed = False
-    flameIO_backing = False
+    flameIO_moving = False
     current_profile_step = 0
     last_total_pulled = 0.0
     
@@ -166,7 +166,7 @@ class TaperPullingCore:
         self.flameIO_zeroed = False
         self.brusher_zeroed = False
         self.pullers_zeroed = False
-        self.flameIO_backing = False
+        self.flameIO_moving = False
         self.current_profile_step = 0
         self.last_total_pulled = 0.0
     
@@ -331,8 +331,17 @@ class TaperPullingCore:
                 self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                 
     def check_io_mb(self):
-        self.fio_v0 = self.motors.flame_io.get_velocity()
-        
+        if self.flame_io_moveback and not self.flameIO_moving:
+            if self.total_pulled >= self.flame_io_mb_start:
+                to_pull = self.flame_io_mb_end - self.total_pulled
+                dist = np.abs(self.flame_io_mb_to - self.flame_io_x0)
+                v_pull = self.motors.left_puller.get_velocity()
+                t = to_pull/(2*v_pull)
+                self.fio_v0 = self.motors.flame_io.get_velocity()
+                v_fmov = dist/t
+                self.motors.flame_io.set_velocity(v_fmov)
+                self.motors.flame_io.go_to(self.flame_io_mb_to)
+                self.flameIO_moving = True                 
     
     def check_stopping(self):
         stop_ok = False
@@ -460,6 +469,10 @@ class TaperPullingCore:
         time.sleep(0.5)
         
         # Retract Flame I/O
+        if self.flame_io_moveback:
+            self.motors.flame_io.set_velocity(self.fio_v0)
+            self.flameIO_moving = False
+            time.sleep(0.1)
         self.motors.flame_io.go_to(0.0)
         
         # Reset pullers velocity
