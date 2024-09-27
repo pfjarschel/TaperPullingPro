@@ -414,7 +414,7 @@ class GenericTLMotor:
         else:
             return 1e-9
             
-    def get_acceleration(self, accel: float):
+    def get_acceleration(self):
         """
         Get motor acceleration.
         """
