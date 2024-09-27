@@ -268,6 +268,7 @@ class MainWindow(FormUI, WindowUI):
         self.pullLoop_timer.timeout.connect(self.pullLoop)
         
         # DAQ connections
+        self.update_daq_combos()
         self.srateSpin.valueChanged.connect(self.daq_init)
         self.daqChannelCombo.currentIndexChanged.connect(self.update_daq_combos)
         self.daqConfCombo.currentIndexChanged.connect(self.daq_init)
@@ -345,9 +346,6 @@ class MainWindow(FormUI, WindowUI):
         self.reset_pull_stats()
         self.recalc_params()
         self.set_fiber_params()
-        
-        self.update_daq_combos()
-        self.daq_init()
         self.data.start_monitor()
         
     def set_daq_params(self):
@@ -767,9 +765,9 @@ class MainWindow(FormUI, WindowUI):
             prev_term = self.daqConfCombo.currentText()
             
             self.daqChannelCombo.clear()
+            self.daqChannelCombo.addItem("Simulation")
             for channel in self.data.daq.channels_names:
                 self.daqChannelCombo.addItem(channel)
-            self.daqChannelCombo.addItem("Simulation")
             
             if prev_devch in self.data.daq.channels_names:
                 self.daqChannelCombo.setCurrentText(prev_devch)
