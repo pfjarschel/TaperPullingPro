@@ -70,7 +70,7 @@
           <enum>QTabWidget::North</enum>
          </property>
          <property name="currentIndex">
-          <number>3</number>
+          <number>0</number>
          </property>
          <property name="elideMode">
           <enum>Qt::ElideRight</enum>
@@ -295,6 +295,9 @@
                <property name="text">
                 <string>83837733</string>
                </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
               </widget>
              </item>
             </layout>
@@ -468,6 +471,9 @@
                <property name="text">
                 <string>83837788</string>
                </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
               </widget>
              </item>
             </layout>
@@ -586,6 +592,9 @@
                <property name="text">
                 <string>67839254</string>
                </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
               </widget>
              </item>
             </layout>
@@ -609,6 +618,9 @@
                </property>
                <property name="text">
                 <string>67838837</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
                </property>
               </widget>
              </item>
