@@ -316,7 +316,7 @@ class TaperPullingCore:
     def check_brushing(self):
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
         if hz >= self.motors.brusher.min_span:
-            if self.motors.brusher.moving == self.motors.brusher.MoveDirection.STOPPED:
+            if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
                 self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
             if self.brusher_enhance_edge and False:
                 pass
@@ -389,9 +389,9 @@ class TaperPullingCore:
         elif not self.loop_tensioned:
             lok = False
             rok = False
-            if self.motors.left_puller.moving == self.motors.left_puller.MoveDirection.STOPPED:
+            if self.motors.left_puller.movement == self.motors.left_puller.MoveDirection.STOPPED:
                 lok = True
-            if self.motors.right_puller.moving == self.motors.right_puller.MoveDirection.STOPPED:
+            if self.motors.right_puller.movement == self.motors.right_puller.MoveDirection.STOPPED:
                 rok = True
             if lok and rok:
                 self.loop_tensioned = True
@@ -402,9 +402,9 @@ class TaperPullingCore:
         elif self.loop_loosing and not self.loop_loosed:
             lok = False
             rok = False
-            if self.motors.left_puller.moving == self.motors.left_puller.MoveDirection.STOPPED:
+            if self.motors.left_puller.movement == self.motors.left_puller.MoveDirection.STOPPED:
                 lok = True
-            if self.motors.right_puller.moving == self.motors.right_puller.MoveDirection.STOPPED:
+            if self.motors.right_puller.movement == self.motors.right_puller.MoveDirection.STOPPED:
                 rok = True
             if lok and rok:
                 self.loop_loosed = True
