@@ -403,6 +403,29 @@ class GenericTLMotor:
             self.set_vel_params(curr_v, curr_a)
             self.accel = accel
             
+    def get_velocity(self):
+        """
+        Get motor velocity.
+        """
+        if self.ok:
+            curr_v, curr_a = self.get_vel_params()
+            self.vel = curr_v
+            return curr_v
+        else:
+            return 1e-9
+            
+    def get_acceleration(self):
+        """
+        Get motor acceleration.
+        """
+        if self.ok:
+            curr_v, curr_a = self.get_vel_params()
+            self.accel = curr_a
+            return curr_a
+        else:
+            return 1e-9
+        
+            
     def get_homed(self) -> bool:
         """
         Get the motor's homing status

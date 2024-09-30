@@ -385,6 +385,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.flame_io.set_acceleration(self.flameIOAccelSpin.value())
         self.core.flame_io_x0 = self.flameIOMovSpin.value()
         self.core.flame_io_hold = self.flameIOHoldSpin.value()
+        self.core.flame_io_moveback = self.fioMovebackCheck.isChecked()
         self.core.flame_io_mb_start = self.flameIOTrigger1Spin.value()
         self.core.flame_io_mb_end = self.flameIOTrigger2Spin.value()
         self.core.flame_io_mb_to = self.flameIOMov2Spin.value()
@@ -872,6 +873,8 @@ class MainWindow(FormUI, WindowUI):
         self.disable_controls()
         self.core.force_hz_edge = self.edgeStopCheck.isChecked()
         self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
+        
+        self.set_motors_params()
         
         self.reset_pull_stats()
         
