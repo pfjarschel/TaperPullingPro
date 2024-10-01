@@ -277,7 +277,6 @@ class MainWindow(FormUI, WindowUI):
         self.responSpin.valueChanged.connect(self.daq_init)
         self.impedanceSpin.valueChanged.connect(self.daq_init)
         self.specsamplesSpin.valueChanged.connect(self.daq_init)
-        self.daqbufferSpin.valueChanged.connect(self.daq_init)
         
         # Motors connections
         self.resetmotorsBut.clicked.connect(self.init_motors)
@@ -358,7 +357,7 @@ class MainWindow(FormUI, WindowUI):
         self.data.spectrum_points = self.specsamplesSpin.value()
         self.data.responsivity = self.responSpin.value()
         self.data.impedance = self.impedanceSpin.value()
-        self.data.set_monitor_buffer(self.daqbufferSpin.value())
+        self.data.set_buffer(2*self.specsamplesSpin.value())
         
         if daq_dev_chan != "Simulation":
             volt_ranges = self.data.daq.get_volt_ranges(self.data.daq.get_dev_from_name(daq_dev_chan))
@@ -566,7 +565,7 @@ class MainWindow(FormUI, WindowUI):
                 
             # Update power monitor
             if self.monpowCheck.isChecked():
-                self.transpowIndSpin.setValue(self.data.get_last_power(db=True))
+                self.transpowIndSpin.setValue(self.data.get_monitor_power(db=True))
                 self.lossIndSpin.setValue(self.refpowIndSpin.value() - self.transpowIndSpin.value())
                 
             # Update motor positions
@@ -706,7 +705,7 @@ class MainWindow(FormUI, WindowUI):
         # Update transmission
         if self.core.pulling:
             self.transm_array[self.transm_i][0] = tp
-            self.transm_array[self.transm_i][1] = self.data.get_last_power(db=False)
+            self.transm_array[self.transm_i][1] = self.data.get_monitor_power(db=False)
             self.transm_i += 1
             tdata = self.transm_array[:self.transm_i]
             if self.transm_i > self.max_tpts:
@@ -720,7 +719,7 @@ class MainWindow(FormUI, WindowUI):
         if self.core.pulling:
             if not self.data.spectrogram_running:
                 self.data.cutoff_f = self.pullerPullVelSpin.value()*1000
-                self.data.start_spectrogram(True, 0.0, True, 0.15, True)
+                self.data.start_spectrogram(0.0, True, 0.15, True)
             
             if len(self.data.spectra) > 0:
                 tp_arr = np.linspace(0.0, tp, len(self.data.spectra))
