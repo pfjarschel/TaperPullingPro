@@ -53,10 +53,15 @@ class TaperPullingData:
     monitor_val = 0.0
     
     continuous_loop = None
-    continuous_interval = 1024  # ms
+    continuous_interval = 100  # ms, buffer will be constructed in parts to allow for fast updating
     
-    buffer_size = 1024
+    buffer_size = 1000
+    buffer_slice = 100
+    soft_buffer_ratio = 10
+    soft_buffer = np.zeros(soft_buffer_ratio, buffer_slice)
+    soft_buffer_i = 0
     buffer = np.zeros(buffer_size)
+    buffering = False
     
     impedance = 1e4  # Ohms
     responsivity = 1.0  # A/W
@@ -155,8 +160,13 @@ class TaperPullingData:
         if self.daq.ok:
             self.init_daq_as_default(self.daq.simulate)
             
-    def set_buffer(self, n: int=1024):
+    def set_buffer(self, n: int=1000):
+        self.soft_buffer_ratio = int(np.ceil((n/self.sampling_rate)/(self.continuous_interval/1000.0)))
+        if self.soft_buffer_ratio < 1: self.soft_buffer_i = 1
+        self.buffer_slice = int(np.ceil(n/self.soft_buffer_ratio))
+        n = self.buffer_slice*self.soft_buffer_ratio
         self.buffer_size = n
+        self.soft_buffer = np.zeros((self.soft_buffer_ratio, self.buffer_slice))
         self.buffer = np.zeros(n)
             
     def get_single_value(self):
@@ -245,11 +255,13 @@ class TaperPullingData:
     def continuous_update(self):
         if not self.daq_busy:
             self.daq_busy = True
+            self.buffering = True
             self.buffer = self.daq.read_data(self.buffer_size)
-            
+
             # Clear remaining DAQ buffer
             self.daq.read_all()
             
+            self.buffering = False
             self.daq_busy = False
             
     def stop_cont_loop(self):
