@@ -54,11 +54,12 @@ class TaperPullingData:
     
     continuous_loop = None
     continuous_interval = 100  # ms, buffer will be constructed in parts to allow for fast updating
+    continuous_interval0 = continuous_interval
     
     buffer_size = 1000
     buffer_slice = 100
     soft_buffer_ratio = 10
-    soft_buffer = np.zeros(soft_buffer_ratio, buffer_slice)
+    soft_buffer = np.zeros((soft_buffer_ratio, buffer_slice))
     soft_buffer_i = 0
     buffer = np.zeros(buffer_size)
     buffering = False
@@ -162,12 +163,16 @@ class TaperPullingData:
             
     def set_buffer(self, n: int=1000):
         self.soft_buffer_ratio = int(np.ceil((n/self.sampling_rate)/(self.continuous_interval/1000.0)))
-        if self.soft_buffer_ratio < 1: self.soft_buffer_i = 1
+        if self.soft_buffer_ratio < 1: 
+            self.soft_buffer_ratio = 1
+            self.continuous_interval = n/self.sampling_rate
+            
         self.buffer_slice = int(np.ceil(n/self.soft_buffer_ratio))
         n = self.buffer_slice*self.soft_buffer_ratio
         self.buffer_size = n
         self.soft_buffer = np.zeros((self.soft_buffer_ratio, self.buffer_slice))
         self.buffer = np.zeros(n)
+        self.soft_buffer_i = 0
             
     def get_single_value(self):
         if not self.daq_busy:
