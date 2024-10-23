@@ -26,7 +26,8 @@ from threading import Timer
 import cv2
 
 from .TaperPullingDAQ import TaperPullingDAQ
-
+from .TaperPullingDAQ import AcquisitionType as AcqType
+from .TaperPullingDAQ import TerminalConfiguration as TermConf
 
 class TaperPullingData:
     """
@@ -45,24 +46,34 @@ class TaperPullingData:
     daq = None
     
     daq_busy = False
+    daq_initing = False
     simulate = False
     sampling_rate = 1e3
     
     monitor_loop = None
-    monitor_interval = 1  # ms
-    monitor_buffer_size = 10240
-    monitor_buffer = np.zeros(monitor_buffer_size)
+    monitor_interval = 20  # ms
+    monitor_val = 0.0
+    
+    continuous_loop = None
+    continuous_interval = 100  # ms, buffer will be constructed in parts to allow for fast updating
+    continuous_interval0 = continuous_interval
+    
+    buffer_size = 1000
+    buffer_slice = 100
+    soft_buffer_ratio = 10
+    soft_buffer = np.zeros((soft_buffer_ratio, buffer_slice))
+    buffer = np.zeros(buffer_size)
     
     impedance = 1e4  # Ohms
     responsivity = 1.0  # A/W
     
     spectrogram_loop = None
+    spectrogram_busy = False
     spectrogram_interval = 100  # ms
-    spectrum_points = 1024
-    spectra_points = 1000000000  # A high value to disable this
+    spectrum_points = 500
+    spectra_points = 1000000000  # A high value to disable downsampling
     max_spectra_points = 2*spectra_points  # Will downsample when this value is reached
     
-    spectrogram_from_buffer = True
     spectrogram_running = False
     last_spectrum = np.zeros((2, spectrum_points))
     last_spectrum_data = np.zeros((2, 2*spectrum_points))
@@ -89,17 +100,28 @@ class TaperPullingData:
         
         self.spectrogram_loop = None
         self.monitor_loop = None
+        self.continuous_loop = None
         
     def __del__(self):
         self.close()
         
     def close(self):
+        self.stop_cont_loop()
+        self.stop_monitor()
+        self.stop_spectrogram()
         self.daq.stop_measuring()
         
     def init_daq_as_default(self, simulate=False):
-        while self.daq_busy:
-            pass
         self.daq_busy = True
+        self.daq_initing = True
+        
+        if isinstance(self.daq.term_config, str):
+            self.daq.term_config = eval(f"TermConf.{self.daq.term_config}")
+        if isinstance(self.daq.mode, str):
+            self.daq.mode = eval(f"AcqType.{self.daq.mode}")
+        
+        self.set_sampling_rate(self.sampling_rate)
+        self.set_buffer(self.buffer_size)
         self.daq.get_devices()
         if len(self.daq.devices) > 0:
             self.daq.get_ai_channels()
@@ -109,22 +131,42 @@ class TaperPullingData:
                                self.daq.scale,
                                self.daq.term_config,
                                self.daq.mode,
-                               self.monitor_buffer_size,
+                               2*self.buffer_size,
                                simulate)
             self.sampling_rate = self.daq.sampling_rate
+            
+        if self.daq.mode == AcqType.CONTINUOUS:
+            self.start_cont_loop()
+        else:
+            self.stop_cont_loop()
+        
+        self.daq_initing = False
         self.daq_busy = False
             
-    def init_daq(self, srate: float, dev_ch: str, scale: float, term="DEFAULT", 
-                  mode="CONTINUOUS", buffer_size=10000, simulate=False):
-        while self.daq_busy:
-            pass
+    def init_daq(self, srate: float, dev_ch: str, scale: float, term=TermConf.DEFAULT, 
+                  mode=AcqType.CONTINUOUS, buffer_size=5000, simulate=False):
+        
+        if isinstance(term, str):
+            term = eval(f"TermConf.{term}")
+        if isinstance(mode, str):
+            mode = eval(f"AcqType.{mode}")
+        
         self.daq_busy = True
+        self.daq_initing = True
+        self.set_sampling_rate(srate)
+        self.set_buffer(buffer_size)
         self.daq.get_devices()
         if len(self.daq.devices) > 0:
             self.daq.get_ai_channels()
         if len(self.daq.channels) > 0 and (dev_ch in self.daq.channels_names):
             self.daq.setup_daq(srate, dev_ch, scale, term, mode, buffer_size, simulate)
             self.sampling_rate = self.daq.sampling_rate
+        if mode == AcqType.CONTINUOUS:
+            self.start_cont_loop()
+        else:
+            self.stop_cont_loop()
+        
+        self.daq_initing = False
         self.daq_busy = False
             
     def set_sampling_rate(self, sampling_rate: float):
@@ -133,66 +175,59 @@ class TaperPullingData:
         
         self.clear_spectrogram()
         
-        if self.daq.ok:
+        if self.daq.ok and not self.daq_initing:
             self.init_daq_as_default(self.daq.simulate)
             
-    def set_monitor_buffer(self, n: int=10240):
-        while self.daq_busy:
-            pass
-        self.monitor_buffer_size = n
-        self.monitor_buffer = np.zeros(n)
-        self.daq.buffer_size = n
+    def set_buffer(self, n: int=1000):
+        self.continuous_interval = self.continuous_interval0
+        self.soft_buffer_ratio = int(np.ceil((n/self.sampling_rate)/(self.continuous_interval/1000.0)))
+        if self.soft_buffer_ratio < 1: 
+            self.soft_buffer_ratio = 1
+            self.continuous_interval = 1000.0*n/self.sampling_rate
+
+        self.buffer_slice = int(np.ceil(n/self.soft_buffer_ratio))
+        self.soft_buffer = np.zeros((self.soft_buffer_ratio, self.buffer_slice))
+        self.buffer = np.zeros(n)
+        self.buffer_size = n
+        
+        self.clear_spectrogram()
+        
+        if self.daq.ok and not self.daq_initing:
+            self.init_daq_as_default(self.daq.simulate)
             
-    def get_single_transmission(self, wait=False):
-        if wait:
-            while self.daq_busy:
-                pass
+    def get_single_value(self):
         if not self.daq_busy:
             self.daq_busy = True
             data = self.daq.read_data()[0]
-            self.monitor_buffer[0] = data
-            self.monitor_buffer = np.roll(self.monitor_buffer, -1)
             self.daq_busy = False
             return data
         else:
             return -1
-        
-    def get_last_monitor(self):
-        return self.monitor_buffer[-1]
     
-    def get_last_power(self, db=False):
-        pwr = 1e3*self.get_last_monitor()/(self.impedance*self.responsivity)
+    def get_single_power(self, db=False):
+        pwr = 1e3*self.get_single_value()/(self.impedance*self.responsivity)
+        if db:
+            if pwr <= 0: pwr = 1e-99
+            return 10*np.log10(pwr)
+        else:
+            return pwr
+        
+    def get_monitor_power(self, db=False):
+        pwr = 1e3*self.monitor_val/(self.impedance*self.responsivity)
         if db:
             if pwr <= 0: pwr = 1e-99
             return 10*np.log10(pwr)
         else:
             return pwr
     
-    def get_transmission_points(self, n:int, wait=False):
-        if wait:
-            while self.daq_busy:
-                pass
+    def get_points(self, n:int):
         if not self.daq_busy:
             self.daq_busy = True
             data = self.daq.read_data(n)
             self.daq_busy = False
             return data
         else:
-            return -1*np.ones(n)
-        
-    def get_buffer_average(self, n):
-        if n <= self.monitor_buffer_size:
-            return self.monitor_buffer[-n:].mean()
-        else:
-            return self.monitor_buffer.mean()
-        
-    def get_buffer_power_average(self, n, db=False):
-        pwr = 1e3*self.get_buffer_average(n)/(self.impedance*self.responsivity)
-        if db:
-            if pwr <= 0: pwr = 1e-99
-            return 10*np.log10(pwr)
-        else:
-            return pwr
+            return -1*np.ones(n)       
     
     def perform_fft(self, x_data, y_data, smooth=0.01, window=False, sigma=0.15):
         yf = []
@@ -219,16 +254,12 @@ class TaperPullingData:
 
         return xf[:n//2], yf_real
     
-    def get_spectrum(self, smooth=0.01, window=True, sigma=0.15, wait = False):
+    def get_spectrum(self, smooth=0.01, window=True, sigma=0.15):
         data_n = 2*self.spectrum_points
-        
-        if self.spectrogram_from_buffer:
-            if data_n > self.monitor_buffer_size: data_n = self.monitor_buffer_size
-            data_y = self.monitor_buffer[-data_n:]
-            data_x = np.linspace(0, data_n*self.monitor_interval/1000.0, data_n)
-        else:
-            data_y = self.get_transmission_points(data_n, wait)
-            data_x = np.linspace(0, data_n/self.sampling_rate, data_n)
+
+        if data_n > self.buffer_size: data_n = self.buffer_size
+        data_y = self.buffer[-data_n:]
+        data_x = np.linspace(0, data_n*self.monitor_interval/1000.0, data_n)
         
         spec_x, spec_y = self.perform_fft(data_x, data_y, smooth, window, sigma)
         
@@ -240,16 +271,43 @@ class TaperPullingData:
     
     def clear_spectrogram(self):
         self.spectra = []
-    
+        
+    def start_cont_loop(self):
+        self.stop_cont_loop()
+        self.continuous_loop = self.Loop(self.continuous_interval/1000.0, self.continuous_update)
+        self.set_buffer(self.buffer_size)
+        self.continuous_loop.start()
+        
+    def continuous_update(self):
+        if not self.daq_busy:
+            self.daq_busy = True
+
+            self.soft_buffer = np.roll(self.soft_buffer, -1, 0)
+            self.soft_buffer[-1, :] = self.daq.read_data(self.buffer_slice)
+            m = self.soft_buffer.shape[0]
+            n = self.soft_buffer.shape[1]
+            self.buffer = self.soft_buffer.reshape(m*n)[-self.buffer_size:]            
+
+            # Clear remaining DAQ buffer
+            self.daq.read_all()
+            
+            self.daq_busy = False
+            
+    def stop_cont_loop(self):
+        try:
+            self.continuous_loop.cancel()
+            self.continuous_loop = None
+        except:
+            pass
+            
     def start_monitor(self):
-        self.monitor_loop = None
+        self.stop_monitor()
         self.monitor_loop = self.Loop(self.monitor_interval/1000.0, self.monitor)
-        self.set_monitor_buffer(self.monitor_buffer_size)
         self.monitor_loop.start()
     
     def monitor(self):
         if not self.daq_busy:
-            self.get_single_transmission()
+            self.monitor_val = self.get_single_value()
             
     def stop_monitor(self):
         try:
@@ -258,21 +316,20 @@ class TaperPullingData:
         except:
             pass
             
-    def start_spectrogram(self, from_buffer=True, smooth=0.01, window=True, sigma=0.15, wait=True):
-        self.spectrogram_running = True
-        self.spectrogram_from_buffer = from_buffer
+    def start_spectrogram(self, smooth=0.01, window=True, sigma=0.15):
         self.clear_spectrogram()
-        self.spectrogram_loop = None
+        self.stop_spectrogram()
+        self.spectrogram_running = True
+        self.last_spectrum = np.zeros((2, self.spectrum_points))
+        self.last_spectrum_data = np.zeros((2, 2*self.spectrum_points))
         self.spectrogram_loop = self.Loop(self.spectrogram_interval/1000.0, self.build_spectrogram, 
-                                          args=(smooth, window, sigma, wait))
+                                          args=(smooth, window, sigma))
         self.spectrogram_loop.start()
         
-    def build_spectrogram(self, smooth=0.01, window=True, sigma=0.15, wait=True):
-        if wait:
-            while self.daq_busy:
-                pass
-        if not self.daq_busy:
-            spec_x, spec_y = self.get_spectrum(smooth, window, sigma, wait)
+    def build_spectrogram(self, smooth=0.01, window=True, sigma=0.15):
+        if not self.spectrogram_busy:
+            self.spectrogram_busy = True
+            spec_x, spec_y = self.get_spectrum(smooth, window, sigma)
             cuton_i = np.abs(spec_x - self.cuton_f).argmin()
             cutoff_i = np.abs(spec_x - self.cutoff_f).argmin()
             self.spectra.append(spec_y[cuton_i:cutoff_i])
@@ -282,9 +339,15 @@ class TaperPullingData:
             # It is better to downsample the entire dataset before plotting, not here
             if len(self.spectra) >= self.max_spectra_points:
                 self.spectra = cv2.resize(np.array(self.spectra), (len(self.spectra_freqs), self.spectra_points)).tolist()
+                
+            self.spectrogram_busy = False
     
     def stop_spectrogram(self):
         self.spectrogram_running = False
-        self.spectrogram_loop.cancel()
-        self.spectrogram_loop = None
+        self.spectrogram_busy = False
+        try:
+            self.spectrogram_loop.cancel()
+            self.spectrogram_loop = None
+        except:
+            pass
         

@@ -268,6 +268,7 @@ class MainWindow(FormUI, WindowUI):
         self.pullLoop_timer.timeout.connect(self.pullLoop)
         
         # DAQ connections
+        self.update_daq_combos()
         self.srateSpin.valueChanged.connect(self.daq_init)
         self.daqChannelCombo.currentIndexChanged.connect(self.update_daq_combos)
         self.daqConfCombo.currentIndexChanged.connect(self.daq_init)
@@ -276,7 +277,6 @@ class MainWindow(FormUI, WindowUI):
         self.responSpin.valueChanged.connect(self.daq_init)
         self.impedanceSpin.valueChanged.connect(self.daq_init)
         self.specsamplesSpin.valueChanged.connect(self.daq_init)
-        self.daqbufferSpin.valueChanged.connect(self.daq_init)
         
         # Motors connections
         self.resetmotorsBut.clicked.connect(self.init_motors)
@@ -345,9 +345,6 @@ class MainWindow(FormUI, WindowUI):
         self.reset_pull_stats()
         self.recalc_params()
         self.set_fiber_params()
-        
-        self.update_daq_combos()
-        self.daq_init()
         self.data.start_monitor()
         
     def set_daq_params(self):
@@ -360,7 +357,7 @@ class MainWindow(FormUI, WindowUI):
         self.data.spectrum_points = self.specsamplesSpin.value()
         self.data.responsivity = self.responSpin.value()
         self.data.impedance = self.impedanceSpin.value()
-        self.data.set_monitor_buffer(self.daqbufferSpin.value())
+        self.data.set_buffer(2*self.specsamplesSpin.value())
         
         if daq_dev_chan != "Simulation":
             volt_ranges = self.data.daq.get_volt_ranges(self.data.daq.get_dev_from_name(daq_dev_chan))
@@ -375,6 +372,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.brusher.set_velocity(self.brusherVelSpin.value())
         self.core.motors.brusher.set_acceleration(self.brusherAccelSpin.value())
         self.core.brusher_x0 = self.brusherInitPosSpin.value()
+        self.core.motors.brusher.min_span = self.brusherMinSpanSpin.value()
         if self.revdirCheck.isChecked():
             self.core.brusher_dir0 = -1
         else:
@@ -386,6 +384,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.flame_io.set_acceleration(self.flameIOAccelSpin.value())
         self.core.flame_io_x0 = self.flameIOMovSpin.value()
         self.core.flame_io_hold = self.flameIOHoldSpin.value()
+        self.core.flame_io_moveback = self.fioMovebackCheck.isChecked()
         self.core.flame_io_mb_start = self.flameIOTrigger1Spin.value()
         self.core.flame_io_mb_end = self.flameIOTrigger2Spin.value()
         self.core.flame_io_mb_to = self.flameIOMov2Spin.value()
@@ -566,7 +565,7 @@ class MainWindow(FormUI, WindowUI):
                 
             # Update power monitor
             if self.monpowCheck.isChecked():
-                self.transpowIndSpin.setValue(self.data.get_last_power(db=True))
+                self.transpowIndSpin.setValue(self.data.get_monitor_power(db=True))
                 self.lossIndSpin.setValue(self.refpowIndSpin.value() - self.transpowIndSpin.value())
                 
             # Update motor positions
@@ -586,30 +585,30 @@ class MainWindow(FormUI, WindowUI):
             self.pullRightIndSlider.setValue(int(1000.0*r_pos/self.core.motors.right_puller.max_pos))
             
             # Update leds
-            if self.core.motors.brusher.ok and self.core.motors.brusher.moving == self.core.motors.brusher.MoveDirection.STOPPED:
+            if self.core.motors.brusher.ok and self.core.motors.brusher.movement == self.core.motors.brusher.MoveDirection.STOPPED:
                 self.brInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-            elif self.core.motors.brusher.ok and self.core.motors.brusher.moving != self.core.motors.brusher.MoveDirection.STOPPED:
+            elif self.core.motors.brusher.ok and self.core.motors.brusher.movement != self.core.motors.brusher.MoveDirection.STOPPED:
                 self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             elif self.core.motors.brusher.error:
                 self.brInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
-            if self.core.motors.flame_io.ok and self.core.motors.flame_io.moving == self.core.motors.flame_io.MoveDirection.STOPPED:
+            if self.core.motors.flame_io.ok and self.core.motors.flame_io.movement == self.core.motors.flame_io.MoveDirection.STOPPED:
                 self.fioInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-            elif self.core.motors.flame_io.ok and self.core.motors.flame_io.moving != self.core.motors.flame_io.MoveDirection.STOPPED:
+            elif self.core.motors.flame_io.ok and self.core.motors.flame_io.movement != self.core.motors.flame_io.MoveDirection.STOPPED:
                 self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             elif self.core.motors.flame_io.error:
                 self.fioInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
-            if self.core.motors.left_puller.ok and self.core.motors.left_puller.moving == self.core.motors.left_puller.MoveDirection.STOPPED:
+            if self.core.motors.left_puller.ok and self.core.motors.left_puller.movement == self.core.motors.left_puller.MoveDirection.STOPPED:
                 self.leftInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-            elif self.core.motors.left_puller.ok and self.core.motors.left_puller.moving != self.core.motors.left_puller.MoveDirection.STOPPED:
+            elif self.core.motors.left_puller.ok and self.core.motors.left_puller.movement != self.core.motors.left_puller.MoveDirection.STOPPED:
                 self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             elif self.core.motors.left_puller.error:
                 self.leftInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
-            if self.core.motors.right_puller.ok and self.core.motors.right_puller.moving == self.core.motors.right_puller.MoveDirection.STOPPED:
+            if self.core.motors.right_puller.ok and self.core.motors.right_puller.movement == self.core.motors.right_puller.MoveDirection.STOPPED:
                 self.rightInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-            elif self.core.motors.right_puller.ok and self.core.motors.right_puller.moving != self.core.motors.right_puller.MoveDirection.STOPPED:
+            elif self.core.motors.right_puller.ok and self.core.motors.right_puller.movement != self.core.motors.right_puller.MoveDirection.STOPPED:
                 self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             elif self.core.motors.right_puller.error:
                 self.rightInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
@@ -624,25 +623,13 @@ class MainWindow(FormUI, WindowUI):
             homed = [False]*4
             
             if self.core.motors.brusher.ok:
-                # self.brInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[0] = True
-            # elif self.core.motors.brusher.error:
-            #     self.brInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             if self.core.motors.flame_io.ok:
-                # self.fioInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[1] = True
-            # elif self.core.motors.flame_io.error:
-            #     self.fioInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             if self.core.motors.left_puller.ok:
-                # self.leftInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[2] = True
-            # elif self.core.motors.left_puller.error:
-            #     self.leftInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             if self.core.motors.right_puller.ok:
-                # self.rightInitLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
                 connected[3] = True
-            # elif self.core.motors.right_puller.error:
-            #     self.rightInitLed.setPixmap(QPixmap(f"{respath}/red_led.png"))
             
             if self.core.motors.brusher.homed:
                 self.brHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
@@ -718,7 +705,7 @@ class MainWindow(FormUI, WindowUI):
         # Update transmission
         if self.core.pulling:
             self.transm_array[self.transm_i][0] = tp
-            self.transm_array[self.transm_i][1] = self.data.get_last_power(db=False)
+            self.transm_array[self.transm_i][1] = self.data.get_monitor_power(db=False)
             self.transm_i += 1
             tdata = self.transm_array[:self.transm_i]
             if self.transm_i > self.max_tpts:
@@ -732,9 +719,7 @@ class MainWindow(FormUI, WindowUI):
         if self.core.pulling:
             if not self.data.spectrogram_running:
                 self.data.cutoff_f = self.pullerPullVelSpin.value()*1000
-                # self.data.cutoff_f = self.data.sampling_rate
-                # self.data.cutoff_f = 100
-                self.data.start_spectrogram(True, 0.0, True, 0.15, True)
+                self.data.start_spectrogram(0.1, True, 0.15)
             
             if len(self.data.spectra) > 0:
                 tp_arr = np.linspace(0.0, tp, len(self.data.spectra))
@@ -781,9 +766,9 @@ class MainWindow(FormUI, WindowUI):
             prev_term = self.daqConfCombo.currentText()
             
             self.daqChannelCombo.clear()
+            self.daqChannelCombo.addItem("Simulation")
             for channel in self.data.daq.channels_names:
                 self.daqChannelCombo.addItem(channel)
-            self.daqChannelCombo.addItem("Simulation")
             
             if prev_devch in self.data.daq.channels_names:
                 self.daqChannelCombo.setCurrentText(prev_devch)
@@ -888,6 +873,9 @@ class MainWindow(FormUI, WindowUI):
         self.core.force_hz_edge = self.edgeStopCheck.isChecked()
         self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
         
+        self.set_motors_params()
+        self.daq_init() 
+        
         self.reset_pull_stats()
         
         hz_function = self.hz_function
@@ -898,8 +886,7 @@ class MainWindow(FormUI, WindowUI):
         
     def stop_pulling(self):
         self.pullLoop_timer.stop()
-        if self.data.spectrogram_running:
-            self.data.stop_spectrogram()
+        self.data.stop_spectrogram()
         self.enable_controls()
         self.core.stop_pulling()
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
@@ -1023,6 +1010,7 @@ class MainWindow(FormUI, WindowUI):
         self.graph_spec.flush_events()
         
     def update_minimum_hz(self):
+        self.core.motors.brusher.min_span = self.brusherMinSpanSpin.value()
         self.min_hz = self.fSizeSpin.value() + self.brusherMinSpanSpin.value()
         self.update_graph(np.array([[0.0, self.total_to_pull], [self.min_hz, self.min_hz]]), 
                           self.graph_hz_minline, self.graph_hz_ax, self.graph_hz)

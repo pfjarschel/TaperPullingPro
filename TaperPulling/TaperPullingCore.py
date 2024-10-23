@@ -81,7 +81,7 @@ class TaperPullingCore:
     flameIO_zeroed = False
     brusher_zeroed = False
     pullers_zeroed = False
-    flameIO_backing = False
+    flameIO_moving = False
     current_profile_step = 0
     last_total_pulled = 0.0
     
@@ -108,6 +108,7 @@ class TaperPullingCore:
     
     # Other vars
     cleave_dist = 5.0
+    fio_v0 = [0.0, 0.0]
     pl_v0 = [0.0, 0.0]
     pl_a0 = [0.0, 0.0]
     pr_v0 = [0.0, 0.0]
@@ -165,7 +166,7 @@ class TaperPullingCore:
         self.flameIO_zeroed = False
         self.brusher_zeroed = False
         self.pullers_zeroed = False
-        self.flameIO_backing = False
+        self.flameIO_moving = False
         self.current_profile_step = 0
         self.last_total_pulled = 0.0
     
@@ -255,6 +256,7 @@ class TaperPullingCore:
                     # Stage 3: Pulling
                     self.check_pulling()
                     self.check_brushing()
+                    self.check_io_mb()
                 elif stage < 16:
                     # Stage 4: Stopping
                     self.check_stopping()
@@ -278,7 +280,6 @@ class TaperPullingCore:
         brusher = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
                (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
         if left and right and brusher:
-            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
             self.motors.flame_io.go_to(self.flame_io_x0)
             self.flame_approaching = True
             print("Flame approaching...")
@@ -313,24 +314,39 @@ class TaperPullingCore:
             print("Pulling ended")
     
     def check_brushing(self):
-        if self.motors.brusher.moving == self.motors.brusher.MoveDirection.STOPPED:
-            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
-        if self.brusher_enhance_edge and False:
-            pass
-        else:
-            l = self.brusher_x0 - hz/2.0
-            r = self.brusher_x0 + hz/2.0
-        if (self.brusher_pos < l and self.brusher_dir == -1) or \
-            self.brusher_pos > r and self.brusher_dir == 1:
-            self.rhz_edges.append(self.brusher_pos)
-            self.brusher_dir = -1*self.brusher_dir
-            self.motors.brusher.stop(0)
-            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+        if hz >= self.motors.brusher.min_span:
+            if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
+                self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+            if self.brusher_enhance_edge and False:
+                pass
+            else:
+                l = self.brusher_x0 - hz/2.0
+                r = self.brusher_x0 + hz/2.0
+            if (self.brusher_pos < l and self.brusher_dir == -1) or \
+                self.brusher_pos > r and self.brusher_dir == 1:
+                self.rhz_edges.append(self.brusher_pos)
+                self.brusher_dir = -1*self.brusher_dir
+                self.motors.brusher.stop(0)
+                self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+                
+    def check_io_mb(self):
+        if self.flame_io_moveback and not self.flameIO_moving:
+            if self.total_pulled >= self.flame_io_mb_start:
+                to_pull = self.flame_io_mb_end - self.total_pulled
+                dist = np.abs(self.flame_io_mb_to - self.flame_io_x0)
+                v_pull = self.motors.left_puller.get_velocity()
+                t = to_pull/(2*v_pull)
+                self.fio_v0 = self.motors.flame_io.get_velocity()
+                v_fmov = dist/t
+                self.motors.flame_io.set_velocity(v_fmov)
+                self.motors.flame_io.go_to(self.flame_io_mb_to)
+                self.flameIO_moving = True                 
     
     def check_stopping(self):
         stop_ok = False
-        if self.force_hz_edge:
+        hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
+        if self.force_hz_edge and hz >= self.motors.brusher.min_span:
             l = self.brusher_x0 - self.hotzone_function[1][-1]/2.0
             r = self.brusher_x0 + self.hotzone_function[1][-1]/2.0
             if (self.brusher_pos <= l  or self.brusher_pos >= r):
@@ -344,11 +360,10 @@ class TaperPullingCore:
             print("Stopped")
     
     def perform_cleave(self):
-        if not self.cleave_started:
-            self.pl_a0 = self.motors.right_puller.accel
-            self.pl_v0 = self.motors.right_puller.vel
-            self.pr_a0 = self.motors.right_puller.accel
-            self.pr_v0 = self.motors.right_puller.vel
+            self.pl_a0 = self.motors.right_puller.get_acceleration()
+            self.pl_v0 = self.motors.right_puller.get_velocity()
+            self.pr_a0 = self.motors.right_puller.get_acceleration()
+            self.pr_v0 = self.motors.right_puller.get_velocity()
             
             self.motors.left_puller.set_acceleration(900)
             self.motors.left_puller.set_velocity(100)
@@ -374,9 +389,9 @@ class TaperPullingCore:
         elif not self.loop_tensioned:
             lok = False
             rok = False
-            if self.motors.left_puller.moving == self.motors.left_puller.MoveDirection.STOPPED:
+            if self.motors.left_puller.movement == self.motors.left_puller.MoveDirection.STOPPED:
                 lok = True
-            if self.motors.right_puller.moving == self.motors.right_puller.MoveDirection.STOPPED:
+            if self.motors.right_puller.movement == self.motors.right_puller.MoveDirection.STOPPED:
                 rok = True
             if lok and rok:
                 self.loop_tensioned = True
@@ -387,9 +402,9 @@ class TaperPullingCore:
         elif self.loop_loosing and not self.loop_loosed:
             lok = False
             rok = False
-            if self.motors.left_puller.moving == self.motors.left_puller.MoveDirection.STOPPED:
+            if self.motors.left_puller.movement == self.motors.left_puller.MoveDirection.STOPPED:
                 lok = True
-            if self.motors.right_puller.moving == self.motors.right_puller.MoveDirection.STOPPED:
+            if self.motors.right_puller.movement == self.motors.right_puller.MoveDirection.STOPPED:
                 rok = True
             if lok and rok:
                 self.loop_loosed = True
@@ -454,6 +469,10 @@ class TaperPullingCore:
         time.sleep(0.5)
         
         # Retract Flame I/O
+        if self.flame_io_moveback:
+            self.motors.flame_io.set_velocity(self.fio_v0)
+            self.flameIO_moving = False
+            time.sleep(0.1)
         self.motors.flame_io.go_to(0.0)
         
         # Reset pullers velocity

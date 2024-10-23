@@ -18,7 +18,7 @@ board.
 import numpy as np
 
 import nidaqmx
-from nidaqmx.constants import AcquisitionType, TerminalConfiguration
+from nidaqmx.constants import AcquisitionType, TerminalConfiguration, READ_ALL_AVAILABLE
 
 class TaperPullingDAQ:
     """
@@ -36,7 +36,7 @@ class TaperPullingDAQ:
     # Measurement
     sampling_rate = 1000.0  # Hz
     device_channel = "Dev 1/ai0"
-    term_config = "Default"
+    term_config = TerminalConfiguration.DEFAULT
     scale = 10.0  # V
     mode = AcquisitionType.FINITE
     buffer_size = 10000
@@ -119,8 +119,8 @@ class TaperPullingDAQ:
             
         return configs
         
-    def setup_daq(self, srate: float, dev_ch: str, scale: float, term="DEFAULT", 
-                  mode="FINITE", buffer_size=10000, simulate=False):
+    def setup_daq(self, srate: float, dev_ch: str, scale: float, term=TerminalConfiguration.DEFAULT, 
+                  mode=AcquisitionType.CONTINUOUS, buffer_size=10000, simulate=False):
         """
         Sets up DAQ device and channel for measurement
         
@@ -136,10 +136,16 @@ class TaperPullingDAQ:
         self.sampling_rate = srate
         self.device_channel = dev_ch
         self.scale = scale
-        self.term_config = TerminalConfiguration[term]
-        self.mode = AcquisitionType[mode]
         self.buffer_size = buffer_size
         self.simulate = simulate
+        
+        if isinstance(term, str):
+            term = eval(f"TerminalConfiguration.{term}")
+        if isinstance(mode, str):
+            mode = eval(f"AcquisitionType.{mode}")
+        self.term_config = term
+        self.mode = mode
+        
         
         if not self.simulate:
             try:
@@ -153,6 +159,7 @@ class TaperPullingDAQ:
                                                           terminal_config=self.term_config)
                 self.task.timing.cfg_samp_clk_timing(srate, sample_mode=self.mode, 
                                                      samps_per_chan=buffer_size + 1)
+                
                 self.ok = True
                 self.start_measuring()
             except Exception as e:
@@ -196,6 +203,23 @@ class TaperPullingDAQ:
             return offs + avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000), n)/2000000.0
         else:
             return np.zeros(n)
+        
+    def read_all(self) -> np.ndarray:
+        """
+        Read all values from the DAQ buffer.
+            
+        Returns:
+            np.ndarray: Array of values read.
+        """
+        if self.ok and not self.paused:
+            return np.array(self.task.read(number_of_samples_per_channel=READ_ALL_AVAILABLE))
+        elif self.simulate and not self.paused:
+            avg = 0.0
+            offs = 1.0
+            span = 2*self.scale
+            return offs + avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000), self.buffer_size)/2000000.0
+        else:
+            return np.zeros(self.buffer_size)
         
     def start_measuring(self):
         """
