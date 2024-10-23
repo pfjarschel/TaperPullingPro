@@ -36,7 +36,7 @@ class TaperPullingDAQ:
     # Measurement
     sampling_rate = 1000.0  # Hz
     device_channel = "Dev 1/ai0"
-    term_config = "Default"
+    term_config = TerminalConfiguration.DEFAULT
     scale = 10.0  # V
     mode = AcquisitionType.FINITE
     buffer_size = 10000
@@ -119,8 +119,8 @@ class TaperPullingDAQ:
             
         return configs
         
-    def setup_daq(self, srate: float, dev_ch: str, scale: float, term="DEFAULT", 
-                  mode="FINITE", buffer_size=10000, simulate=False):
+    def setup_daq(self, srate: float, dev_ch: str, scale: float, term=TerminalConfiguration.DEFAULT, 
+                  mode=AcquisitionType.CONTINUOUS, buffer_size=10000, simulate=False):
         """
         Sets up DAQ device and channel for measurement
         
@@ -136,10 +136,16 @@ class TaperPullingDAQ:
         self.sampling_rate = srate
         self.device_channel = dev_ch
         self.scale = scale
-        self.term_config = TerminalConfiguration[term]
-        self.mode = AcquisitionType[mode]
         self.buffer_size = buffer_size
         self.simulate = simulate
+        
+        if isinstance(term, str):
+            term = eval(f"TerminalConfiguration.{term}")
+        if isinstance(mode, str):
+            mode = eval(f"AcquisitionType.{mode}")
+        self.term_config = term
+        self.mode = mode
+        
         
         if not self.simulate:
             try:

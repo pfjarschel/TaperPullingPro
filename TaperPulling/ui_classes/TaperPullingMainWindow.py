@@ -719,7 +719,7 @@ class MainWindow(FormUI, WindowUI):
         if self.core.pulling:
             if not self.data.spectrogram_running:
                 self.data.cutoff_f = self.pullerPullVelSpin.value()*1000
-                self.data.start_spectrogram(0.0, True, 0.15, True)
+                self.data.start_spectrogram(0.1, True, 0.15)
             
             if len(self.data.spectra) > 0:
                 tp_arr = np.linspace(0.0, tp, len(self.data.spectra))
@@ -874,6 +874,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
         
         self.set_motors_params()
+        self.daq_init() 
         
         self.reset_pull_stats()
         
@@ -885,8 +886,7 @@ class MainWindow(FormUI, WindowUI):
         
     def stop_pulling(self):
         self.pullLoop_timer.stop()
-        if self.data.spectrogram_running:
-            self.data.stop_spectrogram()
+        self.data.stop_spectrogram()
         self.enable_controls()
         self.core.stop_pulling()
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
