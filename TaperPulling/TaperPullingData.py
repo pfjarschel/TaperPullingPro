@@ -45,6 +45,7 @@ class TaperPullingData:
     daq = None
     
     daq_busy = False
+    daq_initing = False
     simulate = False
     sampling_rate = 1e3
     
@@ -60,9 +61,7 @@ class TaperPullingData:
     buffer_slice = 100
     soft_buffer_ratio = 10
     soft_buffer = np.zeros((soft_buffer_ratio, buffer_slice))
-    soft_buffer_i = 0
     buffer = np.zeros(buffer_size)
-    buffering = False
     
     impedance = 1e4  # Ohms
     responsivity = 1.0  # A/W
@@ -112,6 +111,9 @@ class TaperPullingData:
         
     def init_daq_as_default(self, simulate=False):
         self.daq_busy = True
+        self.daq_initing = True
+        
+        self.set_sampling_rate(self.sampling_rate)
         self.set_buffer(self.buffer_size)
         self.daq.get_devices()
         if len(self.daq.devices) > 0:
@@ -127,17 +129,19 @@ class TaperPullingData:
             self.sampling_rate = self.daq.sampling_rate
             
         if self.daq.mode.name == "CONTINUOUS":
-            self.continuous_interval = self.buffer_size/self.daq.sampling_rate
             self.start_cont_loop()
         else:
             self.stop_cont_loop()
-            
+        
+        self.daq_initing = False
         self.daq_busy = False
             
     def init_daq(self, srate: float, dev_ch: str, scale: float, term="DEFAULT", 
                   mode="CONTINUOUS", buffer_size=5000, simulate=False):
         self.daq_busy = True
-        self.set_buffer(self.buffer_size)
+        self.daq_initing = True
+        self.set_sampling_rate(srate)
+        self.set_buffer(buffer_size)
         self.daq.get_devices()
         if len(self.daq.devices) > 0:
             self.daq.get_ai_channels()
@@ -145,11 +149,11 @@ class TaperPullingData:
             self.daq.setup_daq(srate, dev_ch, scale, term, mode, buffer_size, simulate)
             self.sampling_rate = self.daq.sampling_rate
         if mode == "CONTINUOUS":
-            self.continuous_interval = self.buffer_size/srate
             self.start_cont_loop()
         else:
             self.stop_cont_loop()
         
+        self.daq_initing = False
         self.daq_busy = False
             
     def set_sampling_rate(self, sampling_rate: float):
@@ -158,21 +162,23 @@ class TaperPullingData:
         
         self.clear_spectrogram()
         
-        if self.daq.ok:
+        if self.daq.ok and not self.daq_initing:
             self.init_daq_as_default(self.daq.simulate)
             
     def set_buffer(self, n: int=1000):
         self.soft_buffer_ratio = int(np.ceil((n/self.sampling_rate)/(self.continuous_interval/1000.0)))
         if self.soft_buffer_ratio < 1: 
             self.soft_buffer_ratio = 1
-            self.continuous_interval = n/self.sampling_rate
-            
+            self.continuous_interval = 1000.0*n/self.sampling_rate
+
         self.buffer_slice = int(np.ceil(n/self.soft_buffer_ratio))
-        n = self.buffer_slice*self.soft_buffer_ratio
-        self.buffer_size = n
         self.soft_buffer = np.zeros((self.soft_buffer_ratio, self.buffer_slice))
         self.buffer = np.zeros(n)
-        self.soft_buffer_i = 0
+        
+        self.clear_spectrogram()
+        
+        if self.daq.ok and not self.daq_initing:
+            self.init_daq_as_default(self.daq.simulate)
             
     def get_single_value(self):
         if not self.daq_busy:
@@ -260,13 +266,16 @@ class TaperPullingData:
     def continuous_update(self):
         if not self.daq_busy:
             self.daq_busy = True
-            self.buffering = True
-            self.buffer = self.daq.read_data(self.buffer_size)
+
+            self.soft_buffer = np.roll(self.soft_buffer, -1, 0)
+            self.soft_buffer[-1, :] = self.daq.read_data(self.buffer_slice)
+            m = self.soft_buffer.shape[0]
+            n = self.soft_buffer.shape[1]
+            self.buffer = self.soft_buffer.reshape(m*n)[-self.buffer_size:]            
 
             # Clear remaining DAQ buffer
             self.daq.read_all()
             
-            self.buffering = False
             self.daq_busy = False
             
     def stop_cont_loop(self):
