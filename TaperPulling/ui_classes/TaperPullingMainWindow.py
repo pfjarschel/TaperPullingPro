@@ -48,7 +48,11 @@ class MainWindow(FormUI, WindowUI):
     
     # Flow control variables
     done_loading = False
+    going_2start = False
+    go2start_busy = False
+    init_busy = False
     busy = False
+    pull_busy = False
     daq_busy = False
     initLoop_active = False
     init_motors_tries = 10
@@ -70,7 +74,7 @@ class MainWindow(FormUI, WindowUI):
     transm_i = 0
     
     def __del__(self):
-        print("closing all")
+        print("Closing all")
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -99,6 +103,7 @@ class MainWindow(FormUI, WindowUI):
             self.pullLoop_timer.stop()
             self.mainLoop_timer.stop()
             self.initLoop_timer.stop()
+            self.go2start_timer.stop()
             self.data.stop_monitor()
             self.data.close()
             self.core.stop_pulling()
@@ -265,6 +270,10 @@ class MainWindow(FormUI, WindowUI):
         self.initLoop_timer = QTimer()
         self.initLoop_timer.setInterval(self.main_to)
         self.initLoop_timer.timeout.connect(self.initLoop)
+        
+        self.go2start_timer = QTimer()
+        self.go2start_timer.setInterval(self.main_to)
+        self.go2start_timer.timeout.connect(self.go2start_loop)
         
         self.pullLoop_timer = QTimer()
         self.pullLoop_timer.setInterval(self.main_to)
@@ -619,8 +628,8 @@ class MainWindow(FormUI, WindowUI):
             self.busy = False
     
     def initLoop(self):
-        if not self.busy:
-            self.busy = True
+        if not self.init_busy:
+            self.init_busy = True
             
             connected = [False]*4
             homed = [False]*4
@@ -673,7 +682,7 @@ class MainWindow(FormUI, WindowUI):
             else:
                 self.core.motors.right_puller.home()
             
-            self.busy = False
+            self.init_busy = False
             
             if all(connected + homed):
                 self.core.standby = True
@@ -695,81 +704,86 @@ class MainWindow(FormUI, WindowUI):
                     self.resetmotorsBut.setEnabled(True)            
     
     def pullLoop(self):
-        # Update time
-        pull_left = self.total_to_pull - self.core.total_pulled
-        time_left = pull_left/(2*self.pullerPullVelSpin.value())
-        total_time = self.total_to_pull/(2*self.pullerPullVelSpin.value())
-        self.timeleftLabel.setText(f"Time left: {time_left:.2f} s")
-        self.timeleftBar.setValue(int(1000.0*(1 - time_left/total_time)))
-        
-        # Update est. values
-        tp = self.core.total_pulled
-        curr_hz = self.hz_function[1][np.abs(self.hz_function[0] - tp).argmin()]
-        self.totalPulledIndSpin.setValue(tp)
-        self.waistLengthIndSpin.setValue(curr_hz)
-        self.transLengthIndSpin.setValue((tp + self.hz_function[1][0] - curr_hz)/2)
-        
-        # Update est. diameter
-        if tp <= self.total_to_pull:
-            x_ind = np.abs(self.hz_function[0] - tp).argmin()
-            curr_d = 2000*self.profile[1][x_ind]
-        else:  # Manual stop can go beyond the stipulated value
-            curr_d = 2000*self.profile[1][-1]*np.exp(-np.abs(self.total_to_pull - tp)/(2*self.hz_function[1][-1]))
-        self.waistDiamIndSpin.setValue(curr_d)
-        
-        # Update real hotzone
-        curr_hz_sweep_n = len(self.core.rhz_edges)
-        if len(self.core.rhz_edges) > self.hz_sweep_n:
-            if curr_hz_sweep_n > 1:
-                rhz = np.abs(self.core.rhz_edges[-1] - self.core.rhz_edges[-2])
-                self.hotzoneIndSpin.setValue(rhz)
-                if self.core.pulling:
-                    self.rhz_array.append(rhz)
-                    self.rhz_x_array.append(tp)
-                    rhz_data = np.array([self.rhz_x_array, self.rhz_array])
-                    self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
-            self.hz_sweep_n += 1
+        if not self.pull_busy:
+            self.pull_busy = True
             
-        # Update transmission
-        if self.core.pulling:
-            self.transm_array[self.transm_i][0] = tp
-            self.transm_array[self.transm_i][1] = self.data.get_monitor_power(db=False)
-            self.transm_i += 1
-            tdata = self.transm_array[:self.transm_i]
-            if self.transm_i > self.max_tpts:
-                idxs = np.linspace(1, self.transm_i - 2, self.max_tpts - 2, dtype=int)
-                tdata = np.concatenate(([tdata[0]], tdata[idxs], [tdata[-1]]))
+            # Update time
+            pull_left = self.total_to_pull - self.core.total_pulled
+            time_left = pull_left/(2*self.pullerPullVelSpin.value())
+            total_time = self.total_to_pull/(2*self.pullerPullVelSpin.value())
+            self.timeleftLabel.setText(f"Time left: {time_left:.2f} s")
+            self.timeleftBar.setValue(int(1000.0*(1 - time_left/total_time)))
+            
+            # Update est. values
+            tp = self.core.total_pulled
+            curr_hz = self.hz_function[1][np.abs(self.hz_function[0] - tp).argmin()]
+            self.totalPulledIndSpin.setValue(tp)
+            self.waistLengthIndSpin.setValue(curr_hz)
+            self.transLengthIndSpin.setValue((tp + self.hz_function[1][0] - curr_hz)/2)
+            
+            # Update est. diameter
+            if tp <= self.total_to_pull:
+                x_ind = np.abs(self.hz_function[0] - tp).argmin()
+                curr_d = 2000*self.profile[1][x_ind]
+            else:  # Manual stop can go beyond the stipulated value
+                curr_d = 2000*self.profile[1][-1]*np.exp(-np.abs(self.total_to_pull - tp)/(2*self.hz_function[1][-1]))
+            self.waistDiamIndSpin.setValue(curr_d)
+            
+            # Update real hotzone
+            curr_hz_sweep_n = len(self.core.rhz_edges)
+            if len(self.core.rhz_edges) > self.hz_sweep_n:
+                if curr_hz_sweep_n > 1:
+                    rhz = np.abs(self.core.rhz_edges[-1] - self.core.rhz_edges[-2])
+                    self.hotzoneIndSpin.setValue(rhz)
+                    if self.core.pulling:
+                        self.rhz_array.append(rhz)
+                        self.rhz_x_array.append(tp)
+                        rhz_data = np.array([self.rhz_x_array, self.rhz_array])
+                        self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
+                self.hz_sweep_n += 1
                 
-            self.update_graph(tdata.T, self.graph_pow_line, self.graph_pow_ax, self.graph_pow,
-                              None, [0.0, 1.2*(10.0**(self.refpowIndSpin.value()/10.0))])
+            # Update transmission
+            if self.core.pulling:
+                self.transm_array[self.transm_i][0] = tp
+                self.transm_array[self.transm_i][1] = self.data.get_monitor_power(db=False)
+                self.transm_i += 1
+                tdata = self.transm_array[:self.transm_i]
+                if self.transm_i > self.max_tpts:
+                    idxs = np.linspace(1, self.transm_i - 2, self.max_tpts - 2, dtype=int)
+                    tdata = np.concatenate(([tdata[0]], tdata[idxs], [tdata[-1]]))
+                    
+                self.update_graph(tdata.T, self.graph_pow_line, self.graph_pow_ax, self.graph_pow,
+                                None, [0.0, 1.2*(10.0**(self.refpowIndSpin.value()/10.0))])
+                
+            # Update Spectrogram
+            if self.core.pulling:
+                if not self.data.spectrogram_running:
+                    self.data.cutoff_f = self.pullerPullVelSpin.value()*1000
+                    self.data.start_spectrogram(0.1, True, 0.15)
+                
+                if len(self.data.spectra) > 0:
+                    tp_arr = np.linspace(0.0, tp, len(self.data.spectra))
+                    if len(self.data.spectra) > self.max_spectra:
+                        data = np.array(self.data.spectra[-self.max_spectra:]).T
+                        tp0 = tp_arr[-self.max_spectra]
+                    else:
+                        data = np.array(self.data.spectra).T
+                        tp0 = 0.0
+                    freqs = self.data.spectra_freqs
+                    if data.shape[1] > self.graph_spec.width():
+                        data = cv2.resize(data, (self.graph_spec.width(), len(freqs)))
+                    self.graph_spec_img.set_data(data)
+                    self.graph_spec_img.set_extent((tp0, tp, freqs[0], 1/(freqs[-1]*self.pullerPullVelSpin.value())))
+                    self.graph_spec_img.set_clim(data.min(), data.max())
+                    self.graph_spec.draw()
+                    self.graph_spec.flush_events()
             
-        # Update Spectrogram
-        if self.core.pulling:
-            if not self.data.spectrogram_running:
-                self.data.cutoff_f = self.pullerPullVelSpin.value()*1000
-                self.data.start_spectrogram(0.1, True, 0.15)
-            
-            if len(self.data.spectra) > 0:
-                tp_arr = np.linspace(0.0, tp, len(self.data.spectra))
-                if len(self.data.spectra) > self.max_spectra:
-                    data = np.array(self.data.spectra[-self.max_spectra:]).T
-                    tp0 = tp_arr[-self.max_spectra]
-                else:
-                    data = np.array(self.data.spectra).T
-                    tp0 = 0.0
-                freqs = self.data.spectra_freqs
-                if data.shape[1] > self.graph_spec.width():
-                    data = cv2.resize(data, (self.graph_spec.width(), len(freqs)))
-                self.graph_spec_img.set_data(data)
-                self.graph_spec_img.set_extent((tp0, tp, freqs[0], 1/(freqs[-1]*self.pullerPullVelSpin.value())))
-                self.graph_spec_img.set_clim(data.min(), data.max())
-                self.graph_spec.draw()
-                self.graph_spec.flush_events()
-        
-        # Check if ended
-        if self.core.standby:
-            self.pullLoop_timer.stop()
-            self.stop_pulling()
+            # Check if ended
+            if self.core.standby:
+                self.pullLoop_timer.stop()
+                self.stop_pulling()
+                
+            self.pull_busy = False
         
     # DAQ functions
     def daq_init(self):
@@ -897,9 +911,35 @@ class MainWindow(FormUI, WindowUI):
                 self.core.init_puller_r_as_default(True, self.rightSimCheck.isChecked())
         
     def go2start(self):
-        self.core.motors.brusher.go_to(self.brusherInitPosSpin.value())
-        self.core.motors.left_puller.go_to(self.pullerInitPosSpin.value())
-        self.core.motors.right_puller.go_to(self.pullerInitPosSpin.value())
+        if not self.going_2start:
+            self.going_2start = True
+            self.go2start_timer.start()
+        
+    def go2start_loop(self):
+        if not self.go2start_busy:
+            self.go2start_busy = True
+            
+            bOk = np.abs(self.core.brusher_pos - self.brusherInitPosSpin.value()) <= self.core.pos_check_precision
+            fOk = np.abs(self.core.flame_io_pos - 0.0) <= self.core.pos_check_precision
+            lOk = np.abs(self.core.puller_left_pos - self.pullerInitPosSpin.value()) <= self.core.pos_check_precision
+            rOk = np.abs(self.core.puller_right_pos - self.pullerInitPosSpin.value()) <= self.core.pos_check_precision
+            
+            if not bOk and not self.core.motors.brusher.moving:
+                self.core.motors.brusher.go_to(self.brusherInitPosSpin.value())
+            if not fOk and not self.core.motors.flame_io.moving:
+                self.core.motors.flame_io.go_to(0.0)
+                
+            if bOk and fOk:
+                if not self.core.motors.left_puller.moving:
+                    self.core.motors.left_puller.go_to(self.pullerInitPosSpin.value())
+                if not self.core.motors.right_puller.moving:
+                    self.core.motors.right_puller.go_to(self.pullerInitPosSpin.value())
+                
+            if bOk and fOk and lOk and rOk:
+                self.going_2start = False
+                self.go2start_timer.stop()
+            
+            self.go2start_busy = False
         
     def start_pulling(self):
         self.disable_controls()
