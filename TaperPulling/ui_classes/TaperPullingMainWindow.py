@@ -1025,7 +1025,6 @@ class MainWindow(FormUI, WindowUI):
         graph_canvas.flush_events()
         
     def set_cmap(self):
-        toca
         cmap = self.cmapCombo.currentText()
         if self.cmapRevCheck.isChecked():
             cmap = f"{cmap}_r"
