@@ -13,7 +13,7 @@ control procedures during taper fabrication.
 
 import numpy as np
 import time
-from threading import Timer
+from threading import Timer, Thread
 from .TaperPullingMotors import TaperPullingMotors
 
 
@@ -170,23 +170,47 @@ class TaperPullingCore:
         self.current_profile_step = 0
         self.last_total_pulled = 0.0
     
-    def init_brusher_as_default(self, simulate=False):
-        return self.motors.initialize_motor(self.motors.MotorTypes.BRUSHER, simulate=simulate)
+    def init_brusher_as_default(self, async_init=False, simulate=False):
+        if async_init:
+            init_thread = Thread(target=self.motors.initialize_motor, 
+                                 kwargs={"motor_type": self.motors.MotorTypes.BRUSHER, "simulate": simulate})
+            init_thread.start()
+            return False
+        else:
+            return self.motors.initialize_motor(self.motors.MotorTypes.BRUSHER, simulate=simulate)
     
-    def init_flameio_as_default(self, simulate=False):
-        return self.motors.initialize_motor(self.motors.MotorTypes.FLAME_IO, simulate=simulate)
+    def init_flameio_as_default(self, async_init=False, simulate=False):
+        if async_init:
+            init_thread = Thread(target=self.motors.initialize_motor, 
+                                 kwargs={"motor_type": self.motors.MotorTypes.FLAME_IO, "simulate": simulate})
+            init_thread.start()
+            return False
+        else:
+            return self.motors.initialize_motor(self.motors.MotorTypes.FLAME_IO, simulate=simulate)
     
-    def init_puller_l_as_default(self, simulate=False):
-        return self.motors.initialize_motor(self.motors.MotorTypes.LEFT_PULLER, simulate=simulate)
+    def init_puller_l_as_default(self, async_init=False, simulate=False):
+        if async_init:
+            init_thread = Thread(target=self.motors.initialize_motor, 
+                                 kwargs={"motor_type": self.motors.MotorTypes.LEFT_PULLER, "simulate": simulate})
+            init_thread.start()
+            return False
+        else:
+            return self.motors.initialize_motor(self.motors.MotorTypes.LEFT_PULLER, simulate=simulate)
         
-    def init_puller_r_as_default(self, simulate=False):
-        return self.motors.initialize_motor(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
+    def init_puller_r_as_default(self, async_init=False, simulate=False):
+        if async_init:
+            init_thread = Thread(target=self.motors.initialize_motor, 
+                                 kwargs={"motor_type": self.motors.MotorTypes.RIGHT_PULLER, "simulate": simulate})
+            init_thread.start()
+            return False
+        else:
+            return self.motors.initialize_motor(self.motors.MotorTypes.RIGHT_PULLER, simulate=simulate)
     
-    def init_all_motors_as_default(self, simulate=False):
-        bok = self.init_brusher_as_default(simulate)
-        fok = self.init_flameio_as_default(simulate)
-        lok = self.init_puller_l_as_default(simulate)
-        rok = self.init_puller_r_as_default(simulate)
+    def init_all_motors_as_default(self, async_init=False, simulate=False):
+        bok = self.init_brusher_as_default(async_init, simulate)
+        fok = self.init_flameio_as_default(async_init, simulate)
+        lok = self.init_puller_l_as_default(async_init, simulate)
+        rok = self.init_puller_r_as_default(async_init, simulate)
         self.all_motors_ok = bok and fok and lok and rok
         return self.all_motors_ok
     

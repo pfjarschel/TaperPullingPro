@@ -50,6 +50,7 @@ class MainWindow(FormUI, WindowUI):
     done_loading = False
     busy = False
     daq_busy = False
+    initLoop_active = False
     wait_switch = False
     main_to = 100  # ms
     
@@ -621,6 +622,7 @@ class MainWindow(FormUI, WindowUI):
             
             connected = [False]*4
             homed = [False]*4
+            error = [False]*4
             
             if self.core.motors.brusher.ok:
                 connected[0] = True
@@ -630,6 +632,15 @@ class MainWindow(FormUI, WindowUI):
                 connected[2] = True
             if self.core.motors.right_puller.ok:
                 connected[3] = True
+            
+            if self.core.motors.brusher.error:
+                error[0] = True
+            if self.core.motors.flame_io.error:
+                error[1] = True
+            if self.core.motors.left_puller.error:
+                error[2] = True
+            if self.core.motors.right_puller.error:
+                error[3] = True
             
             if self.core.motors.brusher.homed:
                 self.brHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
@@ -659,12 +670,15 @@ class MainWindow(FormUI, WindowUI):
                 self.rightHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             else:
                 self.core.motors.right_puller.home()
-            
+            # print([a | b for a, b in zip((connected + homed), error)])
             self.busy = False
             if all(connected + homed):
-                self.initLoop_timer.stop()
-                self.core.running_process = True
                 self.core.standby = True
+                self.core.running_process = True
+            if all([a | b for a, b in zip((connected + homed), error)]):
+                self.initLoop_timer.stop()
+                self.initLoop_active = False
+                self.resetmotorsBut.setEnabled(True)
     
     def pullLoop(self):
         # Update time
@@ -848,20 +862,29 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.flame_io.go_to(0.0)
         
     def init_motors(self):
-        self.set_motors_params()
-        
-        self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-        self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-        self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-        self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-        
-        self.initLoop_timer.start()
-        
-        self.core.init_brusher_as_default(self.brSimCheck.isChecked())
-        self.core.init_flameio_as_default(self.fioSimCheck.isChecked())
-        self.core.init_puller_l_as_default(self.leftSimCheck.isChecked())
-        self.core.init_puller_r_as_default(self.rightSimCheck.isChecked())
-        
+        if not self.initLoop_active:
+            self.set_motors_params()
+            
+            self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+            
+            self.resetmotorsBut.setEnabled(False)
+            self.initLoop_active = True
+            self.initLoop_timer.start()
+            
+            if not self.core.motors.brusher.ok:
+                self.core.init_brusher_as_default(True, self.brSimCheck.isChecked())
+                time.sleep(1)
+            if not self.core.motors.flame_io.ok:
+                self.core.init_flameio_as_default(True, self.fioSimCheck.isChecked())
+                time.sleep(1)
+            if not self.core.motors.left_puller.ok:
+                self.core.init_puller_l_as_default(True, self.leftSimCheck.isChecked())
+                time.sleep(1)
+            if not self.core.motors.right_puller.ok:
+                self.core.init_puller_r_as_default(True, self.rightSimCheck.isChecked())
         
     def go2start(self):
         self.core.motors.brusher.go_to(self.brusherInitPosSpin.value())
