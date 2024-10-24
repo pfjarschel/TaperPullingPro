@@ -18,10 +18,6 @@ def global_exception_handler(exctype, value, tb):
         print("###############################################################")
         print()
         
-        mainwindow.core.motors.brusher.stop()
-        mainwindow.core.motors.flame_io.go_to(0.0)
-        mainwindow.core.motors.left_puller.stop()
-        mainwindow.core.motors.right_puller.stop()
         mainwindow.core.stop_pulling()
         
     print(f"Exception Type: {exctype}")

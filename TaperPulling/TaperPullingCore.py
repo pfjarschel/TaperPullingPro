@@ -486,12 +486,6 @@ class TaperPullingCore:
     def stop_pulling(self):
         self.standby = True
         
-        # Stop all motors
-        self.motors.brusher.stop()
-        self.motors.left_puller.stop()
-        self.motors.right_puller.stop()
-        time.sleep(0.5)
-        
         # Retract Flame I/O
         if self.flame_io_moveback:
             self.motors.flame_io.set_velocity(self.fio_v0)
@@ -499,10 +493,16 @@ class TaperPullingCore:
             time.sleep(0.1)
         self.motors.flame_io.go_to(0.0)
         
+        # Stop all motors
+        self.motors.brusher.stop()
+        self.motors.left_puller.stop()
+        self.motors.right_puller.stop()
+        
+        
         # Reset pullers velocity
         self.motors.left_puller.set_velocity(self.motors.left_puller.pull_vel)
         self.motors.right_puller.set_velocity(self.motors.right_puller.pull_vel)
-        time.sleep(0.5)
+        time.sleep(0.1)
     
         
         
