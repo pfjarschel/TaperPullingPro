@@ -51,6 +51,8 @@ class MainWindow(FormUI, WindowUI):
     busy = False
     daq_busy = False
     initLoop_active = False
+    init_motors_tries = 10
+    init_motors_i = 0
     wait_switch = False
     main_to = 100  # ms
     
@@ -670,15 +672,27 @@ class MainWindow(FormUI, WindowUI):
                 self.rightHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
             else:
                 self.core.motors.right_puller.home()
-            # print([a | b for a, b in zip((connected + homed), error)])
+            
             self.busy = False
+            
             if all(connected + homed):
                 self.core.standby = True
                 self.core.running_process = True
-            if all([a | b for a, b in zip((connected + homed), error)]):
                 self.initLoop_timer.stop()
                 self.initLoop_active = False
+                self.init_motors_i = 0
                 self.resetmotorsBut.setEnabled(True)
+            elif all([a | b for a, b in zip(connected, error)]) and not all(connected):
+                self.initLoop_timer.stop()
+                self.initLoop_active = False
+                if self.init_motors_i < self.init_motors_tries:
+                    self.init_motors_i += 1
+                    self.init_motors()
+                else:
+                    self.core.standby = True
+                    self.core.running_process = True
+                    self.init_motors_i = 0
+                    self.resetmotorsBut.setEnabled(True)            
     
     def pullLoop(self):
         # Update time
@@ -865,25 +879,21 @@ class MainWindow(FormUI, WindowUI):
         if not self.initLoop_active:
             self.set_motors_params()
             
-            self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-            self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-            self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-            self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-            
             self.resetmotorsBut.setEnabled(False)
             self.initLoop_active = True
             self.initLoop_timer.start()
             
             if not self.core.motors.brusher.ok:
+                self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
                 self.core.init_brusher_as_default(True, self.brSimCheck.isChecked())
-                time.sleep(1)
             if not self.core.motors.flame_io.ok:
+                self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
                 self.core.init_flameio_as_default(True, self.fioSimCheck.isChecked())
-                time.sleep(1)
             if not self.core.motors.left_puller.ok:
+                self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
                 self.core.init_puller_l_as_default(True, self.leftSimCheck.isChecked())
-                time.sleep(1)
             if not self.core.motors.right_puller.ok:
+                self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
                 self.core.init_puller_r_as_default(True, self.rightSimCheck.isChecked())
         
     def go2start(self):

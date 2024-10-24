@@ -213,8 +213,8 @@ class GenericTLMotor:
             if self.libok:
                 if self.lib.TLI_BuildDeviceList() == 0:
                     err = eval(f"self.lib.{self.lib_prfx}_Open(self.serial_c)")
+                    time.sleep(2.0)
                     if err == 0:
-                        time.sleep(1.0)
                         eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
                         eval(f"self.lib.{self.lib_prfx}_LoadSettings(self.serial_c)")
                         time.sleep(0.5)
@@ -469,6 +469,7 @@ class GenericTLMotor:
                 self.stop(0)
                 eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
                 eval(f"self.lib.{self.lib_prfx}_Home(self.serial_c)")
+                time.sleep(0.1)
                 self.start_home_loop()
                 
     def home_loop_function(self):
@@ -477,7 +478,7 @@ class GenericTLMotor:
             
             done = False
             eval(f"self.lib.{self.lib_prfx}_WaitForMessage(self.serial_c, byref(self.messageType), byref(self.messageId), byref(self.messageData))")
-            if (self.messageType.value == 2 and self.messageId.value == 0):
+            if (self.messageType.value == 2 and self.messageId.value == 0) or self.get_homed():
                 done = True
             
             if done:
@@ -809,6 +810,8 @@ class TaperPullingMotors:
         
         print(f"Initializing {motor_type.name}...")
         motor.initing = True
+        motor.ok = False
+        motor.error = False
         motor.connect(serial, poll_ms, simulate)
         motor.initialize()
         motor.set_velocity(motor.vel)
