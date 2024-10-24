@@ -23,7 +23,7 @@ def global_exception_handler(exctype, value, tb):
     print(f"Exception Type: {exctype}")
     print(f"Exception Value: {value}")
     print("Traceback:")
-    traceback.print_tb(tb)[5]
+    traceback.print_tb(tb)
     
 sys.excepthook = global_exception_handler
 
