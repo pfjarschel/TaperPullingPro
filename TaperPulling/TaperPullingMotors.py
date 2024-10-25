@@ -128,6 +128,7 @@ class GenericTLMotor:
         self.target_pos = 0.0
         self.min_pos = 0.0
         self.max_pos = 100.0
+        self.safe_range = [0.0, 100.0]
         
         # Flow control
         self.initing = False
@@ -639,6 +640,12 @@ class GenericTLMotor:
             self.movement = self.MoveDirection.STOPPED
             self.moving = False
             
+    def danger_zone(self):
+        if self.pos >= self.safe_range[0] and self.pos <= self.safe_range[1]:
+            return False
+        else:
+            return True
+            
     def measure_movement_start_time(self):
         if self.ok:
             pos = self.get_position()
@@ -678,11 +685,12 @@ class Brusher(GenericTLMotor):
         self.max_vel = self.vel # mm/s
         self.max_accel = self.accel # mm/s2
         self.serial = "83837733"
-        self.max_pos = 50.0  # mm
+        self.max_pos = 44.0  # mm. This should be 50, but it only goes up to 44.9, locking down after reaching this pos.
         self.units = [3455496, 77296962, 26384]
         self.units_mult = 100.0
         self.unit_cal = True
         self.min_span = 0.1
+        self.safe_range = [26.0, 36.0]
 
 class FlameIO(GenericTLMotor):
     """
@@ -702,6 +710,7 @@ class FlameIO(GenericTLMotor):
         self.units = [3455496, 77296962, 26384]
         self.units_mult = 100.0
         self.unit_cal = True
+        self.safe_range = [-1000.0, 1.0]
         
 class LeftPuller(GenericTLMotor):
     """
@@ -722,6 +731,7 @@ class LeftPuller(GenericTLMotor):
         self.units = [200000, 1342157, 137]
         self.units_mult = 100.0
         self.unit_cal = True
+        self.safe_range = [-1000.0, 86.0]
         
 class RightPuller(GenericTLMotor):
     """
@@ -742,6 +752,7 @@ class RightPuller(GenericTLMotor):
         self.units = [200000, 1342157, 137]
         self.units_mult = 100.0
         self.unit_cal = True
+        self.safe_range = [-1000.0, 73.0]
 
 class TaperPullingMotors:
     """
