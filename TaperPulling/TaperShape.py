@@ -22,6 +22,7 @@ import numpy as np
 from enum import Enum
 from scipy.signal import savgol_filter
 from scipy.optimize import minimize
+from threading import Timer, Thread
 
 # Get relevant paths
 thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
@@ -47,6 +48,17 @@ class TaperShape:
     shape. It also calculates the effective indexes and takes dispersion into
     account.
     """
+        
+    
+    class Loop(Timer):
+        """
+        Class that manages a threaded loop.
+        """
+        def run(self):
+            while not self.finished.wait(self.interval):
+                self.function(*self.args, **self.kwargs)
+    
+    
     # Basic parameters
     wavelength = 1.55  # µm
     initial_r = 62.5e-3  # mm
@@ -54,6 +66,7 @@ class TaperShape:
     n_core_ratio = 1.0036
     n_medium = 1.0
     n_points = 1001
+    calc_finished = False
         
     # Modal effective index difference
     dneffs = np.zeros(11)
@@ -85,6 +98,10 @@ class TaperShape:
             self.load_dneffs(f"{respath}/dneffs_SMF28_FB_1550.txt")
         
         self.set_parameters(wl, r0, r_core, n_core_ratio, n_medium, n_points)
+        
+        # Create arrays to store last calculated profiles
+        self.calc_z_array = None
+        self.calc_r_array = None
         
     def set_parameters(self,  wl: float=1.55,
                        r0: float=62.5e-3,
@@ -359,6 +376,7 @@ class TaperShape:
     def real_adiabatic_profile(self, rw: float, min_hz: float=2.0, start_f: float=1.0,
                                f_step: float=0.01, limit_r: float=20e-3):        
         print("Trying to find the best feasible profile for the current parameters...")
+        self.calc_finished = False
         
         # Find f factor that allows starting hz to be feasible
         f = 1.0  # First attempt
@@ -388,7 +406,12 @@ class TaperShape:
         if hz.min() >= min_hz or min_hz_idx >= len(hz) - 1:          
             # Profile is already feasible, min_hz is not broken
             print("Found a feasible profile!")
-            return z_rw, adiab_r_array, f
+            self.calc_finished = True
+            
+            self.calc_z_array = z_rw
+            self.calc_r_array = adiab_r_array
+            
+            return z_rw, adiab_r_array
         else:          
             # Perform optimization using parametric hot-zone
             curr_n = len(adiab_r_array)
@@ -410,8 +433,18 @@ class TaperShape:
             z_arr_opt0, r_arr_opt0 = self.profile_from_hz(x_arr_opt0, l_arr_opt0)
             z_arr_opt0, r_arr_opt0 = self.extend_profile_until_rw(z_arr_opt0, r_arr_opt0, rw, l_arr_opt0[-1])
             
+            self.calc_z_array = z_arr_opt0
+            self.calc_r_array = r_arr_opt0
+            
+            self.calc_finished = True
+            
             print("Found an optimized profile!")
             return z_arr_opt0, r_arr_opt0
     
-    
+    def real_adiabatic_profile_async(self, rw: float=1.0, min_hz: float=2.0, start_f: float=1.0,
+                            f_step: float=0.01, limit_r: float=20e-3):
         
+        calc_thread = Thread(target=self.real_adiabatic_profile, 
+                             args=(rw, min_hz, start_f, f_step, limit_r))
+        calc_thread.start()
+        return False

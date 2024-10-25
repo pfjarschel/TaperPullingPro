@@ -258,6 +258,18 @@ class TaperPullingCore:
             self.puller_left_pos = self.motors.left_puller.get_position()
             self.puller_right_pos = self.motors.right_puller.get_position()
             
+            # Assess if flame tip is in danger zone
+            if self.check_all_motors_ok():
+                fio_dz = self.motors.flame_io.danger_zone()
+                br_dz = self.motors.brusher.danger_zone()
+                lp_dz = self.motors.left_puller.danger_zone()
+                rp_dz = self.motors.right_puller.danger_zone()
+                
+                is_in_danger = all([fio_dz, br_dz, lp_dz]) or all([fio_dz, br_dz, rp_dz])
+                if is_in_danger:
+                    print("Flame tip was dangerously close to another motor! For safety, all movement ceased and all processes stopped.")
+                    self.stop_pulling()
+            
             if self.running_process:
                 # Process stages
                 # Convert all stage switches to 7-bit number
