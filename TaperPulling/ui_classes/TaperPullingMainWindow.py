@@ -635,6 +635,7 @@ class MainWindow(FormUI, WindowUI):
             homed = [False]*4
             error = [False]*4
             
+            # Check connections
             if self.core.motors.brusher.ok:
                 connected[0] = True
             if self.core.motors.flame_io.ok:
@@ -644,6 +645,7 @@ class MainWindow(FormUI, WindowUI):
             if self.core.motors.right_puller.ok:
                 connected[3] = True
             
+            # Check errors
             if self.core.motors.brusher.error:
                 error[0] = True
             if self.core.motors.flame_io.error:
@@ -653,34 +655,52 @@ class MainWindow(FormUI, WindowUI):
             if self.core.motors.right_puller.error:
                 error[3] = True
             
-            if self.core.motors.brusher.homed:
-                self.brHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-                homed[0] = True
-            elif self.core.motors.brusher.homing:
-                self.brHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-            else:
-                self.core.motors.brusher.home()
-            if self.core.motors.flame_io.homed:
-                self.fioHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-                homed[1] = True
-            elif self.core.motors.flame_io.homing:
-                self.fioHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-            else:
-                self.core.motors.flame_io.home()
-            if self.core.motors.left_puller.homed:
-                self.leftHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-                homed[2] = True
-            elif self.core.motors.left_puller.homing:
-                self.leftHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-            else:
-                self.core.motors.left_puller.home()
-            if self.core.motors.right_puller.homed:
-                self.rightHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
-                homed[3] = True
-            elif self.core.motors.right_puller.homing:
-                self.rightHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-            else:
-                self.core.motors.right_puller.home()
+            # Check if pullers are ok and initialize flame motors
+            if connected[2] and connected[3]:
+                if self.core.motors.left_puller.danger_zone():
+                    self.core.motors.left_puller.go_to(self.core.motors.left_puller.safe_range[1])
+                if self.core.motors.right_puller.danger_zone():
+                    self.core.motors.right_puller.go_to(self.core.motors.right_puller.safe_range[1])
+                
+                if not connected[0] and not self.core.motors.brusher.initing:
+                    self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+                    self.core.init_brusher_as_default(True, self.brSimCheck.isChecked())
+                if not connected[1] and not self.core.motors.flame_io.initing:
+                    self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+                    self.core.init_flameio_as_default(True, self.fioSimCheck.isChecked())
+            
+            if connected[0]:
+                if self.core.motors.brusher.homed:
+                    self.brHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                    homed[0] = True
+                elif self.core.motors.brusher.homing:
+                    self.brHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+                else:
+                    self.core.motors.brusher.home()
+            if connected[1]:
+                if self.core.motors.flame_io.homed:
+                    self.fioHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                    homed[1] = True
+                elif self.core.motors.flame_io.homing:
+                    self.fioHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+                else:
+                    self.core.motors.flame_io.home()
+            if connected[2]:
+                if self.core.motors.left_puller.homed:
+                    self.leftHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                    homed[2] = True
+                elif self.core.motors.left_puller.homing:
+                    self.leftHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+                else:
+                    self.core.motors.left_puller.home()
+            if connected[3]:
+                if self.core.motors.right_puller.homed:
+                    self.rightHomeLed.setPixmap(QPixmap(f"{respath}/green_led.png"))
+                    homed[3] = True
+                elif self.core.motors.right_puller.homing:
+                    self.rightHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
+                else:
+                    self.core.motors.right_puller.home()
             
             self.init_busy = False
             
@@ -691,6 +711,12 @@ class MainWindow(FormUI, WindowUI):
                 self.initLoop_active = False
                 self.init_motors_i = 0
                 self.resetmotorsBut.setEnabled(True)
+            elif all([a | b for a, b in zip(connected[2:], error[2:])]) and not all(connected[2:]):
+                self.initLoop_timer.stop()
+                self.initLoop_active = False
+                if self.init_motors_i < self.init_motors_tries:
+                    self.init_motors_i += 1
+                    self.init_motors()
             elif all([a | b for a, b in zip(connected, error)]) and not all(connected):
                 self.initLoop_timer.stop()
                 self.initLoop_active = False
@@ -897,12 +923,6 @@ class MainWindow(FormUI, WindowUI):
             self.initLoop_active = True
             self.initLoop_timer.start()
             
-            if not self.core.motors.brusher.ok:
-                self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-                self.core.init_brusher_as_default(True, self.brSimCheck.isChecked())
-            if not self.core.motors.flame_io.ok:
-                self.fioInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-                self.core.init_flameio_as_default(True, self.fioSimCheck.isChecked())
             if not self.core.motors.left_puller.ok:
                 self.leftInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
                 self.core.init_puller_l_as_default(True, self.leftSimCheck.isChecked())
