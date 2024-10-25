@@ -104,6 +104,7 @@ class MainWindow(FormUI, WindowUI):
             self.mainLoop_timer.stop()
             self.initLoop_timer.stop()
             self.go2start_timer.stop()
+            self.calc_timer.stop()
             self.data.stop_monitor()
             self.data.close()
             self.core.stop_pulling()
@@ -278,6 +279,10 @@ class MainWindow(FormUI, WindowUI):
         self.pullLoop_timer = QTimer()
         self.pullLoop_timer.setInterval(self.main_to)
         self.pullLoop_timer.timeout.connect(self.pullLoop)
+        
+        self.calc_timer = QTimer()
+        self.calc_timer.setInterval(self.main_to)
+        self.calc_timer.timeout.connect(self.calcLoop)
         
         # DAQ connections
         self.update_daq_combos()
@@ -1159,39 +1164,47 @@ class MainWindow(FormUI, WindowUI):
     
     def calc_hotzone(self):
         self.statusBar.showMessage(f"Calculating ideal feasible profile. Please wait...")
+        self.shape.real_adiabatic_profile(0.5e-3*self.dwoptSpin.value(), self.min_hz, self.ffactorSpin.value())
         
-        try:
-            z_arr, r_arr = self.shape.real_adiabatic_profile(0.5e-3*self.dwoptSpin.value(), self.min_hz, self.ffactorSpin.value())
-            x_arr, l_arr = self.shape.hz_from_profile(z_arr, r_arr, self.wlenoptSpin.value())
-            
-            self.hz_function = np.array([x_arr, l_arr])
-            self.total_to_pull = self.hz_function[0][-1]
-            
-            profile_data = self.shape.profile_from_hz(self.hz_function[0], self.hz_function[1])
-            self.profile_angles = self.shape.profile_angles(profile_data[0], profile_data[1])
-            ideal_prof = self.shape.ideal_adiabatic_profile(profile_data[1].min(), 1.0)
-            self.adiab_angles = self.shape.profile_angles(ideal_prof[0], ideal_prof[1])
-            self.profile = profile_data
-            
-            self.update_graph(self.hz_function, self.graph_hz_line, self.graph_hz_ax, self.graph_hz)
-            self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
-            self.update_graph(profile_data, self.graph_profmini_line, self.graph_profmini_ax, self.graph_profmini)
-            self.update_graph(np.array([ideal_prof[1], self.adiab_angles]), self.graph_anglemini_adialine, self.graph_anglemini_ax, self.graph_anglemini)
-            self.update_graph(np.array([profile_data[1], self.profile_angles]), self.graph_anglemini_line, self.graph_anglemini_ax, self.graph_anglemini)
-            self.update_minimum_hz()
+        self.calc_timer.start()
+    
+    def calcLoop(self):
+        if self.shape.calc_finished:
+            try:
+                z_arr = self.shape.z_array
+                r_arr = self.shape.r_array
+                x_arr, l_arr = self.shape.hz_from_profile(z_arr, r_arr, self.wlenoptSpin.value())
+                
+                self.hz_function = np.array([x_arr, l_arr])
+                self.total_to_pull = self.hz_function[0][-1]
+                
+                profile_data = self.shape.profile_from_hz(self.hz_function[0], self.hz_function[1])
+                self.profile_angles = self.shape.profile_angles(profile_data[0], profile_data[1])
+                ideal_prof = self.shape.ideal_adiabatic_profile(profile_data[1].min(), 1.0)
+                self.adiab_angles = self.shape.profile_angles(ideal_prof[0], ideal_prof[1])
+                self.profile = profile_data
+                
+                self.update_graph(self.hz_function, self.graph_hz_line, self.graph_hz_ax, self.graph_hz)
+                self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
+                self.update_graph(profile_data, self.graph_profmini_line, self.graph_profmini_ax, self.graph_profmini)
+                self.update_graph(np.array([ideal_prof[1], self.adiab_angles]), self.graph_anglemini_adialine, self.graph_anglemini_ax, self.graph_anglemini)
+                self.update_graph(np.array([profile_data[1], self.profile_angles]), self.graph_anglemini_line, self.graph_anglemini_ax, self.graph_anglemini)
+                self.update_minimum_hz()
 
-            self.dwoptSpin.setValue(2e3*profile_data[1].min())
-            self.wlenoptSpin.setValue(self.hz_function[1][-1])
-            self.setWaistLengthSpin.setValue(self.hz_function[1][-1])
-            self.pulledoptIndSpin.setValue(self.hz_function[0][-1])
-            self.hz0optIndSpin.setValue(self.hz_function[1][0])
-            self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
-            self.timeleftLabel.setText(f"Time left: {0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value():.2f} s")
-            
-            self.statusBar.showMessage(f"Profile calculated successfully!")
-        except Exception as e:
-            print(e)
-            self.statusBar.showMessage(e)
+                self.dwoptSpin.setValue(2e3*profile_data[1].min())
+                self.wlenoptSpin.setValue(self.hz_function[1][-1])
+                self.setWaistLengthSpin.setValue(self.hz_function[1][-1])
+                self.pulledoptIndSpin.setValue(self.hz_function[0][-1])
+                self.hz0optIndSpin.setValue(self.hz_function[1][0])
+                self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
+                self.timeleftLabel.setText(f"Time left: {0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value():.2f} s")
+                
+                self.statusBar.showMessage(f"Profile calculated successfully!")
+            except Exception as e:
+                print(e)
+                self.statusBar.showMessage(e)
+                
+            self.calc_timer.stop()
         
     # Menu functions
     def action_save_data(self):
