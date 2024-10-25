@@ -1164,15 +1164,17 @@ class MainWindow(FormUI, WindowUI):
     
     def calc_hotzone(self):
         self.statusBar.showMessage(f"Calculating ideal feasible profile. Please wait...")
-        self.shape.real_adiabatic_profile(0.5e-3*self.dwoptSpin.value(), self.min_hz, self.ffactorSpin.value())
+        self.shape.real_adiabatic_profile_async(0.5e-3*self.dwoptSpin.value(), self.min_hz, self.ffactorSpin.value())
         
         self.calc_timer.start()
     
     def calcLoop(self):
         if self.shape.calc_finished:
+            self.calc_timer.stop()
+            
             try:
-                z_arr = self.shape.z_array
-                r_arr = self.shape.r_array
+                z_arr = self.shape.calc_z_array
+                r_arr = self.shape.calc_r_array
                 x_arr, l_arr = self.shape.hz_from_profile(z_arr, r_arr, self.wlenoptSpin.value())
                 
                 self.hz_function = np.array([x_arr, l_arr])
@@ -1202,9 +1204,6 @@ class MainWindow(FormUI, WindowUI):
                 self.statusBar.showMessage(f"Profile calculated successfully!")
             except Exception as e:
                 print(e)
-                self.statusBar.showMessage(e)
-                
-            self.calc_timer.stop()
         
     # Menu functions
     def action_save_data(self):
