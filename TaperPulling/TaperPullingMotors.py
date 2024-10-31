@@ -440,8 +440,13 @@ class GenericTLMotor:
             # self.homed = not bool(eval(f"self.lib.{self.lib_prfx}_NeedsHoming(self.serial_c)"))
             
             # In fact, none of these are appropriate. It is best to use the status bits for this.
-            status_bits = self.get_status_bits()
-            self.homed = bool(status_bits & 0x00000400)
+            # Just one reading seems to give false results, try several.
+            for i in range(10):
+                status_bits = self.get_status_bits()
+                self.homed = bool(status_bits & 0x00000400)
+                if self.homed:
+                    break
+                time.sleep(0.1)
             
         return self.homed
     
