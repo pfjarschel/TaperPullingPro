@@ -3362,12 +3362,12 @@ margin: -10px -76px;
                <item>
                 <widget class="QLabel" name="label_74">
                  <property name="text">
-                  <string>Loop move back (mm)</string>
+                  <string>Loop move fwd (mm)</string>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="QDoubleSpinBox" name="loopmbSpin">
+                <widget class="QDoubleSpinBox" name="loopmfSpin">
                  <property name="singleStep">
                   <double>0.100000000000000</double>
                  </property>
@@ -3389,12 +3389,12 @@ margin: -10px -76px;
                <item>
                 <widget class="QLabel" name="label_75">
                  <property name="text">
-                  <string>Loop move fwd (mm)</string>
+                  <string>Loop move back (mm)</string>
                  </property>
                 </widget>
                </item>
                <item>
-                <widget class="QDoubleSpinBox" name="loopmfSpin">
+                <widget class="QDoubleSpinBox" name="loopmbSpin">
                  <property name="value">
                   <double>0.900000000000000</double>
                  </property>

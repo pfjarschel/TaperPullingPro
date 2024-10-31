@@ -116,10 +116,10 @@ class TaperPullingCore:
     loop_dist_bw = 1.0
     loop_dist_fw = 1.0
     loop_started = False
-    loop_tensioned = False
+    loop_loosened = False
     loop_looped = False
-    loop_loosing = False
-    loop_loosed = False
+    loop_tensioning = False
+    loop_tensioned = False
     
     def __init__(self):
         """
@@ -416,9 +416,22 @@ class TaperPullingCore:
     def perform_loop(self):
         if not self.loop_started:
             self.loop_started = True
+            self.motors.left_puller.go_to(self.puller_left_pos - self.puller_left_dir*self.loop_dist_fw)
+            self.motors.right_puller.go_to(self.puller_right_pos - self.puller_right_dir*self.loop_dist_fw)
+        elif not self.loop_loosened:
+            lok = False
+            rok = False
+            if self.motors.left_puller.movement == self.motors.left_puller.MoveDirection.STOPPED:
+                lok = True
+            if self.motors.right_puller.movement == self.motors.right_puller.MoveDirection.STOPPED:
+                rok = True
+            if lok and rok:
+                self.loop_loosened = True
+        elif self.loop_looped and not self. loop_tensioning:
             self.motors.left_puller.go_to(self.puller_left_pos + self.puller_left_dir*self.loop_dist_bw)
             self.motors.right_puller.go_to(self.puller_right_pos + self.puller_right_dir*self.loop_dist_bw)
-        elif not self.loop_tensioned:
+            self.loop_tensioning = True
+        elif self.loop_tensioning and not self.loop_tensioned:
             lok = False
             rok = False
             if self.motors.left_puller.movement == self.motors.left_puller.MoveDirection.STOPPED:
@@ -427,26 +440,13 @@ class TaperPullingCore:
                 rok = True
             if lok and rok:
                 self.loop_tensioned = True
-        elif self.loop_looped and not self. loop_loosing:
-            self.motors.left_puller.go_to(self.puller_left_pos - self.puller_left_dir*self.loop_dist_fw)
-            self.motors.right_puller.go_to(self.puller_right_pos - self.puller_right_dir*self.loop_dist_fw)
-            self.loop_loosing = True
-        elif self.loop_loosing and not self.loop_loosed:
-            lok = False
-            rok = False
-            if self.motors.left_puller.movement == self.motors.left_puller.MoveDirection.STOPPED:
-                lok = True
-            if self.motors.right_puller.movement == self.motors.right_puller.MoveDirection.STOPPED:
-                rok = True
-            if lok and rok:
-                self.loop_loosed = True
-        elif self.loop_loosed:
+        elif self.loop_tensioned:
             self.looping = False
             self.loop_started = False
-            self.loop_tensioned = False
+            self.loop_loosened = False
             self.loop_looped = False
-            self.loop_loosing = False
-            self.loop_loosed = False
+            self.loop_tensioning = False
+            self.loop_tensioned = False
         
     def go_to_start(self):
         if self.check_all_motors_ok:

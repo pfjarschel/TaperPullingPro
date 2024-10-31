@@ -1003,25 +1003,26 @@ class MainWindow(FormUI, WindowUI):
         
     def loop(self):
         if self.core.standby:
-            loop_mb = self.loopmbSpin.value()
             loop_mf = self.loopmfSpin.value()
+            loop_mb = self.loopmbSpin.value()
             text = "The loop wizard will now start.\n" + \
-                    f"The puller motors will move {loop_mb:.2f} mm back (each), to provide some tension.\n\n" + \
+                    f"The puller motors will move {loop_mf:.2f} mm forward (each), to loosen the fiber.\n\n" + \
                     "Click 'Ok' to continue."
             QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
             
             self.core.loop_dist_bw = loop_mb
             self.core.loop_dist_fw = loop_mf
             self.core.looping = True
-            while not self.core.loop_tensioned:
+            while not self.core.loop_loosened:
                 time.sleep(0.1)
 
-            text = "Now twist the taper as needed.\n\n" + \
-                "Click 'Ok' to continue when done."
+            text = "Now twist as needed.\n\n" + \
+                   "Click 'Ok' to continue when done."
             QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
             
-            text = f"The puller motors will now move {loop_mf:.2f} mm back (each), to relax the taper.\n\n" + \
-                "Click 'Ok' to continue."
+            text = f"The puller motors will now move {loop_mb:.2f} mm back (each), to tension the loop" + \
+                    " and control its diameter.\n\n" + \
+                    "Click 'Ok' to continue."
             QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
             
             self.core.loop_looped = True
