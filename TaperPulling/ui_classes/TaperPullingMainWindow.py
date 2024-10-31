@@ -225,7 +225,7 @@ class MainWindow(FormUI, WindowUI):
         self.graph_spec_img = self.graph_spec_ax.imshow(np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]).T, aspect="auto",
                                                         extent=(0.0, 1.0, 0.0, 1.0), origin="lower", cmap='PRGn', interpolation='none')
         self.graph_spec_ax.set_xlabel("Pulled Dist. (mm)")
-        self.graph_spec_ax.set_ylabel("Frequency (1/mm)")
+        self.graph_spec_ax.set_ylabel("Frequency (per µm pulled)")
         self.graph_spec_ax.grid(False)
         self.graph_spec.draw()
         
@@ -789,7 +789,7 @@ class MainWindow(FormUI, WindowUI):
             # Update Spectrogram
             if self.core.pulling:
                 if not self.data.spectrogram_running:
-                    self.data.cutoff_f = self.pullerPullVelSpin.value()*1000
+                    self.data.cutoff_f = 2*self.pullerPullVelSpin.value()*1000
                     self.data.start_spectrogram(0.1, True, 0.15)
                 
                 if len(self.data.spectra) > 0:
@@ -804,7 +804,7 @@ class MainWindow(FormUI, WindowUI):
                     if data.shape[1] > self.graph_spec.width():
                         data = cv2.resize(data, (self.graph_spec.width(), len(freqs)))
                     self.graph_spec_img.set_data(data)
-                    self.graph_spec_img.set_extent((tp0, tp, freqs[0], 1/(freqs[-1]*self.pullerPullVelSpin.value())))
+                    self.graph_spec_img.set_extent((tp0, tp, 1e-3*freqs[0]/self.pullerPullVelSpin.value(), 1e-3*freqs[-1]/self.pullerPullVelSpin.value()))
                     self.graph_spec_img.set_clim(data.min(), data.max())
                     self.graph_spec.draw()
                     self.graph_spec.flush_events()
