@@ -1,9 +1,9 @@
 # Import PyQt6 stuff
 from PyQt6 import uic
-from PyQt6.QtCore import QTimer, QCoreApplication, QDir
+from PyQt6.QtCore import Qt, QTimer, QCoreApplication, QDir, pyqtSignal, QObject, QEvent
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
                             QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
-                            QMessageBox, QFileDialog
+                            QMessageBox, QFileDialog, QLabel, QMenu
 from PyQt6.QtGui import QPixmap
 
 # Import other stuff
@@ -22,6 +22,7 @@ from TaperPulling.TaperShape import TaperShape
 from TaperPulling.TaperPullingSim import TaperPullingSim
 from TaperPulling.TaperPullingCore import TaperPullingCore
 from TaperPulling.TaperPullingData import TaperPullingData
+from TaperPulling.TaperPullingMotors import GenericTLMotor
 
 # Load UI files
 thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
@@ -31,6 +32,25 @@ confpath = f"{rootpath}/config"
 FormUI, WindowUI = uic.loadUiType(f"{respath}/mainwindow.ui")
 
 
+# Status LEDs event filter (clickable label)
+class LabelEventFilter(QObject):
+    clicked = pyqtSignal()
+    right_clicked = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+    def eventFilter(self, obj, event):
+        if event.type() == event.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.RightButton:
+                self.right_clicked.emit()
+            elif event.button() == Qt.MouseButton.LeftButton:
+                self.clicked.emit()
+        return False
+
+
+
+# Main class
 class MainWindow(FormUI, WindowUI):
     # Taper classes objects
     shape = None
@@ -113,6 +133,39 @@ class MainWindow(FormUI, WindowUI):
             event.accept()
         else:
             event.ignore()
+    
+    # Function to add clicking functionality to LEDs
+    def make_led_clickable(self, label: QLabel, motor: GenericTLMotor):
+        # Create and install event filter
+        event_filter = LabelEventFilter(label)
+        label.installEventFilter(event_filter)
+        
+        # # Enable context menu
+        label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        
+        # Add right-click menu functionality
+        def show_context_menu(position):
+            context_menu = QMenu(label)
+            action1 = context_menu.addAction("Re-initialize (if initialized)")
+            action2 = context_menu.addAction("Force home")
+            
+            action = context_menu.exec(label.mapToGlobal(position))
+            
+            if action == action1:
+                motor.close()
+                self.init_motors()
+            
+            if action == action2:
+                if motor.name == "Brusher":
+                    if self.core.motors.left_puller.danger_zone():
+                        self.core.motors.left_puller.go_to(self.core.motors.left_puller.safe_range[1])
+                    if self.core.motors.right_puller.danger_zone():
+                        self.core.motors.right_puller.go_to(self.core.motors.right_puller.safe_range[1])
+                motor.home(True)
+        
+        label.customContextMenuRequested.connect(show_context_menu)
+        
+        return event_filter
     
     # Configure UI
     def config_ui(self):
@@ -310,6 +363,17 @@ class MainWindow(FormUI, WindowUI):
         self.enablemanualCheck.clicked.connect(self.toggle_manual_control)
         self.brusherMinSpanSpin.valueChanged.connect(self.update_minimum_hz)
         self.fSizeSpin.valueChanged.connect(self.update_minimum_hz)
+        
+        # Motor LEDs
+        self.brInitLed_ef = self.make_led_clickable(self.brInitLed, self.core.motors.brusher)
+        self.brHomeLed_ef = self.make_led_clickable(self.brHomeLed, self.core.motors.brusher)
+        self.fioInitLed_ef = self.make_led_clickable(self.fioInitLed, self.core.motors.flame_io)
+        self.fioHomeLed_ef = self.make_led_clickable(self.fioHomeLed, self.core.motors.flame_io)
+        self.leftInitLed_ef = self.make_led_clickable(self.leftInitLed, self.core.motors.left_puller)
+        self.leftHomeLed_ef = self.make_led_clickable(self.leftHomeLed, self.core.motors.left_puller)
+        self.rightInitLed_ef = self.make_led_clickable(self.rightInitLed, self.core.motors.right_puller)
+        self.rightHomeLed_ef = self.make_led_clickable(self.rightHomeLed, self.core.motors.right_puller)
+        
         
         # Taper params connections
         self.distPriorRadio.clicked.connect(self.recalc_params)
@@ -934,6 +998,10 @@ class MainWindow(FormUI, WindowUI):
             if not self.core.motors.right_puller.ok:
                 self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
                 self.core.init_puller_r_as_default(True, self.rightSimCheck.isChecked())
+                
+    def br_reinit(self):
+        self.core.motors.brusher.close()
+        self.init_motors()
         
     def go2start(self):
         if not self.going_2start:

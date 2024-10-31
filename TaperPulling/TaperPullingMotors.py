@@ -141,6 +141,7 @@ class GenericTLMotor:
         self.movement = self.MoveDirection.STOPPED
         
         # Device
+        self.name = "Generic"
         self.motor_type = None
         self.serial = ""
         self.serial_c = None
@@ -262,13 +263,16 @@ class GenericTLMotor:
         """
 
         if self.ok:
-            if disable:
-                eval(f"self.lib.{self.lib_prfx}_DisableChannel(self.serial_c)")
-            eval(f"self.lib.{self.lib_prfx}_StopPolling(self.serial_c)")
-            eval(f"self.lib.{self.lib_prfx}_Close(self.serial_c)")
-        
-            if self.simulate:
-                self.lib.TLI_UninitializeSimulations()
+            try:
+                if disable:
+                    eval(f"self.lib.{self.lib_prfx}_DisableChannel(self.serial_c)")
+                eval(f"self.lib.{self.lib_prfx}_StopPolling(self.serial_c)")
+                eval(f"self.lib.{self.lib_prfx}_Close(self.serial_c)")
+            
+                if self.simulate:
+                    self.lib.TLI_UninitializeSimulations()
+            except Exception as e:
+                print(e)
         
         self.ok = False
         
@@ -684,6 +688,8 @@ class Brusher(GenericTLMotor):
     def __init__(self, kinesis_dll_lib=None):
         super().__init__(MotorType.TCUBE_DCSERVO, kinesis_dll_lib)
         
+        self.name = "Brusher"
+        
         # Default parameters
         self.vel = 2.5  # mm/s
         self.accel = 4.5  # mm/s2
@@ -705,6 +711,8 @@ class FlameIO(GenericTLMotor):
     def __init__(self, kinesis_dll_lib=None):
         super().__init__(MotorType.TCUBE_DCSERVO, kinesis_dll_lib)
         
+        self.name = "FlameIO"
+        
         # Default parameters
         self.vel = 2.0  # mm/s
         self.accel = 2.0  # mm/s2
@@ -724,6 +732,8 @@ class LeftPuller(GenericTLMotor):
     
     def __init__(self, kinesis_dll_lib=None):
         super().__init__(MotorType.TCUBE_BRUSHLESS, kinesis_dll_lib)
+        
+        self.name = "LefttPuller"
         
         # Default parameters
         self.vel = 40.0  # mm/s
@@ -745,6 +755,8 @@ class RightPuller(GenericTLMotor):
     
     def __init__(self, kinesis_dll_lib=None):
         super().__init__(MotorType.TCUBE_BRUSHLESS, kinesis_dll_lib)
+        
+        self.name = "RightPuller"
         
         # Default parameters
         self.vel = 40.0  # mm/s
