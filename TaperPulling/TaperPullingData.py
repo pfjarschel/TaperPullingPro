@@ -259,7 +259,7 @@ class TaperPullingData:
 
         if data_n > self.buffer_size: data_n = self.buffer_size
         data_y = self.buffer[-data_n:]
-        data_x = np.linspace(0, data_n*self.monitor_interval/1000.0, data_n)
+        data_x = np.linspace(0, data_n/self.sampling_rate, data_n)
         
         spec_x, spec_y = self.perform_fft(data_x, data_y, smooth, window, sigma)
         

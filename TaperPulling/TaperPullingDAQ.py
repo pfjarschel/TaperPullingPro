@@ -51,7 +51,10 @@ class TaperPullingDAQ:
         Nothing is done directly at instantiation, except getting system info.
         """
         
-        self.local_system = nidaqmx.system.System.local()
+        try:
+            self.local_system = nidaqmx.system.System.local()
+        except Exception as e:
+            print(e)
         
     def __del__(self):
         self.stop_measuring()
@@ -145,7 +148,7 @@ class TaperPullingDAQ:
             mode = eval(f"AcquisitionType.{mode}")
         self.term_config = term
         self.mode = mode
-        
+
         
         if not self.simulate:
             try:
