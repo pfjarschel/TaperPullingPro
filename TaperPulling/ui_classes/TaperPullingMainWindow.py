@@ -1063,11 +1063,33 @@ class MainWindow(FormUI, WindowUI):
     def cleave(self):
         if self.core.standby:
             text = "Caution: this procedure is a gamble, and results are not guaranteed.\n" + \
-                "The puller motors will move 10 mm back at 0.5 m/s, accelerating with 0.5g. " + \
-                "This should, in theory, break the taper as smoothly as possible right in the middle.\n" + \
-                "If you are able, a very tiny scratch can help achieve good a result."
-            QMessageBox.information(self, "About to cleave", text, QMessageBox.StandardButton.Ok)
-            self.core.cleaving = True
+                "There two options available:\n\n" + \
+                "1. The pullers move back 2 mm each at the normal pulling velocity, slowly stretching " + \
+                "the fiber until it breaks. This procedure is best when used on a looped taper.\n\n" + \
+                "2. The puller motors will move 5 mm back each at 0.1 m/s, accelerating with 0.9g.\n\n" + \
+                "Both methods should, in theory, break the taper as smoothly as possible right in the middle.\n" + \
+                "If you are able, a very tiny scratch can help achieve good a result.\n\n" + \
+                "Which method do you want to try?"
+                
+            cleave_box = QMessageBox()
+            cleave_box.setWindowTitle("About to attempt cleaving")
+            cleave_box.setIcon(QMessageBox.Icon.Warning)
+            cleave_box.setText(text)
+            cleave_box.addButton("Smooth cleave", QMessageBox.ButtonRole.YesRole)
+            cleave_box.addButton("Brute cleave", QMessageBox.ButtonRole.NoRole)
+            cleave_box.addButton(QMessageBox.StandardButton.Cancel)
+            choose_slow = cleave_box.exec()
+
+            # if choose_slow == QMessageBox.ButtonRole.YesRole:  # Doesn't work
+            # if choose_slow == QMessageBox.StandardButton.Yes:  # Doesn't work
+            if choose_slow == 2:  # Why 2? That's what's returned, but why? How can we make this safer to future changes?
+                self.core.cleave_mode = "slow"
+                self.core.cleave_dist = 2.0
+                self.core.cleaving = True
+            elif choose_slow == 3:
+                self.core.cleave_mode = "fast"
+                self.core.cleave_dist = 5.0
+                self.core.cleaving = True
         
     def loop(self):
         if self.core.standby:
@@ -1076,30 +1098,40 @@ class MainWindow(FormUI, WindowUI):
             text = "The loop wizard will now start.\n" + \
                     f"The puller motors will move {loop_mf:.2f} mm forward (each), to loosen the fiber.\n\n" + \
                     "Click 'Ok' to continue."
-            QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
+            box_resp = QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
             
-            self.core.loop_dist_bw = loop_mb
-            self.core.loop_dist_fw = loop_mf
-            self.core.looping = True
-            while not self.core.loop_loosened:
-                time.sleep(0.1)
+            if box_resp == QMessageBox.StandardButton.Ok:
+                self.core.loop_dist_bw = loop_mb
+                self.core.loop_dist_fw = loop_mf
+                self.core.looping = True
+                while not self.core.loop_loosened:
+                    time.sleep(0.1)
 
-            text = "Now twist as needed.\n\n" + \
-                   "Click 'Ok' to continue when done."
-            QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
-            
-            text = f"The puller motors will now move {loop_mb:.2f} mm back (each), to tension the loop" + \
-                    " and control its diameter.\n\n" + \
-                    "Click 'Ok' to continue."
-            QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
-            
-            self.core.loop_looped = True
-            while self.core.looping:
-                time.sleep(0.1)
-            
-            text = "Thats it! Your loop should be complete!\n\n" + \
-                "Click 'Ok' to end the wizard."
-            QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
+                text = "Now twist as needed.\n\n" + \
+                    "Click 'Ok' to continue when done."
+                box_resp = QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
+                
+                text = f"The puller motors will now move {loop_mb:.2f} mm back (each), to tension the loop" + \
+                        " and control its diameter.\n\n" + \
+                        "Click 'Ok' to continue."
+                box_resp = QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+                
+                if box_resp == QMessageBox.StandardButton.Ok:
+                    self.core.loop_looped = True
+                    while self.core.looping:
+                        time.sleep(0.1)
+                    
+                    text = "Thats it! Your loop should be complete!\n\n" + \
+                        "Click 'Ok' to end the wizard."
+                    QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
+                else:
+                    self.core.looping = False
+                    self.core.loop_started = False
+                    self.core.loop_loosened = False
+                    self.core.loop_looped = False
+                    self.core.loop_tensioning = False
+                    self.core.loop_tensioned = False
+                    
     
     # Taper params functions
     def recalc_params(self):

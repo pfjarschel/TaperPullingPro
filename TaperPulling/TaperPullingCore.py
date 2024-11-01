@@ -44,7 +44,7 @@ class TaperPullingCore:
     pulling = False             # Stage 3
     stopping = False            # Stage 4
     standby = False             # Stage 5
-    cleaving = False            # Opt. Stage 6
+    cleaving = False       # Opt. Stage 6
     looping = False             # Opt. Stage 6
     pos_check_precision = 0.1   # Precision expected when checking for positions (mm)
     print_lps = False
@@ -90,7 +90,7 @@ class TaperPullingCore:
     auto_stop = True  # Stops when pulled distance reaches hz function end
     force_hz_edge = True  # Prevents two diameters
     
-    brusher_x0 = 33.0  # mm
+    brusher_x0 = 31.0  # mm
     brusher_min_span = 0.5  # mm, minimum brush span. Motor glitches if it's too low
     brusher_reverse = False  # Start brushing to more negative positions (v < 0)
     
@@ -107,7 +107,9 @@ class TaperPullingCore:
     brusher_enhance_edge = True  # Use acceleration information to improve HZ edges
     
     # Other vars
-    cleave_dist = 5.0
+    cleave_dist = 2.0
+    cleave_mode = "slow"
+    cleave_ongoing = False
     fio_v0 = [0.0, 0.0]
     pl_v0 = [0.0, 0.0]
     pl_a0 = [0.0, 0.0]
@@ -272,9 +274,9 @@ class TaperPullingCore:
             
             if self.running_process:
                 # Process stages
-                # Convert all stage switches to 7-bit number
-                stage_array = [self.flame_approaching, self.flame_holding, self.pulling, 
-                            self.stopping, self.standby, self.looping, self.cleaving]
+                # Convert all stage switches to a 7-bit number
+                stage_array = [self.flame_approaching, self.flame_holding, self.pulling, self.stopping,
+                               self.standby, self.looping, self.cleaving]
                 stage = sum(map(lambda x: x[1] << x[0], enumerate(stage_array)))
                 
                 if stage == 0:
@@ -392,26 +394,34 @@ class TaperPullingCore:
             print("Stopped")
     
     def perform_cleave(self):
+        if not self.cleave_ongoing:
+            self.cleave_ongoing = True
+            
             self.pl_a0 = self.motors.right_puller.get_acceleration()
             self.pl_v0 = self.motors.right_puller.get_velocity()
             self.pr_a0 = self.motors.right_puller.get_acceleration()
             self.pr_v0 = self.motors.right_puller.get_velocity()
             
-            self.motors.left_puller.set_acceleration(900)
-            self.motors.left_puller.set_velocity(100)
-            self.motors.right_puller.set_acceleration(900)
-            self.motors.right_puller.set_velocity(100)
+            if self.cleave_mode == "fast":
+                self.motors.left_puller.set_acceleration(900)
+                self.motors.left_puller.set_velocity(100)
+                self.motors.right_puller.set_acceleration(900)
+                self.motors.right_puller.set_velocity(100)
+            else:
+                self.motors.left_puller.set_velocity(0.1)
+                self.motors.right_puller.set_velocity(0.1)
             
             self.motors.left_puller.move_relative(-self.cleave_dist)
             self.motors.right_puller.move_relative(-self.cleave_dist)
-            time.sleep(2.0)
+        else:
+            if (not self.motors.left_puller.moving) and (not self.motors.right_puller.moving):
+                self.motors.left_puller.set_acceleration(self.pl_a0)
+                self.motors.left_puller.set_velocity(self.pl_v0)
+                self.motors.right_puller.set_acceleration(self.pr_a0)
+                self.motors.right_puller.set_velocity(self.pr_v0)
             
-            self.motors.left_puller.set_acceleration(self.pl_a0)
-            self.motors.left_puller.set_velocity(self.pl_v0)
-            self.motors.right_puller.set_acceleration(self.pr_a0)
-            self.motors.right_puller.set_velocity(self.pr_v0)
-            
-            self.cleaving = False
+                self.cleaving = False
+                self.cleave_ongoing = False
             
     def perform_loop(self):
         if not self.loop_started:
