@@ -43,6 +43,7 @@ class TaperPullingDAQ:
     paused = False
     task_running = False
     ok = False
+    sys_ok = False
     simulate = False # Simulate DAQ acquisition
     
     def __init__(self):
@@ -53,6 +54,7 @@ class TaperPullingDAQ:
         
         try:
             self.local_system = nidaqmx.system.System.local()
+            self.sys_ok = True
         except Exception as e:
             print(e)
         
@@ -67,47 +69,53 @@ class TaperPullingDAQ:
         """
         Gets all NI DAQ devices present in the system.
         """
-        self.local_system = nidaqmx.system.System.local()
-        for device in self.local_system.devices:
-            self.devices.append(device)
-            self.devices_names.append(device.name)
-            
-        return self.devices
+        if self.sys_ok:
+            self.local_system = nidaqmx.system.System.local()
+            for device in self.local_system.devices:
+                self.devices.append(device)
+                self.devices_names.append(device.name)
+                
+            return self.devices
+        else:
+            return []
         
     def get_ai_channels(self, dev=None):
         """
         Gets all analog in channels from a device (or all).
         """
-        channels = []
-        if dev != None:
-            for channel in dev.ai_physical_chans:
-                self.channels.append(channel)
-                self.channels_names.append(channel.name)
-        else:
-            for dev in self.devices:
+        if self.sys_ok:
+            if dev != None:
                 for channel in dev.ai_physical_chans:
                     self.channels.append(channel)
                     self.channels_names.append(channel.name)
+            else:
+                for dev in self.devices:
+                    for channel in dev.ai_physical_chans:
+                        self.channels.append(channel)
+                        self.channels_names.append(channel.name)
             
         return self.channels
     
     def get_dev_from_name(self, dev_chan: str):
-        try:
-            dev_str = dev_chan.split("/")[0]
-            dev_idx = self.devices_names.index(dev_str)
-            return self.devices[dev_idx]
-        except:
-            print(f"Device from {dev_chan} not found")
-            return None
+        if self.sys_ok:
+            try:
+                dev_str = dev_chan.split("/")[0]
+                dev_idx = self.devices_names.index(dev_str)
+                return self.devices[dev_idx]
+            except:
+                print(f"Device from {dev_chan} not found")
+                return None
     
     def get_volt_ranges(self, dev):
         """
         Gets the AI voltage ranges for a device.
         """
         ranges = []
-        dev_ranges = dev.ai_voltage_rngs
-        for i in range(len(dev_ranges)//2):
-            ranges.append(np.abs(dev_ranges[i*2]))
+        
+        if self.sys_ok:
+            dev_ranges = dev.ai_voltage_rngs
+            for i in range(len(dev_ranges)//2):
+                ranges.append(np.abs(dev_ranges[i*2]))
             
         return ranges
     
@@ -116,9 +124,11 @@ class TaperPullingDAQ:
         Gets the terminal configs for a channel.
         """
         configs = []
-        chan_configs = channel.ai_term_cfgs
-        for conf in chan_configs:
-            configs.append(conf)
+        
+        if self.sys_ok:
+            chan_configs = channel.ai_term_cfgs
+            for conf in chan_configs:
+                configs.append(conf)
             
         return configs
         
@@ -150,7 +160,7 @@ class TaperPullingDAQ:
         self.mode = mode
 
         
-        if not self.simulate:
+        if not self.simulate and self.sys_ok:
             try:
                 self.task.stop()
                 self.task.close()
