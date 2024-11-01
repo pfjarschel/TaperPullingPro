@@ -2776,6 +2776,12 @@ margin: -10px -76px;
              </item>
              <item>
               <widget class="QDoubleSpinBox" name="flameIOPosIndSpin">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
                <property name="readOnly">
                 <bool>true</bool>
                </property>
@@ -2797,6 +2803,12 @@ margin: -10px -76px;
               <widget class="QDoubleSpinBox" name="flameIOPosSpin">
                <property name="enabled">
                 <bool>false</bool>
+               </property>
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
                </property>
                <property name="keyboardTracking">
                 <bool>false</bool>
@@ -2927,6 +2939,12 @@ margin: -10px -76px;
              </item>
              <item>
               <widget class="QDoubleSpinBox" name="brusherPosIndSpin">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
                <property name="readOnly">
                 <bool>true</bool>
                </property>
@@ -2948,6 +2966,12 @@ margin: -10px -76px;
               <widget class="QDoubleSpinBox" name="brusherPosSpin">
                <property name="enabled">
                 <bool>false</bool>
+               </property>
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
                </property>
                <property name="keyboardTracking">
                 <bool>false</bool>
@@ -3069,6 +3093,12 @@ margin: -10px -76px;
              </item>
              <item>
               <widget class="QDoubleSpinBox" name="leftPosIndSpin">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
                <property name="readOnly">
                 <bool>true</bool>
                </property>
@@ -3090,6 +3120,12 @@ margin: -10px -76px;
               <widget class="QDoubleSpinBox" name="leftPosSpin">
                <property name="enabled">
                 <bool>false</bool>
+               </property>
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
                </property>
                <property name="keyboardTracking">
                 <bool>false</bool>
@@ -3211,6 +3247,12 @@ margin: -10px -76px;
              </item>
              <item>
               <widget class="QDoubleSpinBox" name="rightPosIndSpin">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
                <property name="readOnly">
                 <bool>true</bool>
                </property>
@@ -3232,6 +3274,12 @@ margin: -10px -76px;
               <widget class="QDoubleSpinBox" name="rightPosSpin">
                <property name="enabled">
                 <bool>false</bool>
+               </property>
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
                </property>
                <property name="keyboardTracking">
                 <bool>false</bool>
