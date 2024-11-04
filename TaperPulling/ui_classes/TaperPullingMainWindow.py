@@ -1080,7 +1080,10 @@ class MainWindow(FormUI, WindowUI):
             self.core.motors.right_puller.go_to(self.rightPosSpin.value())
         
     def stop_all_motors(self):
-        self.stop_pulling()
+        if self.core.pulling:
+            self.stop_pulling()
+        else:
+            self.core.stop_pulling()
         self.core.motors.brusher.stop()
         self.core.motors.flame_io.stop()
         self.core.motors.left_puller.stop()
