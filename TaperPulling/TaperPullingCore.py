@@ -122,6 +122,7 @@ class TaperPullingCore:
     loop_looped = False
     loop_tensioning = False
     loop_tensioned = False
+    emergency_stopped = False
     
     def __init__(self):
         """
@@ -269,9 +270,13 @@ class TaperPullingCore:
                 
                 is_in_danger = all([fio_dz, br_dz, lp_dz]) or all([fio_dz, br_dz, rp_dz])
                 if is_in_danger:
-                    print("Flame tip was dangerously close to another motor! For safety, all movement ceased and all processes stopped.")
-                    self.stop_pulling()
-            
+                    if not self.emergency_stopped:
+                        self.emergency_stopped = True
+                        print("Flame tip was dangerously close to another motor! For safety, all movement ceased and all processes stopped.")
+                        self.stop_pulling()
+                elif self.emergency_stopped:
+                    self.emergency_stopped = False
+        
             if self.running_process:
                 # Process stages
                 # Convert all stage switches to a 7-bit number
