@@ -2191,6 +2191,13 @@
             </widget>
            </item>
            <item>
+            <widget class="QPushButton" name="tensionButton">
+             <property name="text">
+              <string>Tension</string>
+             </property>
+            </widget>
+           </item>
+           <item>
             <widget class="QPushButton" name="loopBut">
              <property name="text">
               <string>Loop</string>

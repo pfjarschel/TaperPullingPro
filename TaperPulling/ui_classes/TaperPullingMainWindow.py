@@ -353,6 +353,7 @@ class MainWindow(FormUI, WindowUI):
         self.gotozeroBut.clicked.connect(self.go2start)
         self.startBut.clicked.connect(self.start_pulling)
         self.stopBut.clicked.connect(self.stop_pulling)
+        self.tensionButton.clicked.connect(self.tension)
         self.cleaveBut.clicked.connect(self.cleave)
         self.loopBut.clicked.connect(self.loop)
         self.emerBut.clicked.connect(self.stop_all_motors)
@@ -998,10 +999,6 @@ class MainWindow(FormUI, WindowUI):
             if not self.core.motors.right_puller.ok:
                 self.rightInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
                 self.core.init_puller_r_as_default(True, self.rightSimCheck.isChecked())
-                
-    def br_reinit(self):
-        self.core.motors.brusher.close()
-        self.init_motors()
         
     def go2start(self):
         if not self.going_2start:
@@ -1059,7 +1056,17 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
         self.timeleftBar.setValue(0)
         self.timeleftLabel.setText(f"Time left: 0.0 s")
-        
+    
+    def tension(self):
+        if self.core.standby:
+            text = "The tension process will now start.\n" + \
+                    f"The puller motors will move 0.1 mm back (each), to tension the fiber. Repeat as needed.\n\n" + \
+                    "Click 'Ok' to continue."
+            box_resp = QMessageBox.information(self, "Tension taper", text, QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+            if box_resp == QMessageBox.StandardButton.Ok:
+                self.core.motors.left_puller.move_relative(-0.1)
+                self.core.motors.right_puller.move_relative(-0.1)
+            
     def cleave(self):
         if self.core.standby:
             text = "Caution: this procedure is a gamble, and results are not guaranteed.\n" + \
