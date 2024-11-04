@@ -59,8 +59,8 @@ class MainWindow(FormUI, WindowUI):
     data = None
     
     # General variables
-    max_tpts = 1024
-    max_spectra = 1024
+    max_tpts = 10000
+    max_spectra = 1000
     temp_settings_file = f"{rootpath}/config/temp_settings.json"
     default_settings_file = f"{confpath}/PyTaper_default_settings.json"
     factory_settings_file = f"{confpath}/PyTaper_factory_settings.json"
@@ -90,8 +90,10 @@ class MainWindow(FormUI, WindowUI):
     hz_sweep_n = 0
     rhz_array = []
     rhz_x_array = []
-    transm_array = np.zeros((60000, 2))
+    transm_array = np.zeros((max_tpts, 2))
+    spectrogram_data = np.zeros((2,2))
     transm_i = 0
+    profile_mode = "Standard"  # Can be Standard, Optimized or Loaded
     
     def __del__(self):
         print("Closing all")
@@ -536,8 +538,13 @@ class MainWindow(FormUI, WindowUI):
                 settings_dict[w.objectName()] = w.currentIndex()
             for w in self.findChildren(QLineEdit):
                 settings_dict[w.objectName()] = w.text()
-                
-            json.dump(settings_dict, open(filename, "w"))
+            
+            with open(filename, 'w') as f:
+                json.dump(settings_dict, f, 
+                    indent=4,
+                    sort_keys=True,
+                    separators=(',', ': ')
+                )
     
     def load_settings(self, filename):
         if filename != "":
@@ -568,6 +575,99 @@ class MainWindow(FormUI, WindowUI):
     
     def load_default_settings(self):
         self.load_settings(self.default_settings_file)
+        
+    def save_data(self, file_prefix: str=""):
+        parameters_file = file_prefix + "_parameters.json"
+        
+        parameters_dict = {}
+        
+        parameters_dict["Motors"] = {}
+        parameters_dict["Motors"]["Brusher"] = {}
+        parameters_dict["Motors"]["Brusher"]["Velocity"] = self.brusherVelSpin.value()
+        parameters_dict["Motors"]["Brusher"]["Acceleration"] = self.brusherAccelSpin.value()
+        parameters_dict["Motors"]["Brusher"]["Initial_pos"] = self.brusherInitPosSpin.value()
+        parameters_dict["Motors"]["Brusher"]["Min_span"] = self.brusherMinSpanSpin.value()
+        parameters_dict["Motors"]["Brusher"]["Flame_size"] = self.fSizeSpin.value()
+        parameters_dict["Motors"]["Brusher"]["Edge_precision"] = self.enhanceHZCheck.isChecked()
+        parameters_dict["Motors"]["Brusher"]["Reverse_dir"] = self.revdirCheck.isChecked()
+        parameters_dict["Motors"]["FlameIO"] = {}
+        parameters_dict["Motors"]["FlameIO"]["Velocity"] = self.flameIOVelSpin.value()
+        parameters_dict["Motors"]["FlameIO"]["Acceleration"] = self.flameIOAccelSpin.value()
+        parameters_dict["Motors"]["FlameIO"]["Initial_pos"] = self.flameIOMovSpin.value()
+        parameters_dict["Motors"]["FlameIO"]["Hold_time"] = self.flameIOHoldSpin.value()
+        parameters_dict["Motors"]["FlameIO"]["Change_prox"] = self.fioMovebackCheck.isChecked()
+        parameters_dict["Motors"]["FlameIO"]["End_pos"] = self.flameIOMov2Spin.value()
+        parameters_dict["Motors"]["FlameIO"]["Change_prox_start"] = self.flameIOTrigger1Spin.value()
+        parameters_dict["Motors"]["FlameIO"]["Change_prox_end"] = self.flameIOTrigger2Spin.value()
+        parameters_dict["Motors"]["Pullers"] = {}
+        parameters_dict["Motors"]["Pullers"]["Max_velocity"] = self.pullerVelSpin.value()
+        parameters_dict["Motors"]["Pullers"]["Pull_velocity"] = self.pullerPullVelSpin.value()
+        parameters_dict["Motors"]["Pullers"]["Acceleration"] = self.pullerAccelSpin.value()
+        parameters_dict["Motors"]["Pullers"]["Initial_pos"] = self.pullerInitPosSpin.value()
+        parameters_dict["Motors"]["Pullers"]["Adjust_pull_vel"] = self.correctCheck.isChecked()
+        
+        parameters_dict["DAQ"] = {}
+        parameters_dict["DAQ"]["Dev/channel"] = self.daqChannelCombo.currentText()
+        parameters_dict["DAQ"]["Term_config"] = self.daqConfCombo.currentText()
+        parameters_dict["DAQ"]["Mode"] = self.daqmodeCombo.currentText()
+        parameters_dict["DAQ"]["Sampling_rate"] = self.srateSpin.value()
+        parameters_dict["DAQ"]["V_range"] = self.daqvrangeSpin.value()
+        parameters_dict["DAQ"]["Spectrogram_samples"] = self.specsamplesSpin.value()
+        parameters_dict["DAQ"]["Impedance"] = self.impedanceSpin.value()
+        parameters_dict["DAQ"]["Responsivity"] = self.responSpin.value()
+        
+        parameters_dict["Profile"] = {}
+        parameters_dict["Profile"]["Mode"] = self.profile_mode
+        parameters_dict["Profile"]["Initial_diameter"] = self.d0Spin.value()
+        if self.profile_mode == "Standard":
+            parameters_dict["Profile"]["Waist_diameter"] = self.dwSpin.value()
+            parameters_dict["Profile"]["Waist_length"] = self.setWaistLengthSpin.value()
+            parameters_dict["Profile"]["Initial_HZ"] = self.l0Spin.value()
+            parameters_dict["Profile"]["Dist_to_pull"] = self.x0Spin.value()
+            parameters_dict["Profile"]["Alpha"] = self.alphaSpin.value()
+        elif self.profile_mode == "Optimized":
+            parameters_dict["Profile"]["Waist_diameter"] = self.dwoptSpin.value()
+            parameters_dict["Profile"]["Waist_length"] = self.wlenoptSpin.value()
+            parameters_dict["Profile"]["Initial_HZ"] = self.hz0optIndSpin.value()
+            parameters_dict["Profile"]["Dist_to_pull"] = self.pulledoptIndSpin.value()
+            parameters_dict["Profile"]["Calc_params"] = {}
+            parameters_dict["Profile"]["Calc_params"]["Total_diameter"] = self.d0Spin.value()
+            parameters_dict["Profile"]["Calc_params"]["Core_diameter"] = self.coredSpin.value()
+            parameters_dict["Profile"]["Calc_params"]["Clad_n"] = self.cladSpin.value()
+            parameters_dict["Profile"]["Calc_params"]["Core_n"] = self.corenSpin.value()
+            parameters_dict["Profile"]["Calc_params"]["Medium_n"] = self.mednSpin.value()
+            parameters_dict["Profile"]["Calc_params"]["Wavelength"] = self.wlSpin.value()
+        parameters_dict["Profile"]["Transition_length"] = self.setTransLengthSpin.value()
+        
+        parameters_dict["Result"] = {}
+        parameters_dict["Result"]["Total_pulled"] = self.totalPulledIndSpin.value()
+        parameters_dict["Result"]["Est_waist_diam"] = self.waistDiamIndSpin.value()
+        parameters_dict["Result"]["Est_waist_length"] = self.waistLengthIndSpin.value()
+        parameters_dict["Result"]["Est_trans_length"] = self.transLengthIndSpin.value()
+        parameters_dict["Result"]["Final_loss"] = self.transm_array[self.transm_i-1][1]
+        
+        with open(parameters_file, 'w') as f:
+            json.dump(parameters_dict, f, 
+                indent=4,
+                sort_keys=True,
+                separators=(',', ': ')
+            )
+            
+        transm_file = file_prefix + "_transmission.txt"
+        if self.transm_i > 0:
+            np.savetxt(transm_file, self.transm_array[:self.transm_i-1])
+            
+        profile_file = file_prefix + "_profile.txt"
+        np.savetxt(profile_file, np.array(self.profile).T)
+        
+        hz_file = file_prefix + "_hotzone.txt"
+        np.savetxt(hz_file, np.array(self.hz_function).T)
+        
+        realhz_file = file_prefix + "_real_hotzone.txt"
+        np.savetxt(realhz_file, np.array([self.rhz_x_array, self.rhz_array]).T)
+        
+        spec_file = file_prefix + "_spectrogram.txt"
+        np.savetxt(spec_file, np.array(self.spectrogram_data).T)
     
     def enable_controls(self):
         widgets = self.findChildren(QWidget)
@@ -873,6 +973,7 @@ class MainWindow(FormUI, WindowUI):
                     self.graph_spec_img.set_clim(data.min(), data.max())
                     self.graph_spec.draw()
                     self.graph_spec.flush_events()
+                    self.spectrogram_data = data
             
             # Check if ended
             if self.core.standby:
@@ -1184,6 +1285,8 @@ class MainWindow(FormUI, WindowUI):
         
         self.total_to_pull = x0
         
+        self.profile_mode = "Standard"
+        
     def update_graph(self, data, graph_line, graph_ax, graph_canvas, xlims=None, ylims=None):
         graph_line.set_xdata(data[0])
         graph_line.set_ydata(data[1])
@@ -1263,6 +1366,7 @@ class MainWindow(FormUI, WindowUI):
                         self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
                         self.timeleftLabel.setText(f"Time left: {0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value():.2f} s")
                         
+                        self.profile_mode = "Loaded"
                         self.statusBar.showMessage(f"Hotzone file loaded")
                 except:
                     pass
@@ -1309,14 +1413,19 @@ class MainWindow(FormUI, WindowUI):
                 self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
                 self.timeleftLabel.setText(f"Time left: {0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value():.2f} s")
                 
+                self.profile_mode = "Optimized"
                 self.statusBar.showMessage(f"Profile calculated successfully!")
             except Exception as e:
                 print(e)
         
     # Menu functions
     def action_save_data(self):
-        #TODO: save data function
-        print("saved data")
+        file = QFileDialog.getSaveFileName(self, "Save data prefix", self.last_dir)
+        file_prefix = file[0]
+        
+        self.last_dir = os.path.dirname(os.path.realpath(file_prefix)).replace("\\", "/")
+        
+        self.save_data(file_prefix)
         
     def action_load_def_settings(self):
         self.load_default_settings()
