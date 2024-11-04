@@ -14,6 +14,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import numpy as np
 import time
+from datetime import datetime
 import json
 import cv2
 
@@ -1157,6 +1158,11 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
         self.timeleftBar.setValue(0)
         self.timeleftLabel.setText(f"Time left: 0.0 s")
+        
+        # Save data just to be safe
+        data_bckp_dir = f"{rootpath}/data_bckp/{datetime.now().strftime("%Y_%m_%d")}"
+        Path(data_bckp_dir).mkdir(parents=True, exist_ok=True)
+        self.save_data(f"{data_bckp_dir}/auto_{datetime.now().strftime("%Y_%m_%d")}")
     
     def tension(self):
         if self.core.standby:
