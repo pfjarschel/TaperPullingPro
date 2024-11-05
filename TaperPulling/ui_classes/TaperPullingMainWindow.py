@@ -979,7 +979,7 @@ class MainWindow(FormUI, WindowUI):
             # Check if ended
             if self.core.standby:
                 self.pullLoop_timer.stop()
-                self.stop_pulling()
+                self.stop_pulling(True)
                 
             self.pull_busy = False
         
@@ -1080,15 +1080,20 @@ class MainWindow(FormUI, WindowUI):
             self.core.motors.right_puller.go_to(self.rightPosSpin.value())
         
     def stop_all_motors(self):
-        if self.core.pulling:
-            self.stop_pulling()
-        else:
-            self.core.stop_pulling()
+        self.stop_pulling(save_data=False)
         self.core.motors.brusher.stop()
         self.core.motors.flame_io.stop()
         self.core.motors.left_puller.stop()
         self.core.motors.right_puller.stop()
         self.core.motors.flame_io.go_to(0.0)
+        
+        self.going_2start = False
+        self.go2start_timer.stop()
+        
+        self.initLoop_timer.stop()
+        self.initLoop_active = False
+        self.init_motors_i = 0
+        self.resetmotorsBut.setEnabled(True)
         
     def init_motors(self):
         if not self.initLoop_active:
@@ -1096,6 +1101,7 @@ class MainWindow(FormUI, WindowUI):
             
             self.resetmotorsBut.setEnabled(False)
             self.initLoop_active = True
+            self.init_busy = False
             self.initLoop_timer.start()
             
             if not self.core.motors.left_puller.ok:
@@ -1152,20 +1158,21 @@ class MainWindow(FormUI, WindowUI):
         self.core.start_process(self.hz_function)
         self.pullLoop_timer.start()
         
-    def stop_pulling(self):
+    def stop_pulling(self, save_data=False):
         self.pullLoop_timer.stop()
+        self.core.stop_pulling()
         self.data.stop_spectrogram()
         self.enable_controls()
-        self.core.stop_pulling()
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
         self.timeleftBar.setValue(0)
         self.timeleftLabel.setText(f"Time left: 0.0 s")
         
         # Save data just to be safe
-        data_bckp_dir = f"{rootpath}/data_bckp/{datetime.now().strftime("%Y_%m_%d")}"
-        Path(data_bckp_dir).mkdir(parents=True, exist_ok=True)
-        self.save_data(f"{data_bckp_dir}/auto_{datetime.now().strftime("%Y_%m_%d")}")
+        if save_data:
+            data_bckp_dir = f"{rootpath}/data_bckp/{datetime.now().strftime("%Y_%m_%d")}"
+            Path(data_bckp_dir).mkdir(parents=True, exist_ok=True)
+            self.save_data(f"{data_bckp_dir}/auto_{datetime.now().strftime("%Y_%m_%d")}")
     
     def tension(self):
         if self.core.standby:
