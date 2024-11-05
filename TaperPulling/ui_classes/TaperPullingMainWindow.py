@@ -84,6 +84,7 @@ class MainWindow(FormUI, WindowUI):
     # Fabrication variables
     hz_function = np.array([[0.0, 1.0], [1.0, 1.0]])
     profile = np.array([[0.0, 1.0], [1.0, 1.0]])
+    realish_profile = np.array([[0.0, 1.0], [1.0, 1.0]])
     min_hz = 0.0
     total_to_pull = 0.0
     adiab_angles = np.array([[0.0, 1.0], [1.0, 1.0]])
@@ -662,6 +663,9 @@ class MainWindow(FormUI, WindowUI):
         profile_file = file_prefix + "_profile.txt"
         np.savetxt(profile_file, np.array(self.profile).T)
         
+        realish_profile_file = file_prefix + "_realish_profile.txt"
+        np.savetxt(realish_profile_file, np.array(self.realish_profile).T)
+        
         hz_file = file_prefix + "_hotzone.txt"
         np.savetxt(hz_file, np.array(self.hz_function).T)
         
@@ -927,10 +931,10 @@ class MainWindow(FormUI, WindowUI):
                         self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
                         
                         # Update profile graph with profile from real hz
-                        realish_profile = self.shape.profile_from_hz(np.array(self.rhz_x_array), np.array(self.rhz_array))                        
-                        self.update_graph(realish_profile, self.graph_profmini_line_realish, self.graph_profmini_ax, self.graph_profmini)
+                        self.realish_profile = self.shape.profile_from_hz(np.array(self.rhz_x_array), np.array(self.rhz_array))                        
+                        self.update_graph(self.realish_profile, self.graph_profmini_line_realish, self.graph_profmini_ax, self.graph_profmini)
                         
-                        curr_d = 2000*realish_profile[1][-1]
+                        curr_d = 2000*self.realish_profile[1][-1]
                         self.waistDiamIndSpin.setValue(curr_d)
                 else:
                     rhz = self.hz_function[1][0]
