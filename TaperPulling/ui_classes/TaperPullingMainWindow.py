@@ -313,7 +313,8 @@ class MainWindow(FormUI, WindowUI):
         self.graph_profmini = FigureCanvas(self.figure_profmini)
         self.profMiniGraph.addWidget(self.graph_profmini)
         self.graph_profmini_ax = self.figure_profmini.add_subplot()
-        self.graph_profmini_line, = self.graph_profmini_ax.plot([0.1, 0.1], [0.1, 0.1])
+        self.graph_profmini_line, = self.graph_profmini_ax.plot([0, 0], [0, 0])
+        self.graph_profmini_line_realish, = self.graph_profmini_ax.plot([0, 0], [0, 0], 'k--')
         self.graph_profmini_ax.set_xticks([])
         self.graph_profmini_ax.set_yticks([])
         self.graph_profmini.draw()
@@ -911,20 +912,7 @@ class MainWindow(FormUI, WindowUI):
             self.timeleftLabel.setText(f"Time left: {time_left:.2f} s")
             self.timeleftBar.setValue(int(1000.0*(1 - time_left/total_time)))
             
-            # Update est. values
             tp = self.core.total_pulled
-            curr_hz = self.hz_function[1][np.abs(self.hz_function[0] - tp).argmin()]
-            self.totalPulledIndSpin.setValue(tp)
-            self.waistLengthIndSpin.setValue(curr_hz)
-            self.transLengthIndSpin.setValue((tp + self.hz_function[1][0] - curr_hz)/2)
-            
-            # Update est. diameter
-            if tp <= self.total_to_pull:
-                x_ind = np.abs(self.hz_function[0] - tp).argmin()
-                curr_d = 2000*self.profile[1][x_ind]
-            else:  # Manual stop can go beyond the stipulated value
-                curr_d = 2000*self.profile[1][-1]*np.exp(-np.abs(self.total_to_pull - tp)/(2*self.hz_function[1][-1]))
-            self.waistDiamIndSpin.setValue(curr_d)
             
             # Update real hotzone
             curr_hz_sweep_n = len(self.core.rhz_edges)
@@ -937,7 +925,36 @@ class MainWindow(FormUI, WindowUI):
                         self.rhz_x_array.append(tp)
                         rhz_data = np.array([self.rhz_x_array, self.rhz_array])
                         self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
+                        
+                        # Update profile graph with profile from real hz
+                        realish_profile = self.shape.profile_from_hz(np.array(self.rhz_x_array), np.array(self.rhz_array))                        
+                        self.update_graph(realish_profile, self.graph_profmini_line_realish, self.graph_profmini_ax, self.graph_profmini)
+                        
+                        curr_d = 2000*realish_profile[1][-1]
+                        self.waistDiamIndSpin.setValue(curr_d)
+                else:
+                    rhz = self.hz_function[1][0]
+                    self.hotzoneIndSpin.setValue(rhz)
+                    if self.core.pulling:
+                        self.rhz_array.append(rhz)
+                        self.rhz_x_array.append(0.0)
+                        rhz_data = np.array([self.rhz_x_array, self.rhz_array])
+                        self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
                 self.hz_sweep_n += 1
+                
+            # Update est. values
+            # Designed hz         
+            # curr_hz = self.hz_function[1][np.abs(self.hz_function[0] - tp).argmin()]
+            
+            # Real hz
+            if len(self.rhz_array) > 0:
+                curr_hz = self.rhz_array[-1]
+            else:
+                curr_hz = 0
+            
+            self.totalPulledIndSpin.setValue(tp)
+            self.waistLengthIndSpin.setValue(curr_hz)
+            self.transLengthIndSpin.setValue((tp + self.hz_function[1][0] - curr_hz)/2)
                 
             # Update transmission
             if self.core.pulling:
