@@ -966,8 +966,7 @@ class MainWindow(FormUI, WindowUI):
                     idxs = np.linspace(1, self.transm_i - 2, self.max_tpts - 2, dtype=int)
                     tdata = np.concatenate(([tdata[0]], tdata[idxs], [tdata[-1]]))
                     
-                self.update_graph(tdata.T, self.graph_pow_line, self.graph_pow_ax, self.graph_pow,
-                                None, [0.0, 1.2*(10.0**(self.refpowIndSpin.value()/10.0))])
+                self.update_graph(tdata.T, self.graph_pow_line, self.graph_pow_ax, self.graph_pow)
                 
             # Update Spectrogram
             if self.core.pulling:
