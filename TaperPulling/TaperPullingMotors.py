@@ -146,9 +146,9 @@ class GenericTLMotor:
         self.serial = ""
         self.serial_c = None
         self.simulate = False
-        self.kinesis_poll = 200  # ms. Less than this is problematic
+        self.kinesis_poll = 10  # ms
         self.lib_prfx = ""
-        self.monitor_interval = 200  # ms
+        self.monitor_interval = 10  # ms
         self.lib = None
         self.libok = False
         self.unit_cal = False
@@ -192,7 +192,7 @@ class GenericTLMotor:
     def __del__(self):
         self.close()
         
-    def connect(self, serial="", poll_ms=200, simulate=False):
+    def connect(self, serial="", poll_ms=10, simulate=False):
         """
         Connect to motor
         
@@ -235,7 +235,7 @@ class GenericTLMotor:
                         time.sleep(0.5)
                         
                         # Start polling 
-                        if poll_ms >= 10:
+                        if poll_ms >= 1:
                             eval(f"self.lib.{self.lib_prfx}_StartPolling(self.serial_c, c_int(poll_ms))")
                         self.ok = True
                     else:
@@ -462,7 +462,7 @@ class GenericTLMotor:
             float: The position
         """
         if self.ok:
-            if self.kinesis_poll < 10:
+            if self.kinesis_poll < 1:
                 eval(f"self.lib.{self.lib_prfx}_RequestPosition(self.serial_c)")
                 time.sleep(0.1)
             dev_pos = c_int(eval(f"self.lib.{self.lib_prfx}_GetPosition(self.serial_c)"))
@@ -540,7 +540,7 @@ class GenericTLMotor:
         if (not self.moving) and (not self.homing) and self.ok:
             self.moving = True
             self.move_loop = None
-            self.move_loop = self.Loop(self. monitor_interval/1000.0,self.move_loop_function)
+            self.move_loop = self.Loop(self. monitor_interval/1000.0, self.move_loop_function)
             self.messageType = c_ushort(999)
             self.messageId = c_uint32(999)
             self.messageData = c_uint32(999)
@@ -809,7 +809,7 @@ class TaperPullingMotors:
         self.left_puller.close()
         self.right_puller.close()
         
-    def initialize_motor(self, motor_type: MotorTypes, serial: str="", poll_ms=50, simulate=False):
+    def initialize_motor(self, motor_type: MotorTypes, serial: str="", poll_ms=10, simulate=False):
         """
         Connect to, configure, and home (if needed) a motor.
         If a parameter is not given, its current value (default at initialization) is used

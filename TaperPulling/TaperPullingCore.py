@@ -36,7 +36,7 @@ class TaperPullingCore:
     
     # Flow control
     update_loop = None
-    poll_interval = 10  # ms.
+    poll_interval = 1  # ms.
     busy = False
     running_process = False     # If pulling process started
     flame_approaching = False   # Stage 1
@@ -241,7 +241,7 @@ class TaperPullingCore:
     def update_function(self):
         if not self.busy:
             self.busy = True
-        
+
             # Get current time
             self.time_bef = self.time_now
             self.time_now = time.time()
@@ -312,7 +312,6 @@ class TaperPullingCore:
                 elif stage < 128:
                     # Opt. Stage 6: Cleaving
                     self.perform_cleave()
-            
             self.busy = False
                 
     def going_to_start(self):
@@ -350,7 +349,7 @@ class TaperPullingCore:
                             
         if self.auto_stop and self.total_pulled >= self.hotzone_function[0][-1]:
             self.stopping = True
-            print("Pulling ended")
+            print("Pulling ending...")
     
     def check_brushing(self):
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
