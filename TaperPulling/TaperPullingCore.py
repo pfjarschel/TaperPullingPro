@@ -103,6 +103,8 @@ class TaperPullingCore:
     
     left_puller_x0 = 84.0  # mm
     right_puller_x0 = 84.0  # mm
+    left_puller_xinit = left_puller_x0
+    right_puller_xinit = right_puller_x0
     pullers_adaptive_vel = True  # Slows down pulling if flame span is too large and/or when brusher is slower
     brusher_enhance_edge = True  # Use acceleration information to improve HZ edges
     
@@ -290,6 +292,7 @@ class TaperPullingCore:
                 elif stage < 2:
                     # Stage 1: Flame approaching
                     self.check_brushing()
+                    self.get_pullers_xinit()
                     self.approach_flame()
                 elif stage < 4:
                     # Stage 2: Flame holding
@@ -323,6 +326,10 @@ class TaperPullingCore:
             print("Flame approaching...")
             print("Started brushing")
     
+    def get_pullers_xinit(self):
+        self.left_puller_xinit = self.puller_left_pos
+        self.right_puller_xinit = self.puller_right_pos
+    
     def approach_flame(self):
         flame_in = (self.flame_io_pos >= self.flame_io_x0 - self.pos_check_precision) and \
                    (self.flame_io_pos <= self.flame_io_x0 + self.pos_check_precision)
@@ -344,8 +351,8 @@ class TaperPullingCore:
             print("Started pulling")
     
     def check_pulling(self):
-        self.total_pulled = np.abs(self.left_puller_x0 - self.puller_left_pos) + \
-                            np.abs(self.right_puller_x0 - self.puller_right_pos)
+        self.total_pulled = np.abs(self.left_puller_xinit - self.puller_left_pos) + \
+                            np.abs(self.right_puller_xinit - self.puller_right_pos)
                             
         if self.auto_stop and self.total_pulled >= self.hotzone_function[0][-1]:
             self.stopping = True
