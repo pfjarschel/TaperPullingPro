@@ -21,13 +21,13 @@ from TaperPulling.TaperPullingData import TaperPullingData
 
 # Initialize core
 core = TaperPullingCore()
-if core.init_all_motors_as_default(simulate=True):
+if core.init_all_motors_as_default(simulate=False):
     core.start_update()
 
 # Initialize Data acquisition and processing
 data_manager = TaperPullingData()
 data_manager.set_sampling_rate(1e3)
-data_manager.init_daq_as_default(simulate=True)
+data_manager.init_daq_as_default(simulate=False)
 
 # Lists to hold data
 b_pos = []
@@ -39,9 +39,10 @@ times = []
 vals = []
 
 # Hotzone function: a 2 point line
-# Will pull 20 mm (10 on each side)
-# Hot zone will grow from 2 mm to 10 mm
-hz_function = [[0.0, 20.0], [2.0, 10.0]]
+# Will pull b mm (half on each side)
+# Hot zone will grow from c mm to d mm
+# hz_function = [[0, b], [c, d]]
+hz_function = [[0.0, 20.0], [2.0, 2.0]]
 
 # Initialize list to hold measured hz lengths
 hz_points = [[0.0, hz_function[1][0]]]
@@ -61,10 +62,12 @@ core.motors.flame_io.wait_for_home()
 core.motors.brusher.wait_for_home()
 print("Homed")
 
-core.brusher_x0 = 33.0
+core.brusher_x0 = 31.0
 core.flame_io_x0 = 14.1
 core.left_puller_x0 = 84.0
 core.right_puller_x0 = 84.0
+
+core.go_to_start()
 
 # Start process
 core.start_process(hz_function)
@@ -101,7 +104,7 @@ while not core.standby:
     fio_pos.append(core.motors.flame_io.pos)
     lp_pos.append(core.motors.left_puller.pos)
     rp_pos.append(core.motors.right_puller.pos)
-    vals.append(data_manager.get_last_monitor())
+    vals.append(data_manager.get_single_power())
     total_pulled.append(core.total_pulled)
     times.append(time.time() - t0)
     
