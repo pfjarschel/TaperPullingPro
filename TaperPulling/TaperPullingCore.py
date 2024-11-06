@@ -329,6 +329,9 @@ class TaperPullingCore:
     def get_pullers_xinit(self):
         self.left_puller_xinit = self.puller_left_pos
         self.right_puller_xinit = self.puller_right_pos
+        self.motors.left_puller.set_velocity(self.motors.left_puller.pull_vel)
+        self.motors.right_puller.set_velocity(self.motors.right_puller.pull_vel)
+        time.sleep(0.1)
     
     def approach_flame(self):
         flame_in = (self.flame_io_pos >= self.flame_io_x0 - self.pos_check_precision) and \
@@ -341,14 +344,14 @@ class TaperPullingCore:
     def hold_flame(self):
         time_hold = time.time() - self.time_hold0
         if time_hold >= self.flame_io_hold:
-            self.motors.left_puller.set_velocity(self.motors.left_puller.pull_vel)
-            self.motors.right_puller.set_velocity(self.motors.right_puller.pull_vel)
-            time.sleep(0.5)
-            self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
-            self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
-            self.pulling = True
-            print("Flame hold done")
-            print("Started pulling")
+            brusher_centered = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
+                      (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
+            if brusher_centered:
+                self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
+                self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
+                self.pulling = True
+                print("Flame hold done")
+                print("Started pulling")
     
     def check_pulling(self):
         self.total_pulled = np.abs(self.left_puller_xinit - self.puller_left_pos) + \
@@ -358,22 +361,30 @@ class TaperPullingCore:
             self.stopping = True
             print("Pulling ending...")
     
-    def check_brushing(self):
+    def check_brushing(self, mode=0):
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
-        if hz >= self.motors.brusher.min_span:
-            if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
-                self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
-            if self.brusher_enhance_edge and False:
-                pass
-            else:
-                l = self.brusher_x0 - hz/2.0
-                r = self.brusher_x0 + hz/2.0
-            if (self.brusher_pos < l and self.brusher_dir == -1) or \
-                self.brusher_pos > r and self.brusher_dir == 1:
-                self.rhz_edges.append(self.brusher_pos)
-                self.brusher_dir = -1*self.brusher_dir
-                self.motors.brusher.stop(0)
-                self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+        if mode == 0:
+            if hz >= self.motors.brusher.min_span:
+                if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
+                    self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+                if self.brusher_enhance_edge and False:
+                    pass
+                else:
+                    l = self.brusher_x0 - hz/2.0
+                    r = self.brusher_x0 + hz/2.0
+                if (self.brusher_pos < l and self.brusher_dir == -1) or \
+                    self.brusher_pos > r and self.brusher_dir == 1:
+                    self.rhz_edges.append(self.brusher_pos)
+                    self.brusher_dir = -1*self.brusher_dir
+                    self.motors.brusher.stop(0)
+                    self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+        else:
+            pass
+            # TODO: figure this out 
+            # if hz >= self.motors.brusher.min_span:
+            #     if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
+                    
+            #         self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                 
     def check_io_mb(self):
         if self.flame_io_moveback and not self.flameIO_moving:
