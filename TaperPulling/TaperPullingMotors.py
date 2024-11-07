@@ -695,7 +695,7 @@ class Brusher(GenericTLMotor):
         self.max_vel = self.vel # mm/s
         self.max_accel = self.accel # mm/s2
         self.serial = "83837733"
-        self.max_pos = 44.0  # mm. This should be 50, but it only goes up to 44.9, locking down after reaching this pos.
+        self.max_pos = 49.0  # mm. This should be 50, but it only goes up to 49, locking down after reaching this pos.
         self.units = [3455496, 77296962, 26384]
         self.units_mult = 100.0
         self.unit_cal = True
