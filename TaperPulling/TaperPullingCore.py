@@ -94,7 +94,7 @@ class TaperPullingCore:
     # Brushing control mode
     # 0: Checks for position at every loop, moves indefinitely. Less precision, faster
     # 0: Calculates stopping point, send brusher to that position. More precise, stopping procedure is slow
-    brushing_control_mode = 1
+    brushing_control_mode = 0
     
     brusher_x0 = 31.0  # mm
     brusher_min_span = 0.5  # mm, minimum brush span. Motor glitches if it's too low
