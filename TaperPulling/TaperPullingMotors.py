@@ -690,7 +690,7 @@ class Brusher(GenericTLMotor):
         self.name = "Brusher"
         
         # Default parameters
-        self.vel = 2.5  # mm/s
+        self.vel = 2.4  # mm/s
         self.accel = 4.5  # mm/s2
         self.max_vel = self.vel # mm/s
         self.max_accel = self.accel # mm/s2
