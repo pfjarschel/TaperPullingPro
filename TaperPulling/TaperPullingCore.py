@@ -89,6 +89,7 @@ class TaperPullingCore:
     hotzone_function = np.zeros((2, 11))  # Hotzone size x pulled distance
     auto_stop = True  # Stops when pulled distance reaches hz function end
     force_hz_edge = True  # Prevents two diameters
+    flame_size = 0.0  # Subtract this value from hotzone
     
     # Brushing control mode
     # 0: Checks for position at every loop, moves indefinitely. Less precision, faster
@@ -376,19 +377,17 @@ class TaperPullingCore:
                     pass
                 else:
                     dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
-                    l = self.brusher_x0 - hz/2.0 + dist_compensation
-                    r = self.brusher_x0 + hz/2.0 - dist_compensation
+                    l = self.brusher_x0 - hz/2.0 + dist_compensation + self.flame_size/2.0
+                    r = self.brusher_x0 + hz/2.0 - dist_compensation - self.flame_size/2.0
                 if (self.brusher_pos < l and self.brusher_dir == -1) or \
                     self.brusher_pos > r and self.brusher_dir == 1:
                     self.brusher_dir = -1*self.brusher_dir
                     self.motors.brusher.stop(0)
-                    self.rhz_edges.append(self.brusher_pos)
+                    self.rhz_edges.append(self.brusher_pos - self.brusher_dir*self.flame_size/2.0)
                     self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
         else:
             if hz >= self.motors.brusher.min_span:
                 if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
-                    self.rhz_edges.append(self.brusher_pos)
-                    
                     # Interpolate hz function, discarding previous values
                     new_x = np.linspace(self.total_pulled,  self.hotzone_function[0][-1], 1001)
                     new_hz = np.interp(new_x, self.hotzone_function[0], self.hotzone_function[1])
@@ -397,10 +396,11 @@ class TaperPullingCore:
                     v_x = self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel
                     v_f = self.motors.brusher.vel
                     difference = np.abs((new_x - self.total_pulled) - (new_hz*v_x/v_f))
-                    delta_l = new_hz[difference.argmin()]
+                    delta_l = new_hz[difference.argmin()] - self.flame_size
                     
                     # Move
                     self.brusher_dir = -1*self.brusher_dir
+                    self.rhz_edges.append(self.brusher_pos - self.brusher_dir*self.flame_size/2.0)
                     self.motors.brusher.go_to(self.brusher_x0 + delta_l*self.brusher_dir/2.0)
                 
     def check_io_mb(self):

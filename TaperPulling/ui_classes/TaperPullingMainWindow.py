@@ -1166,6 +1166,7 @@ class MainWindow(FormUI, WindowUI):
         self.disable_controls()
         self.core.force_hz_edge = self.edgeStopCheck.isChecked()
         self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
+        self.core.flame_size = self.fSizeSpin.value()
         
         self.set_motors_params()
         self.daq_init() 
@@ -1175,7 +1176,7 @@ class MainWindow(FormUI, WindowUI):
         hz_function = self.hz_function
         if self.manualStopCheck.isChecked():
             hz_function[0][-1] = 200.0
-        self.core.start_process(self.hz_function)
+        self.core.start_process(hz_function)
         self.pullLoop_timer.start()
         
     def stop_pulling(self, save_data=False):
