@@ -375,7 +375,7 @@ class TaperPullingCore:
                 if self.brusher_enhance_edge and False:
                     pass
                 else:
-                    dist_compensation = 1.5*self.motors.brusher.vel*self.poll_interval/1000.0
+                    dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
                     l = self.brusher_x0 - hz/2.0 + dist_compensation
                     r = self.brusher_x0 + hz/2.0 - dist_compensation
                 if (self.brusher_pos < l and self.brusher_dir == -1) or \
