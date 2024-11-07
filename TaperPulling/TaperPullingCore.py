@@ -94,7 +94,7 @@ class TaperPullingCore:
     # Brushing control mode
     # 0: Checks for position at every loop, moves indefinitely. Less precision, faster
     # 0: Calculates stopping point, send brusher to that position. More precise, stopping procedure is slow
-    brushing_control_mode = 0 
+    brushing_control_mode = 1
     
     brusher_x0 = 31.0  # mm
     brusher_min_span = 0.5  # mm, minimum brush span. Motor glitches if it's too low
@@ -369,7 +369,7 @@ class TaperPullingCore:
     def check_brushing(self, mode=0):
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
         if mode == 0:
-            if hz >= self.motors.brusher.min_span:
+            if hz - self.flame_size >= self.motors.brusher.min_span:
                 if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
                     self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                 if self.brusher_enhance_edge and False:

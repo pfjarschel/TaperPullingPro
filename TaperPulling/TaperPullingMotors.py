@@ -429,8 +429,7 @@ class GenericTLMotor:
             return curr_a
         else:
             return 1e-9
-        
-            
+                 
     def get_homed(self) -> bool:
         """
         Get the motor's homing status
