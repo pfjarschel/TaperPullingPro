@@ -36,7 +36,7 @@ class TaperPullingCore:
     
     # Flow control
     update_loop = None
-    poll_interval = 1  # ms.
+    poll_interval = 10  # ms.
     busy = False
     running_process = False     # If pulling process started
     flame_approaching = False   # Stage 1
@@ -85,7 +85,7 @@ class TaperPullingCore:
     current_profile_step = 0
     last_total_pulled = 0.0
     
-    # Pulling parameters (and some defautls)
+    # Pulling parameters (and some defaults)
     hotzone_function = np.zeros((2, 11))  # Hotzone size x pulled distance
     auto_stop = True  # Stops when pulled distance reaches hz function end
     force_hz_edge = True  # Prevents two diameters
@@ -379,9 +379,9 @@ class TaperPullingCore:
                     r = self.brusher_x0 + hz/2.0
                 if (self.brusher_pos < l and self.brusher_dir == -1) or \
                     self.brusher_pos > r and self.brusher_dir == 1:
-                    self.rhz_edges.append(self.brusher_pos)
                     self.brusher_dir = -1*self.brusher_dir
                     self.motors.brusher.stop(0)
+                    self.rhz_edges.append(self.brusher_pos)
                     self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
         else:
             if hz >= self.motors.brusher.min_span:
