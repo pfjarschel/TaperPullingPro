@@ -90,6 +90,11 @@ class TaperPullingCore:
     auto_stop = True  # Stops when pulled distance reaches hz function end
     force_hz_edge = True  # Prevents two diameters
     
+    # Brushing control mode
+    # 0: Checks for position at every loop, moves indefinitely. Less precision, faster
+    # 0: Calculates stopping point, send brusher to that position. More precise, stopping procedure is slow
+    brushing_control_mode = 0  
+    
     brusher_x0 = 31.0  # mm
     brusher_min_span = 0.5  # mm, minimum brush span. Motor glitches if it's too low
     brusher_reverse = False  # Start brushing to more negative positions (v < 0)
@@ -291,17 +296,17 @@ class TaperPullingCore:
                     self.going_to_start()
                 elif stage < 2:
                     # Stage 1: Flame approaching
-                    self.check_brushing()
+                    self.check_brushing(self.brushing_control_mode)
                     self.get_pullers_xinit()
                     self.approach_flame()
                 elif stage < 4:
                     # Stage 2: Flame holding
-                    self.check_brushing()
+                    self.check_brushing(self.brushing_control_mode)
                     self.hold_flame()
                 elif stage < 8:
                     # Stage 3: Pulling
                     self.check_pulling()
-                    self.check_brushing()
+                    self.check_brushing(self.brushing_control_mode)
                     self.check_io_mb()
                 elif stage < 16:
                     # Stage 4: Stopping
@@ -379,12 +384,23 @@ class TaperPullingCore:
                     self.motors.brusher.stop(0)
                     self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
         else:
-            pass
-            # TODO: figure this out 
-            # if hz >= self.motors.brusher.min_span:
-            #     if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
+            if hz >= self.motors.brusher.min_span:
+                if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
+                    self.rhz_edges.append(self.brusher_pos)
                     
-            #         self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+                    # Interpolate hz function, discarding previous values
+                    new_x = np.linspace(self.total_pulled,  self.hotzone_function[0][-1], 1001)
+                    new_hz = np.interp(new_x, self.hotzone_function[0], self.hotzone_function[1])
+                    
+                    # Calculate intersection point from functions
+                    v_x = self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel
+                    v_f = self.motors.brusher.vel
+                    difference = np.abs((new_x - self.total_pulled) - (new_hz*v_x/v_f))
+                    delta_l = new_hz[difference.argmin()]
+                    
+                    # Move
+                    self.brusher_dir = -1*self.brusher_dir
+                    self.motors.brusher.go_to(self.brusher_x0 + delta_l*self.brusher_dir/2.0)
                 
     def check_io_mb(self):
         if self.flame_io_moveback and not self.flameIO_moving:
