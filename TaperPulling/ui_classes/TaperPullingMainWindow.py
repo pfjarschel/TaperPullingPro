@@ -483,6 +483,10 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.right_puller.set_acceleration(self.pullerAccelSpin.value())
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
+        self.core.motors.left_puller.vel = self.pullerVelSpin.value()
+        self.core.motors.right_puller.vel = self.pullerVelSpin.value()
+        self.core.motors.left_puller.pull_vel = self.pullerPullVelSpin.value()
+        self.core.motors.right_puller.pull_vel = self.pullerPullVelSpin.value()
         self.core.left_puller_x0 = self.pullerInitPosSpin.value()
         self.core.right_puller_x0 = self.pullerInitPosSpin.value()
         

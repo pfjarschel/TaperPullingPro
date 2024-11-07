@@ -298,7 +298,6 @@ class TaperPullingCore:
                 elif stage < 2:
                     # Stage 1: Flame approaching
                     self.check_brushing(self.brushing_control_mode)
-                    self.get_pullers_xinit()
                     self.approach_flame()
                 elif stage < 4:
                     # Stage 2: Flame holding
@@ -523,6 +522,7 @@ class TaperPullingCore:
         if self.check_all_motors_ok:
             # Send brusher to starting position
             self.motors.brusher.go_to(self.brusher_x0)
+            self.get_pullers_xinit()
             
             # Set hotzone function
             try:
@@ -557,8 +557,8 @@ class TaperPullingCore:
         
         
         # Reset pullers velocity
-        self.motors.left_puller.set_velocity(self.motors.left_puller.pull_vel)
-        self.motors.right_puller.set_velocity(self.motors.right_puller.pull_vel)
+        self.motors.left_puller.set_velocity(self.motors.left_puller.vel)
+        self.motors.right_puller.set_velocity(self.motors.right_puller.vel)
         time.sleep(0.1)
     
         
