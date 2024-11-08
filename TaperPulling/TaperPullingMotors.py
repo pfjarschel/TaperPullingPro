@@ -468,9 +468,16 @@ class GenericTLMotor:
             self.pos = self.dev2real(dev_pos.value, 0)
         return self.pos
     
-    def get_stopped(self):
+    def motor_stopped(self):
         status_bits = self.get_status_bits()
-        if status_bits & 1 << 5:
+        if bool(status_bits & 0x00000010) or bool(status_bits & 0x00000020):
+            return False
+        else:
+            return True
+        
+    def motor_moving(self):
+        status_bits = self.get_status_bits()
+        if bool(status_bits & 0x00000010) or bool(status_bits & 0x00000020):
             return True
         else:
             return False
