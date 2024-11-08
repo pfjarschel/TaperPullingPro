@@ -369,6 +369,7 @@ class MainWindow(FormUI, WindowUI):
         self.enablemanualCheck.clicked.connect(self.toggle_manual_control)
         self.brusherMinSpanSpin.valueChanged.connect(self.update_minimum_hz)
         self.fSizeSpin.valueChanged.connect(self.update_minimum_hz)
+        self.enhanceHZCheck.clicked.connect(self.enhanced_edge_warn)
         
         # Motor LEDs
         self.brInitLed_ef = self.make_led_clickable(self.brInitLed, self.core.motors.brusher)
@@ -1466,6 +1467,15 @@ class MainWindow(FormUI, WindowUI):
             except Exception as e:
                 print(e)
         
+    def enhanced_edge_warn(self):
+        if self.enhanceHZCheck.isChecked():
+            text = "When this option is enabled, the puller motors stop moving during the hot zone edges. " + \
+                   "In theory, it should minimize the effect of the brusher slow acceleration, which can " + \
+                   "cause bumps and dips in the taper profile, which increases losses. It is also possible that " + \
+                   "this effect is what enables us to see the single mode signature in the spectrogram.\n" + \
+                   "Keep in mind the the total pulling time will be much greater due to the pauses."
+            QMessageBox.information(self, "Enhanced edge information", text, QMessageBox.StandardButton.Ok)
+    
     # Menu functions
     def action_save_data(self):
         file = QFileDialog.getSaveFileName(self, "Save data prefix", self.last_dir)
