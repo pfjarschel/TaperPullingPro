@@ -468,6 +468,27 @@ class GenericTLMotor:
             self.pos = self.dev2real(dev_pos.value, 0)
         return self.pos
     
+    def get_stopped(self):
+        status_bits = self.get_status_bits()
+        if status_bits & 1 << 5:
+            return True
+        else:
+            return False
+    
+    def get_movement_ended(self):
+        eval(f"self.lib.{self.lib_prfx}_WaitForMessage(self.serial_c, byref(self.messageType), byref(self.messageId), byref(self.messageData))")
+        if (self.messageType.value == 2 and self.messageId.value == 1):
+            return True
+        else:
+            return False
+        
+    def get_home_ended(self):
+        eval(f"self.lib.{self.lib_prfx}_WaitForMessage(self.serial_c, byref(self.messageType), byref(self.messageId), byref(self.messageData))")
+        if (self.messageType.value == 2 and self.messageId.value == 0):
+            return True
+        else:
+            return False
+    
     def home(self, force=False):
         """
         Perform homing procedure
@@ -485,11 +506,7 @@ class GenericTLMotor:
         if not self.busy:
             self.busy = True
             
-            done = False
-            eval(f"self.lib.{self.lib_prfx}_WaitForMessage(self.serial_c, byref(self.messageType), byref(self.messageId), byref(self.messageData))")
-            if (self.messageType.value == 2 and self.messageId.value == 0) or self.get_homed():
-                done = True
-            
+            done = self.get_home_ended()
             if done:
                 time.sleep(1.0)
                 self.homing = False
@@ -522,11 +539,7 @@ class GenericTLMotor:
         if not self.busy:
             self.busy = True
             
-            done = False
-            eval(f"self.lib.{self.lib_prfx}_WaitForMessage(self.serial_c, byref(self.messageType), byref(self.messageId), byref(self.messageData))")
-            if (self.messageType.value == 2 and self.messageId.value == 1):
-                done = True
-            
+            done = self.get_movement_ended()
             if done:
                 self.moving = False
                 self.movement = self.MoveDirection.STOPPED
@@ -543,7 +556,7 @@ class GenericTLMotor:
             self.messageType = c_ushort(999)
             self.messageId = c_uint32(999)
             self.messageData = c_uint32(999)
-            self.move_loop.start()       
+            self.move_loop.start()
             
     def go_to(self, pos:float, stop=True, stop_mode=0):
         """
