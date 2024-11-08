@@ -75,6 +75,7 @@ class TaperPullingData:
     max_spectra_points = 2*spectra_points  # Will downsample when this value is reached
     
     spectrogram_running = False
+    spectrogram_pause = False
     last_spectrum = np.zeros((2, spectrum_points))
     last_spectrum_data = np.zeros((2, 2*spectrum_points))
     spectra = []
@@ -327,7 +328,7 @@ class TaperPullingData:
         self.spectrogram_loop.start()
         
     def build_spectrogram(self, smooth=0.01, window=True, sigma=0.15):
-        if not self.spectrogram_busy:
+        if not self.spectrogram_busy and not self.spectrogram_pause:
             self.spectrogram_busy = True
             spec_x, spec_y = self.get_spectrum(smooth, window, sigma)
             cuton_i = np.abs(spec_x - self.cuton_f).argmin()
