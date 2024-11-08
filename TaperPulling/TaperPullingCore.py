@@ -84,7 +84,6 @@ class TaperPullingCore:
     flameIO_moving = False
     current_profile_step = 0
     last_total_pulled = 0.0
-    last_brusher_pos = 0.0
     
     # Pulling parameters (and some defaults)
     hotzone_function = np.zeros((2, 11))  # Hotzone size x pulled distance
@@ -100,6 +99,8 @@ class TaperPullingCore:
     brusher_x0 = 31.0  # mm
     brusher_min_span = 0.5  # mm, minimum brush span. Motor glitches if it's too low
     brusher_reverse = False  # Start brushing to more negative positions (v < 0)
+    brusher_stopping = False
+    brusher_accelerating = False
     
     flame_io_x0 = 14.3  # mm
     flame_io_hold = 1.0  # s
@@ -379,10 +380,10 @@ class TaperPullingCore:
                 if self.brusher_enhance_edge:
                     if (self.brusher_pos <= l and self.brusher_dir == -1) or \
                         self.brusher_pos >= r and self.brusher_dir == 1:
-                        if self.motors.brusher.moving:
+                        if self.motors.brusher.moving and not self.brusher_accelerating:
                             self.rhz_edges.append(self.brusher_pos + self.brusher_dir*self.flame_size/2.0)
                             self.motors.brusher.stop(1)
-                            self.last_brusher_pos = self.brusher_pos
+                            self.brusher_stopping = True
                             if self.pulling:
                                 self.motors.left_puller.stop(0)
                                 self.motors.right_puller.stop(0)
@@ -390,7 +391,10 @@ class TaperPullingCore:
                             if not self.motors.brusher.moving:
                                 self.brusher_dir = -1*self.brusher_dir
                             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
-                    elif self.brusher_pos >= l - dist_compensation and self.brusher_pos <= r + dist_compensation:
+                            self.brusher_accelerating = True
+                            self.brusher_stopping = False
+                    if self.brusher_pos >= l - dist_compensation and self.brusher_pos <= r + dist_compensation:
+                        self.brusher_accelerating = False
                         if self.pulling and not self.motors.left_puller.moving:
                             self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
                         if self.pulling and not self.motors.right_puller.moving:
