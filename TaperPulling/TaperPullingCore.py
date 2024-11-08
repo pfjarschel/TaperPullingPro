@@ -84,6 +84,7 @@ class TaperPullingCore:
     flameIO_moving = False
     current_profile_step = 0
     last_total_pulled = 0.0
+    last_brusher_pos = 0.0
     
     # Pulling parameters (and some defaults)
     hotzone_function = np.zeros((2, 11))  # Hotzone size x pulled distance
@@ -329,6 +330,8 @@ class TaperPullingCore:
             self.motors.flame_io.go_to(self.flame_io_x0)
             self.flame_approaching = True
             print("Flame approaching...")
+            
+            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
             print("Started brushing")
     
     def get_pullers_xinit(self):
@@ -369,21 +372,36 @@ class TaperPullingCore:
     def check_brushing(self, mode=0):
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
         if mode == 0:
-            if hz - self.flame_size >= self.motors.brusher.min_span:
-                if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
-                    self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
-                if self.brusher_enhance_edge and False:
-                    pass
+            if hz - self.flame_size >= self.motors.brusher.min_span:                
+                dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
+                l = self.brusher_x0 - hz/2.0 + dist_compensation + self.flame_size/2.0
+                r = self.brusher_x0 + hz/2.0 - dist_compensation - self.flame_size/2.0
+                if self.brusher_enhance_edge:
+                    if (self.brusher_pos <= l and self.brusher_dir == -1) or \
+                        self.brusher_pos >= r and self.brusher_dir == 1:
+                        if self.motors.brusher.moving:
+                            self.rhz_edges.append(self.brusher_pos + self.brusher_dir*self.flame_size/2.0)
+                            self.motors.brusher.stop(1)
+                            self.last_brusher_pos = self.brusher_pos
+                            if self.pulling:
+                                self.motors.left_puller.stop(0)
+                                self.motors.right_puller.stop(0)
+                        if self.motors.brusher.motor_stopped():
+                            if not self.motors.brusher.moving:
+                                self.brusher_dir = -1*self.brusher_dir
+                            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+                    elif self.brusher_pos >= l - dist_compensation and self.brusher_pos <= r + dist_compensation:
+                        if self.pulling and not self.motors.left_puller.moving:
+                            self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
+                        if self.pulling and not self.motors.right_puller.moving:
+                            self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
                 else:
-                    dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
-                    l = self.brusher_x0 - hz/2.0 + dist_compensation + self.flame_size/2.0
-                    r = self.brusher_x0 + hz/2.0 - dist_compensation - self.flame_size/2.0
-                if (self.brusher_pos < l and self.brusher_dir == -1) or \
-                    self.brusher_pos > r and self.brusher_dir == 1:
-                    self.brusher_dir = -1*self.brusher_dir
-                    self.motors.brusher.stop(0)
-                    self.rhz_edges.append(self.brusher_pos - self.brusher_dir*self.flame_size/2.0)
-                    self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+                    if (self.brusher_pos <= l and self.brusher_dir == -1) or \
+                        self.brusher_pos >= r and self.brusher_dir == 1:
+                        self.brusher_dir = -1*self.brusher_dir
+                        self.motors.brusher.stop(0)
+                        self.rhz_edges.append(self.brusher_pos - self.brusher_dir*self.flame_size/2.0)
+                        self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
         else:
             if hz >= self.motors.brusher.min_span:
                 if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
