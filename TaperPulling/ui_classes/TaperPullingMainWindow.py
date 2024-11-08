@@ -965,7 +965,7 @@ class MainWindow(FormUI, WindowUI):
             self.transLengthIndSpin.setValue((tp + self.hz_function[1][0] - curr_hz)/2)
                 
             # Update transmission
-            if self.core.pulling:
+            if self.core.pulling and self.core.motors.left_puller.moving and self.core.motors.right_puller.moving:
                 self.transm_array[self.transm_i][0] = tp
                 self.transm_array[self.transm_i][1] = self.data.get_monitor_power(db=False)
                 self.transm_i += 1
@@ -977,7 +977,11 @@ class MainWindow(FormUI, WindowUI):
                 self.update_graph(tdata.T, self.graph_pow_line, self.graph_pow_ax, self.graph_pow)
                 
             # Update Spectrogram
-            if self.core.pulling:
+            if self.core.motors.left_puller.moving and self.core.motors.right_puller.moving:
+                self.data.spectrogram_pause = False
+            else:
+                self.data.spectrogram_pause = True
+            if self.core.pulling and not self.data.spectrogram_pause:
                 if not self.data.spectrogram_running:
                     self.data.cutoff_f = 2*self.pullerPullVelSpin.value()*1000
                     self.data.start_spectrogram(0.1, True, 0.15)
