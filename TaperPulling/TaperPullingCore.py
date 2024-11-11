@@ -393,7 +393,7 @@ class TaperPullingCore:
                             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                             self.brusher_accelerating = True
                             self.brusher_stopping = False
-                    if self.brusher_pos >= l - dist_compensation and self.brusher_pos <= r + dist_compensation:
+                    elif self.brusher_pos >= l - dist_compensation and self.brusher_pos <= r + dist_compensation:
                         self.brusher_accelerating = False
                         if self.pulling and not self.motors.left_puller.moving:
                             self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
