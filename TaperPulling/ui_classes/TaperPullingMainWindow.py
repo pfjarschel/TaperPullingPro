@@ -1471,9 +1471,9 @@ class MainWindow(FormUI, WindowUI):
         if self.enhanceHZCheck.isChecked():
             text = "When this option is enabled, the puller motors stop moving during the hot zone edges. " + \
                    "In theory, it should minimize the effect of the brusher slow acceleration, which can " + \
-                   "cause bumps and dips in the taper profile, which increases losses. It is also possible that " + \
+                   "cause bumps and dips in the taper profile, increasing losses. It is also possible that " + \
                    "this effect is what enables us to see the single mode signature in the spectrogram.\n" + \
-                   "Keep in mind the the total pulling time will be much greater due to the pauses."
+                   "Keep in mind that the total pulling time will be much greater due to the pauses."
             QMessageBox.information(self, "Enhanced edge information", text, QMessageBox.StandardButton.Ok)
     
     # Menu functions
