@@ -1202,7 +1202,7 @@ class MainWindow(FormUI, WindowUI):
         if save_data:
             data_bckp_dir = f"{rootpath}/data_bckp/{datetime.now().strftime("%Y_%m_%d")}"
             Path(data_bckp_dir).mkdir(parents=True, exist_ok=True)
-            self.save_data(f"{data_bckp_dir}/auto_{datetime.now().strftime("%Y_%m_%d")}")
+            self.save_data(f"{data_bckp_dir}/auto_{datetime.now().strftime("%H_%M_%S")}")
     
     def tension(self):
         if self.core.standby:
