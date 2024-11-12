@@ -99,8 +99,6 @@ class TaperPullingCore:
     brusher_x0 = 31.0  # mm
     brusher_min_span = 0.5  # mm, minimum brush span. Motor glitches if it's too low
     brusher_reverse = False  # Start brushing to more negative positions (v < 0)
-    brusher_stopping = False
-    brusher_accelerating = False
     
     flame_io_x0 = 14.3  # mm
     flame_io_hold = 1.0  # s
@@ -377,31 +375,39 @@ class TaperPullingCore:
                 dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
                 l = self.brusher_x0 - hz/2.0 + dist_compensation + self.flame_size/2.0
                 r = self.brusher_x0 + hz/2.0 - dist_compensation - self.flame_size/2.0
+                beyond_limit = ((self.brusher_pos <= l and self.brusher_dir == -1) or 
+                                (self.brusher_pos >= r and self.brusher_dir == 1))
                 if self.brusher_enhance_edge:
-                    if (self.brusher_pos <= l and self.brusher_dir == -1) or \
-                        self.brusher_pos >= r and self.brusher_dir == 1:
-                        if self.motors.brusher.moving and not self.brusher_accelerating:
+                    if beyond_limit:
+                        if self.motors.brusher.moving:
                             self.rhz_edges.append(self.brusher_pos + self.brusher_dir*self.flame_size/2.0)
                             self.motors.brusher.stop(1)
-                            self.brusher_stopping = True
                             if self.pulling:
                                 self.motors.left_puller.stop(0)
                                 self.motors.right_puller.stop(0)
                         if self.motors.brusher.motor_stopped():
-                            if not self.motors.brusher.moving:
-                                self.brusher_dir = -1*self.brusher_dir
+                            # The issue is either the motor_stopped function is not returning the right result (never entering this block)
+                            # or the move function is not working properly (exits this block to never enter again, since it's not  really moving).
+                            # Solutions:
+                            #   - Add a flag to only execute the move function on the next loop iteration
+                            #   - Change the conditions so it can enter here again and start moving if it is not moving
+                            #     Need to test the brute force method below.
+                            # TODO: Test and then clean this block.
+                            print("stopped")
+                            self.brusher_dir = -1*self.brusher_dir
                             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
-                            self.brusher_accelerating = True
-                            self.brusher_stopping = False
+                            print("moving")
                     elif self.brusher_pos >= l - dist_compensation and self.brusher_pos <= r + dist_compensation:
-                        self.brusher_accelerating = False
                         if self.pulling and not self.motors.left_puller.moving:
                             self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
                         if self.pulling and not self.motors.right_puller.moving:
                             self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
+                    # Brute force move motor
+                    if self.motors.brusher.moving and self.motors.brusher.motor_stopped():
+                        print("motor was bugged, trying to move again...")
+                        self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                 else:
-                    if (self.brusher_pos <= l and self.brusher_dir == -1) or \
-                        self.brusher_pos >= r and self.brusher_dir == 1:
+                    if beyond_limit:
                         self.brusher_dir = -1*self.brusher_dir
                         self.motors.brusher.stop(0)
                         self.rhz_edges.append(self.brusher_pos - self.brusher_dir*self.flame_size/2.0)
@@ -582,9 +588,3 @@ class TaperPullingCore:
         self.motors.left_puller.set_velocity(self.motors.left_puller.vel)
         self.motors.right_puller.set_velocity(self.motors.right_puller.vel)
         time.sleep(0.1)
-    
-        
-        
-        
-            
-        
