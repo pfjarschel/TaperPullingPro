@@ -403,7 +403,7 @@ class TaperPullingCore:
                         if self.pulling and not self.motors.right_puller.moving:
                             self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
                     # Brute force move motor
-                    if self.motors.brusher.moving and self.motors.brusher.motor_stopped():
+                    elif self.motors.brusher.moving and self.motors.brusher.motor_stopped():
                         print("motor was bugged, trying to move again...")
                         self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                 else:
