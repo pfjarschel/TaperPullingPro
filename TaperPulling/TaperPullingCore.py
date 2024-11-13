@@ -113,6 +113,9 @@ class TaperPullingCore:
     left_puller_xinit = left_puller_x0
     right_puller_xinit = right_puller_x0
     pullers_adaptive_vel = True  # Slows down pulling if flame span is too large and/or when brusher is slower
+    pullers_av_threshold = [5, 7]  # mm, threshold to decrease pulling velocity
+    pullers_av_factor = 0.5  # will decrease velocity to this factor
+    pullers_av_idx = 0  # Keep trac of speed changes
     brusher_enhance_edge = True  # Use acceleration information to improve HZ edges
     
     # Other vars
@@ -339,6 +342,7 @@ class TaperPullingCore:
         self.right_puller_xinit = self.puller_right_pos
         self.motors.left_puller.set_velocity(self.motors.left_puller.pull_vel)
         self.motors.right_puller.set_velocity(self.motors.right_puller.pull_vel)
+        self.pullers_av_idx = 0
         time.sleep(0.1)
     
     def approach_flame(self):
@@ -364,7 +368,19 @@ class TaperPullingCore:
     def check_pulling(self):
         self.total_pulled = np.abs(self.left_puller_xinit - self.puller_left_pos) + \
                             np.abs(self.right_puller_xinit - self.puller_right_pos)
-                            
+        
+        if self.pullers_adaptive_vel:
+            if self.pullers_av_idx < len(self.pullers_av_threshold):
+                if self.total_pulled >= self.pullers_av_threshold[self.pullers_av_idx]:
+                    self.pullers_av_idx += 1
+                    self.motors.left_puller.stop(0)
+                    self.motors.right_puller.stop(0)
+                    new_v = self.pullers_av_factor*self.motors.left_puller.vel
+                    self.motors.left_puller.set_velocity(new_v)
+                    self.motors.right_puller.set_velocity(new_v)
+                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
+                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
+        
         if self.auto_stop and self.total_pulled >= self.hotzone_function[0][-1]:
             self.stopping = True
             print("Pulling ending...")
@@ -603,3 +619,5 @@ class TaperPullingCore:
         self.motors.left_puller.set_velocity(self.motors.left_puller.vel)
         self.motors.right_puller.set_velocity(self.motors.right_puller.vel)
         time.sleep(0.1)
+        
+        self.reset_pull_stats()

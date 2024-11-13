@@ -1175,6 +1175,7 @@ class MainWindow(FormUI, WindowUI):
         self.disable_controls()
         self.core.force_hz_edge = self.edgeStopCheck.isChecked()
         self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
+        self.core.pullers_adaptive_vel = self.correctCheck.isChecked()
         self.core.flame_size = self.fSizeSpin.value()
         
         self.set_motors_params()
