@@ -99,6 +99,7 @@ class TaperPullingCore:
     brusher_x0 = 31.0  # mm
     brusher_min_span = 0.5  # mm, minimum brush span. Motor glitches if it's too low
     brusher_reverse = False  # Start brushing to more negative positions (v < 0)
+    brusher_going2x0 = False  # Brusher is going to x0
     
     flame_io_x0 = 14.3  # mm
     flame_io_hold = 1.0  # s
@@ -409,8 +410,17 @@ class TaperPullingCore:
                         self.motors.brusher.stop(0)
                         self.rhz_edges.append(self.brusher_pos - self.brusher_dir*self.flame_size/2.0)
                         self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+            else:
+                if (self.brusher_pos >= self.brusher_x0 + self.pos_check_precision or  
+                    self.brusher_pos <= self.brusher_x0 - self.pos_check_precision):
+                    if not self.brusher_going2x0:
+                        self.brusher_going2x0 = True
+                        self.motors.brusher.go_to(self.brusher_x0)
+                else:
+                    self.brusher_going2x0 = False
         else:
-            if hz >= self.motors.brusher.min_span:
+            if hz - self.flame_size >= self.motors.brusher.min_span:
+                # This is a work in progressm, possibly useless
                 if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
                     # Interpolate hz function, discarding previous values
                     new_x = np.linspace(self.total_pulled,  self.hotzone_function[0][-1], 1001)
@@ -426,6 +436,14 @@ class TaperPullingCore:
                     self.brusher_dir = -1*self.brusher_dir
                     self.rhz_edges.append(self.brusher_pos - self.brusher_dir*self.flame_size/2.0)
                     self.motors.brusher.go_to(self.brusher_x0 + delta_l*self.brusher_dir/2.0)
+            else:
+                if (self.brusher_pos >= self.brusher_x0 + self.pos_check_precision or  
+                    self.brusher_pos <= self.brusher_x0 - self.pos_check_precision):
+                    if not self.brusher_going2x0:
+                        self.brusher_going2x0 = True
+                        self.motors.brusher.go_to(self.brusher_x0)
+                else:
+                    self.brusher_going2x0 = False
                 
     def check_io_mb(self):
         if self.flame_io_moveback and not self.flameIO_moving:
