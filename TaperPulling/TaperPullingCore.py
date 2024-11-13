@@ -401,7 +401,7 @@ class TaperPullingCore:
                     # Brute force move motor, if for some reason the move() function doesn't do its job.
                     elif self.motors.brusher.moving and self.motors.brusher.motor_stopped():
                         # In the future, it might be important to change the stop flag here.
-                        # Several stop commands in a row (before it actually stops), may harm performance
+                        # Several commands in a row may harm performance
                         self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                 else:
                     if beyond_limit:
