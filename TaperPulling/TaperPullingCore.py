@@ -385,9 +385,14 @@ class TaperPullingCore:
                             if self.pulling:
                                 self.motors.left_puller.stop(0)
                                 self.motors.right_puller.stop(0)
-                        if self.motors.brusher.motor_stopped():
+                        elif self.motors.brusher.motor_stopped():
                             self.brusher_dir = -1*self.brusher_dir
                             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+                        # Brute force stop motor, if for some reason the stop() function doesn't do its job.
+                        else:
+                            # In the future, it might be important to set some flag here.
+                            # Several stop commands in a row (before it actually stops), may harm performance
+                            self.motors.brusher.stop(1)
                     elif self.brusher_pos >= l - dist_compensation and self.brusher_pos <= r + dist_compensation:
                         if self.pulling and not self.motors.left_puller.moving:
                             self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
@@ -395,6 +400,8 @@ class TaperPullingCore:
                             self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
                     # Brute force move motor, if for some reason the move() function doesn't do its job.
                     elif self.motors.brusher.moving and self.motors.brusher.motor_stopped():
+                        # In the future, it might be important to change the stop flag here.
+                        # Several stop commands in a row (before it actually stops), may harm performance
                         self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                 else:
                     if beyond_limit:
