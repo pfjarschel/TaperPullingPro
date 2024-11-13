@@ -386,25 +386,15 @@ class TaperPullingCore:
                                 self.motors.left_puller.stop(0)
                                 self.motors.right_puller.stop(0)
                         if self.motors.brusher.motor_stopped():
-                            # The issue is either the motor_stopped function is not returning the right result (never entering this block)
-                            # or the move function is not working properly (exits this block to never enter again, since it's not  really moving).
-                            # Solutions:
-                            #   - Add a flag to only execute the move function on the next loop iteration
-                            #   - Change the conditions so it can enter here again and start moving if it is not moving
-                            #     Need to test the brute force method below.
-                            # TODO: Test and then clean this block.
-                            print("stopped")
                             self.brusher_dir = -1*self.brusher_dir
                             self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
-                            print("moving")
                     elif self.brusher_pos >= l - dist_compensation and self.brusher_pos <= r + dist_compensation:
                         if self.pulling and not self.motors.left_puller.moving:
                             self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
                         if self.pulling and not self.motors.right_puller.moving:
                             self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
-                    # Brute force move motor
+                    # Brute force move motor, if for some reason the move() function doesn't do its job.
                     elif self.motors.brusher.moving and self.motors.brusher.motor_stopped():
-                        print("motor was bugged, trying to move again...")
                         self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
                 else:
                     if beyond_limit:
