@@ -15,6 +15,7 @@
 # Created files
 **/config/*
 **/data_bckp/*
+**/data_bckp*
 
 # Dev testing
 private_tests*
