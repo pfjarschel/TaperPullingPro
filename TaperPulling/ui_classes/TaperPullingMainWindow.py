@@ -1077,8 +1077,7 @@ class MainWindow(FormUI, WindowUI):
             self.daq_busy = False
             
             self.daq_init()
-            
-    
+               
     def set_ref_power(self):
         self.refpowIndSpin.setValue(self.transpowIndSpin.value())
         

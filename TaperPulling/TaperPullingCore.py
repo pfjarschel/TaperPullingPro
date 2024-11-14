@@ -113,7 +113,7 @@ class TaperPullingCore:
     left_puller_xinit = left_puller_x0
     right_puller_xinit = right_puller_x0
     pullers_adaptive_vel = True  # Slows down pulling if flame span is too large and/or when brusher is slower
-    pullers_av_threshold = [10, 20, 30, 40, 50]  # mm, thresholds to decrease pulling velocity
+    pullers_av_threshold = [10, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200]  # mm, thresholds to decrease pulling velocity
     pullers_av_factor = 0.75  # will decrease velocity to this factor
     pullers_av_idx = 0  # Keep trac of speed changes
     brusher_enhance_edge = True  # Use acceleration information to improve HZ edges
