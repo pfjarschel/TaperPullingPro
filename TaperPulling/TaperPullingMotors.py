@@ -386,7 +386,7 @@ class GenericTLMotor:
             vel (float): Standard velocity.
         """
         if self.ok:
-            if vel < 0.1: vel = 0.1
+            if vel < 0.001: vel = 0.001
             if vel > self.max_vel: vel = self.max_vel
             curr_v, curr_a = self.get_vel_params()
             curr_v = vel
