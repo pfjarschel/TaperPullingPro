@@ -370,6 +370,7 @@ class MainWindow(FormUI, WindowUI):
         self.brusherMinSpanSpin.valueChanged.connect(self.update_minimum_hz)
         self.fSizeSpin.valueChanged.connect(self.update_minimum_hz)
         self.enhanceHZCheck.clicked.connect(self.enhanced_edge_warn)
+        self.correctCheck.clicked.connect(self.set_adaptive_vel)
         
         # Motor LEDs
         self.brInitLed_ef = self.make_led_clickable(self.brInitLed, self.core.motors.brusher)
@@ -465,6 +466,7 @@ class MainWindow(FormUI, WindowUI):
             self.core.brusher_dir0 = -1
         else:
             self.core.brusher_dir0 = 1
+        self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
             
         # In/Out
         self.core.motors.flame_io.serial = self.flameIOSerialText.text()
@@ -490,6 +492,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.right_puller.pull_vel = self.pullerPullVelSpin.value()
         self.core.left_puller_x0 = self.pullerInitPosSpin.value()
         self.core.right_puller_x0 = self.pullerInitPosSpin.value()
+        self.core.pullers_adaptive_vel = self.correctCheck.isChecked()
         
     def set_fiber_params(self):
         n_cl = self.cladSpin.value()
@@ -737,7 +740,8 @@ class MainWindow(FormUI, WindowUI):
         
     def reset_pull_stats(self):
         self.core.reset_pull_stats()
-        self.timeleftLabel.setText(f"Time left: {self.total_to_pull/(2*self.pullerPullVelSpin.value()):.2f} s")
+        self.set_motors_params()
+        self.timeleftLabel.setText(f"Time left: {self.core.get_time_left(self.total_to_pull, 0.0):.2f} s")
         self.timeleftBar.setValue(0)
         self.totalPulledIndSpin.setValue(0.0)
         self.waistDiamIndSpin.setValue(self.d0Spin.value())
@@ -915,9 +919,8 @@ class MainWindow(FormUI, WindowUI):
             self.pull_busy = True
             
             # Update time
-            pull_left = self.total_to_pull - self.core.total_pulled
-            time_left = pull_left/(2*self.pullerPullVelSpin.value())
-            total_time = self.total_to_pull/(2*self.pullerPullVelSpin.value())
+            time_left = self.core.get_time_left()
+            total_time = self.core.get_time_left(total_pulled=0.0)
             self.timeleftLabel.setText(f"Time left: {time_left:.2f} s")
             self.timeleftBar.setValue(int(1000.0*(1 - time_left/total_time)))
             
@@ -1309,7 +1312,8 @@ class MainWindow(FormUI, WindowUI):
 
         self.setTransLengthSpin.setValue(z0)
         self.setWaistLengthSpin.setValue(lw)
-        self.timeleftLabel.setText(f"Time left: {x0/(2.0*self.pullerPullVelSpin.value()):.2f} s")
+        self.set_motors_params()
+        self.timeleftLabel.setText(f"Time left: {self.core.get_time_left(x0, 0.0):.2f} s")
         
         if np.abs(alpha) > 0.01:
             hz_data = self.shape.uniform_hz(hz0, alpha, x0)
@@ -1413,7 +1417,8 @@ class MainWindow(FormUI, WindowUI):
                         self.pulledoptIndSpin.setValue(self.hz_function[0][-1])
                         self.hz0optIndSpin.setValue(self.hz_function[1][0])
                         self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
-                        self.timeleftLabel.setText(f"Time left: {0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value():.2f} s")
+                        self.set_motors_params()
+                        self.timeleftLabel.setText(f"Time left: {self.core.get_time_left(self.total_to_pull, 0.0):.2f} s")
                         
                         self.profile_mode = "Loaded"
                         self.statusBar.showMessage(f"Hotzone file loaded")
@@ -1461,7 +1466,8 @@ class MainWindow(FormUI, WindowUI):
                 self.pulledoptIndSpin.setValue(self.hz_function[0][-1])
                 self.hz0optIndSpin.setValue(self.hz_function[1][0])
                 self.setTransLengthSpin.setValue((self.hz_function[0][-1] + self.hz_function[1][0] - self.hz_function[1][-1])/2)
-                self.timeleftLabel.setText(f"Time left: {0.5*self.hz_function[0][-1]/self.pullerPullVelSpin.value():.2f} s")
+                self.set_motors_params()
+                self.timeleftLabel.setText(f"Time left: {self.core.get_time_left(self.total_to_pull, 0.0):.2f} s")
                 
                 self.profile_mode = "Optimized"
                 self.statusBar.showMessage(f"Profile calculated successfully!")
@@ -1476,6 +1482,10 @@ class MainWindow(FormUI, WindowUI):
                    "this effect is what enables us to see the single mode signature in the spectrogram.\n" + \
                    "Keep in mind that the total pulling time will be much greater due to the pauses."
             QMessageBox.information(self, "Enhanced edge information", text, QMessageBox.StandardButton.Ok)
+            
+    def set_adaptive_vel(self):
+        self.set_motors_params()
+        self.timeleftLabel.setText(f"Time left: {self.core.get_time_left(self.total_to_pull, 0.0):.2f} s")
     
     # Menu functions
     def action_save_data(self):

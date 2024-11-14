@@ -113,8 +113,8 @@ class TaperPullingCore:
     left_puller_xinit = left_puller_x0
     right_puller_xinit = right_puller_x0
     pullers_adaptive_vel = True  # Slows down pulling if flame span is too large and/or when brusher is slower
-    pullers_av_threshold = [5, 7]  # mm, threshold to decrease pulling velocity
-    pullers_av_factor = 0.5  # will decrease velocity to this factor
+    pullers_av_threshold = [10, 20, 30, 40, 50]  # mm, thresholds to decrease pulling velocity
+    pullers_av_factor = 0.75  # will decrease velocity to this factor
     pullers_av_idx = 0  # Keep trac of speed changes
     brusher_enhance_edge = True  # Use acceleration information to improve HZ edges
     
@@ -375,9 +375,10 @@ class TaperPullingCore:
                     self.pullers_av_idx += 1
                     self.motors.left_puller.stop(0)
                     self.motors.right_puller.stop(0)
-                    new_v = self.pullers_av_factor*self.motors.left_puller.vel
-                    self.motors.left_puller.set_velocity(new_v)
-                    self.motors.right_puller.set_velocity(new_v)
+                    new_lv = self.motors.left_puller.pull_vel*(self.pullers_av_factor**self.pullers_av_idx)
+                    new_rv = self.motors.right_puller.pull_vel*(self.pullers_av_factor**self.pullers_av_idx)
+                    self.motors.left_puller.set_velocity(new_lv)
+                    self.motors.right_puller.set_velocity(new_rv)
                     self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
                     self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
         
@@ -621,3 +622,37 @@ class TaperPullingCore:
         time.sleep(0.1)
         
         self.reset_pull_stats()
+        
+    def get_time_left(self, total_to_pull=-1, total_pulled=-1): 
+        if total_to_pull < 0:
+            total_to_pull = self.hotzone_function[0][-1]
+        if total_pulled < 0:
+            total_pulled = self.total_pulled
+        to_pull = total_to_pull - total_pulled
+        v0 = (self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel)
+        t = 0
+        if self.pullers_adaptive_vel:
+            i0 = 0
+            if total_pulled > 0:
+                i0 = self.pullers_av_idx
+            if i0 < len(self.pullers_av_threshold):
+                v = v0*(self.pullers_av_factor**i0)
+                th = np.min([total_to_pull, self.pullers_av_threshold[i0]])
+                x = th - total_pulled
+                t += x/v
+            for i in range(i0, len(self.pullers_av_threshold) - 1):
+                if self.pullers_av_threshold[i] <= total_to_pull:
+                    v = v0*(self.pullers_av_factor**(i + 1))
+                    th = np.min([total_to_pull, self.pullers_av_threshold[i + 1]]) 
+                    x = th - self.pullers_av_threshold[i]
+                    t += x/v
+            i1 = len(self.pullers_av_threshold) - 1
+            if self.pullers_av_threshold[i1] < total_to_pull:
+                v = v0*(self.pullers_av_factor**(i1 + 1))
+                x = total_to_pull - np.max([self.pullers_av_threshold[i1], total_pulled])
+                t += x/v
+        else:
+            x = to_pull
+            t = x/v0
+        
+        return t
