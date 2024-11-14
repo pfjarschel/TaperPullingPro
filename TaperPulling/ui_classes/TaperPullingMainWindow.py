@@ -370,7 +370,7 @@ class MainWindow(FormUI, WindowUI):
         self.brusherMinSpanSpin.valueChanged.connect(self.update_minimum_hz)
         self.fSizeSpin.valueChanged.connect(self.update_minimum_hz)
         self.enhanceHZCheck.clicked.connect(self.enhanced_edge_warn)
-        self.correctCheck.clicked.connect(self.set_adaptive_vel)
+        self.adaptivelCheck.clicked.connect(self.set_adaptive_vel)
         
         # Motor LEDs
         self.brInitLed_ef = self.make_led_clickable(self.brInitLed, self.core.motors.brusher)
@@ -492,7 +492,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.right_puller.pull_vel = self.pullerPullVelSpin.value()
         self.core.left_puller_x0 = self.pullerInitPosSpin.value()
         self.core.right_puller_x0 = self.pullerInitPosSpin.value()
-        self.core.pullers_adaptive_vel = self.correctCheck.isChecked()
+        self.core.pullers_adaptive_vel = self.adaptivelCheck.isChecked()
         
     def set_fiber_params(self):
         n_cl = self.cladSpin.value()
@@ -615,7 +615,7 @@ class MainWindow(FormUI, WindowUI):
         parameters_dict["Motors"]["Pullers"]["Pull_velocity"] = self.pullerPullVelSpin.value()
         parameters_dict["Motors"]["Pullers"]["Acceleration"] = self.pullerAccelSpin.value()
         parameters_dict["Motors"]["Pullers"]["Initial_pos"] = self.pullerInitPosSpin.value()
-        parameters_dict["Motors"]["Pullers"]["Adjust_pull_vel"] = self.correctCheck.isChecked()
+        parameters_dict["Motors"]["Pullers"]["Adjust_pull_vel"] = self.adaptivelCheck.isChecked()
         
         parameters_dict["DAQ"] = {}
         parameters_dict["DAQ"]["Dev/channel"] = self.daqChannelCombo.currentText()
@@ -1178,7 +1178,7 @@ class MainWindow(FormUI, WindowUI):
         self.disable_controls()
         self.core.force_hz_edge = self.edgeStopCheck.isChecked()
         self.core.brusher_enhance_edge = self.enhanceHZCheck.isChecked()
-        self.core.pullers_adaptive_vel = self.correctCheck.isChecked()
+        self.core.pullers_adaptive_vel = self.adaptivelCheck.isChecked()
         self.core.flame_size = self.fSizeSpin.value()
         
         self.set_motors_params()
