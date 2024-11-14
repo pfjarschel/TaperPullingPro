@@ -3627,6 +3627,7 @@ margin: -10px -76px;
      <string>File</string>
     </property>
     <addaction name="actionSave_Data"/>
+    <addaction name="actionClear_autosaved_data"/>
     <addaction name="separator"/>
     <addaction name="actionLoad_Default_Settings"/>
     <addaction name="actionSet_Current_as_Default"/>
@@ -3704,6 +3705,11 @@ margin: -10px -76px;
    </property>
    <property name="shortcut">
     <string>Ctrl+S</string>
+   </property>
+  </action>
+  <action name="actionClear_autosaved_data">
+   <property name="text">
+    <string>Clear Autosaved Data...</string>
    </property>
   </action>
  </widget>
