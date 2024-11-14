@@ -1516,6 +1516,8 @@ class MainWindow(FormUI, WindowUI):
                 if os.path.exists(data_folder):
                     shutil.rmtree(data_folder)
                     QMessageBox.information(self, "Bye bye data", "Done, all data deleted.")
+                else:
+                    QMessageBox.information(self, "No data", "No previous data found, so nothing was deleted.")
         
     def action_load_def_settings(self):
         self.load_default_settings()
