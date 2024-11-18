@@ -621,7 +621,11 @@ class TaperPullingCore:
         self.motors.right_puller.set_velocity(self.motors.right_puller.vel)
         time.sleep(0.1)
         
+        # Reset all leftover stuff
         self.reset_pull_stats()
+        
+        # Go to standby mode
+        self.standby = True
         
     def get_time_left(self, total_to_pull=-1, total_pulled=-1): 
         if total_to_pull < 0:
