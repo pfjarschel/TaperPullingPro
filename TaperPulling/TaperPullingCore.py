@@ -535,7 +535,7 @@ class TaperPullingCore:
                 rok = True
             if lok and rok:
                 self.loop_loosened = True
-        elif self.loop_looped and not self. loop_tensioning:
+        elif self.loop_looped and not self.loop_tensioning:
             self.motors.left_puller.go_to(self.puller_left_pos + self.puller_left_dir*self.loop_dist_bw)
             self.motors.right_puller.go_to(self.puller_right_pos + self.puller_right_dir*self.loop_dist_bw)
             self.loop_tensioning = True
@@ -625,6 +625,7 @@ class TaperPullingCore:
         self.reset_pull_stats()
         
         # Go to standby mode
+        self.running_process = True
         self.standby = True
         
     def get_time_left(self, total_to_pull=-1, total_pulled=-1): 
