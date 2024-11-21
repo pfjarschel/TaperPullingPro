@@ -627,6 +627,7 @@ class TaperPullingCore:
         # Go to standby mode
         self.running_process = True
         self.standby = True
+        self.motors.flame_io.go_to(0.0)
         
     def get_time_left(self, total_to_pull=-1, total_pulled=-1): 
         if total_to_pull < 0:
