@@ -844,11 +844,6 @@ class MainWindow(FormUI, WindowUI):
             
             # Check if pullers are ok and initialize flame motors
             if connected[2] and connected[3]:
-                if self.core.motors.left_puller.danger_zone():
-                    self.core.motors.left_puller.go_to(self.core.motors.left_puller.safe_range[1])
-                if self.core.motors.right_puller.danger_zone():
-                    self.core.motors.right_puller.go_to(self.core.motors.right_puller.safe_range[1])
-                
                 if not connected[0] and not self.core.motors.brusher.initing:
                     self.brInitLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
                     self.core.init_brusher_as_default(True, self.brSimCheck.isChecked())
@@ -862,7 +857,11 @@ class MainWindow(FormUI, WindowUI):
                     homed[0] = True
                 elif self.core.motors.brusher.homing:
                     self.brHomeLed.setPixmap(QPixmap(f"{respath}/yellow_led.png"))
-                else:
+                elif connected[2] and connected[3]:
+                    if self.core.motors.left_puller.danger_zone():
+                        self.core.motors.left_puller.go_to(self.core.motors.left_puller.safe_range[1])
+                    if self.core.motors.right_puller.danger_zone():
+                        self.core.motors.right_puller.go_to(self.core.motors.right_puller.safe_range[1])
                     self.core.motors.brusher.home()
             if connected[1]:
                 if self.core.motors.flame_io.homed:
