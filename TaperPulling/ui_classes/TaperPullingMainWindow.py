@@ -1194,9 +1194,9 @@ class MainWindow(FormUI, WindowUI):
         
     def stop_pulling(self, save_data=False):
         self.pullLoop_timer.stop()
-        self.core.stop_pulling()
         self.data.stop_spectrogram()
         self.enable_controls()
+        self.core.stop_pulling()
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
         self.timeleftBar.setValue(0)
