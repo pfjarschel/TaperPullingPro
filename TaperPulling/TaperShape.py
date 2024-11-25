@@ -64,7 +64,7 @@ class TaperShape:
     n_core_ratio = n_core_ratio_smf28
     n_medium = n_medium_smf28
     n_points = 1001
-    modes_points = 101
+    modes_points = 21
     calc_finished = False
     calc_ongoing = False
         
@@ -79,7 +79,7 @@ class TaperShape:
                        n_core_ratio: float=n_core_ratio_smf28,
                        n_medium: float=n_medium_smf28,
                        n_points: int=1001,
-                       modes_points = 101
+                       modes_points = 21
                        ):
         """
         This class contains all the tools related to the shape of fiber tapers.
@@ -118,7 +118,7 @@ class TaperShape:
                        n_core_ratio: float=1.0036,
                        n_medium: float=1.0,
                        n_points: int=1001,
-                       modes_points = 101
+                       modes_points = 21
                        ):
 
         self.wavelength = wl
