@@ -21,7 +21,7 @@
 
 import json
 import time
-from distutils.version import StrictVersion as Version
+# from distutils.version import StrictVersion as Version
 from operator import mul
 from functools import reduce
 from itertools import product, islice
@@ -341,12 +341,12 @@ class FiberFactory(object):
                 raise FiberFactoryValidationError(
                     "Missing '{}' parameter".format(key))
 
-        if Version(obj["version"]) > Version(__version__):
-            raise FiberFactoryValidationError("Version of loaded object "
-                                              "is higher that version "
-                                              "of current library")
-        elif Version(obj["version"]) < Version(__version__):
-            self._upgrade(obj)
+        # if Version(obj["version"]) > Version(__version__):
+        #     raise FiberFactoryValidationError("Version of loaded object "
+        #                                       "is higher that version "
+        #                                       "of current library")
+        # elif Version(obj["version"]) < Version(__version__):
+        #     self._upgrade(obj)
 
         for layernum, layer in enumerate(obj["layers"], 1):
             self._validateLayer(layer, layernum)
