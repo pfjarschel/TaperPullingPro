@@ -18,6 +18,7 @@ Wavelength parameter in µm.
 # =============================================================================
 
 import os
+import time
 import numpy as np
 from enum import Enum
 from scipy.signal import savgol_filter
@@ -47,17 +48,7 @@ class TaperShape:
     optimal adiabatic shape, and calculate the hotzone function for any tapering
     shape. It also calculates the effective indexes and takes dispersion into
     account.
-    """
-        
-    
-    class Loop(Timer):
-        """
-        Class that manages a threaded loop.
-        """
-        def run(self):
-            while not self.finished.wait(self.interval):
-                self.function(*self.args, **self.kwargs)
-    
+    """    
     
     # SMF-28 default
     wl_smf28 = 1.55  # µm
@@ -72,8 +63,10 @@ class TaperShape:
     r_core = r_core_smf28
     n_core_ratio = n_core_ratio_smf28
     n_medium = n_medium_smf28
-    n_points = 101
+    n_points = 1001
+    modes_points = 101
     calc_finished = False
+    calc_ongoing = False
         
     # Modal effective index difference
     dneffs = np.zeros(11)
@@ -85,7 +78,8 @@ class TaperShape:
                        r_core: float=r_core_smf28,
                        n_core_ratio: float=n_core_ratio_smf28,
                        n_medium: float=n_medium_smf28,
-                       n_points: int=101
+                       n_points: int=1001,
+                       modes_points = 101
                        ):
         """
         This class contains all the tools related to the shape of fiber tapers.
@@ -109,6 +103,8 @@ class TaperShape:
         # Load default modal effective index difference
         self.load_dneffs(f"{respath}/dneffs_SMF28_FB_1550.txt")
         self.dneffs_smf28_1550 = self.dneffs
+        self.n_points = len(self.dneffs)
+        self.modes_points = modes_points
         
         self.set_parameters(wl, r0, r_core, n_core_ratio, n_medium, n_points)
         
@@ -121,7 +117,8 @@ class TaperShape:
                        r_core: float=4.1e-3,
                        n_core_ratio: float=1.0036,
                        n_medium: float=1.0,
-                       n_points: int=1001
+                       n_points: int=1001,
+                       modes_points = 101
                        ):
 
         self.wavelength = wl
@@ -130,63 +127,79 @@ class TaperShape:
         self.n_core_ratio = n_core_ratio
         self.n_medium = n_medium
         self.n_points = n_points
+        self.modes_points = modes_points
         self.n_cladding = self.cladding_refractive_index(wl)
         self.n_core = self.core_refractive_index(wl)
         
     def calculate_approx_dneffs(self):
-        # This is wrong. Do not use!
-        # Will be updated shortly.
+        if not self.calc_ongoing:
+            self.calc_ongoing = True
+            self.calc_finished = False
+            print("Calculating modes for different diameters...")
+            time.sleep(10)
+            print("Modes calculation complete!")
+            self.calc_finished = True
+            self.calc_ongoing = False
         
-        self.r_array = np.logspace(np.log10(5e-5), np.log10(self.initial_r), self.n_points)
+        # self.r_array = np.logspace(np.log10(5e-5), np.log10(self.initial_r), self.n_points)
         
-        n = self.n_points
-        n_cl = self.n_cladding
-        n_co = self.n_core
-        n_med = self.n_medium
-        wl = self.wavelength
+        # n = self.n_points
+        # n_cl = self.n_cladding
+        # n_co = self.n_core
+        # n_med = self.n_medium
+        # wl = self.wavelength
 
-        neffs_cl_1 = np.zeros(n)
-        neffs_cl_2 = np.zeros(n)
-        neffs_co_1 = np.zeros(n)
-        neffs_co_2 = np.zeros(n)
+        # neffs_cl_1 = np.zeros(n)
+        # neffs_cl_2 = np.zeros(n)
+        # neffs_co_1 = np.zeros(n)
+        # neffs_co_2 = np.zeros(n)
 
-        for i in range(n):
-            clad_r = 1e3*self.r_array[i]
-            core_r = self.r_core*(clad_r/self.initial_r)
-            neffs_co_1[i] = self.mode_neff(core_r, n_co, n_cl, wl, Mode.LP01)
-            neffs_co_2[i] = self.mode_neff(core_r, n_co, n_cl, wl, Mode.LP02)
-            neffs_cl_1[i] = self.mode_neff(clad_r, n_cl, n_med, wl, Mode.LP01)
-            neffs_cl_2[i] = self.mode_neff(clad_r, n_cl, n_med, wl, Mode.LP02)
+        # for i in range(n):
+        #     clad_r = 1e3*self.r_array[i]
+        #     core_r = self.r_core*(clad_r/self.initial_r)
+        #     neffs_co_1[i] = self.mode_neff(core_r, n_co, n_cl, wl, Mode.LP01)
+        #     neffs_co_2[i] = self.mode_neff(core_r, n_co, n_cl, wl, Mode.LP02)
+        #     neffs_cl_1[i] = self.mode_neff(clad_r, n_cl, n_med, wl, Mode.LP01)
+        #     neffs_cl_2[i] = self.mode_neff(clad_r, n_cl, n_med, wl, Mode.LP02)
 
-        thresh_lp01_idx = np.nonzero(np.diff(neffs_cl_1))[0][-1]
-        thresh_lp01_r = self.r_array[thresh_lp01_idx]
-        thresh_lp02_idx = np.nonzero(np.diff(neffs_cl_2))[0][-1]
-        thresh_lp02_r = self.r_array[thresh_lp02_idx]
-        neffs_lp01 = np.zeros(n)
-        neffs_lp02 = np.zeros(n)
-        a = 0.5
-        for i in range(n):
-            if i <= thresh_lp01_idx:
-                neffs_lp01[i] = neffs_cl_1[i]
-            else:
-                x = 1e3*(self.r_array[i] - thresh_lp01_r)
-                co_weight = x/(x + a)
-                cl_weight = 1 - co_weight
-                neffs_lp01[i] = cl_weight*neffs_cl_1[i] + co_weight*neffs_co_1[i]
-        for i in range(n):
-            if i <= thresh_lp02_idx:
-                neffs_lp02[i] = neffs_cl_2[i]
-            else:
-                x = 1e3*(self.r_array[i] - thresh_lp02_r)
-                co_weight = x/(x + a)
-                cl_weight = 1 - co_weight
-                neffs_lp02[i] = cl_weight*neffs_cl_2[i] + co_weight*neffs_co_2[i]
+        # thresh_lp01_idx = np.nonzero(np.diff(neffs_cl_1))[0][-1]
+        # thresh_lp01_r = self.r_array[thresh_lp01_idx]
+        # thresh_lp02_idx = np.nonzero(np.diff(neffs_cl_2))[0][-1]
+        # thresh_lp02_r = self.r_array[thresh_lp02_idx]
+        # neffs_lp01 = np.zeros(n)
+        # neffs_lp02 = np.zeros(n)
+        # a = 0.5
+        # for i in range(n):
+        #     if i <= thresh_lp01_idx:
+        #         neffs_lp01[i] = neffs_cl_1[i]
+        #     else:
+        #         x = 1e3*(self.r_array[i] - thresh_lp01_r)
+        #         co_weight = x/(x + a)
+        #         cl_weight = 1 - co_weight
+        #         neffs_lp01[i] = cl_weight*neffs_cl_1[i] + co_weight*neffs_co_1[i]
+        # for i in range(n):
+        #     if i <= thresh_lp02_idx:
+        #         neffs_lp02[i] = neffs_cl_2[i]
+        #     else:
+        #         x = 1e3*(self.r_array[i] - thresh_lp02_r)
+        #         co_weight = x/(x + a)
+        #         cl_weight = 1 - co_weight
+        #         neffs_lp02[i] = cl_weight*neffs_cl_2[i] + co_weight*neffs_co_2[i]
 
-        self.dneffs = np.zeros(n)
-        for i in range(n):
-            self.dneffs[i] = neffs_lp01[i] - neffs_lp02[i]
-            if self.dneffs[i] < 1e-5:
-                self.dneffs[i] = 1e-5
+        # self.dneffs = np.zeros(n)
+        # for i in range(n):
+        #     self.dneffs[i] = neffs_lp01[i] - neffs_lp02[i]
+        #     if self.dneffs[i] < 1e-5:
+        #         self.dneffs[i] = 1e-5
+        
+            return self.dneffs
+        else:
+            return self.dneffs
+                
+    def calculate_approx_dneffs_async(self):
+        calc_thread = Thread(target=self.calculate_approx_dneffs)
+        calc_thread.start()
+        return False
         
     def load_dneffs(self, file):
         dneffs_txt = np.loadtxt(file)
@@ -387,72 +400,79 @@ class TaperShape:
         return z_arr, r_arr
     
     def real_adiabatic_profile(self, rw: float, min_hz: float=2.0, start_f: float=1.0,
-                               f_step: float=0.01, limit_r: float=20e-3):        
-        print("Trying to find the best feasible profile for the current parameters...")
-        self.calc_finished = False
-        
-        # Find f factor that allows starting hz to be feasible
-        f = 1.0  # First attempt
-        start_hz_ok = False
-        while not start_hz_ok:
-            z_rw, adiab_r_array = self.ideal_adiabatic_profile(rw, f)
+                               f_step: float=0.01, limit_r: float=20e-3):
+        if not self.calc_ongoing:
+            print("Trying to find the best feasible profile for the current parameters...")
+            self.calc_finished = False
+            self.calc_ongoing = True
             
-            # Get hot-zone to adjust for real flame sizes
-            x_hz, hz = self.hz_from_profile(z_rw, adiab_r_array, min_hz)
-            
-            # Find point where hz <= min_hz
-            min_hz_diff = hz[1:] - min_hz
-            min_hz_idx = len(hz) - 1
-            for i in range(1, len(min_hz_diff)):
-                if np.sign(min_hz_diff[i - 1]) != np.sign(min_hz_diff[i]):
-                    min_hz_idx = i
-                    break
-            r0 = adiab_r_array[min_hz_idx]
-            
-            if hz[0] >= min_hz and r0 <= limit_r:
-                start_hz_ok = True
-            else:
-                f -= f_step
-                if f <= 0:
-                    raise Exception("Error: Could not find a feasible profile that matches the desired final radius.")
-            
-        if hz.min() >= min_hz or min_hz_idx >= len(hz) - 1:          
-            # Profile is already feasible, min_hz is not broken
-            print("Found a feasible profile!")
-            self.calc_finished = True
-            
-            self.calc_z_array = z_rw
-            self.calc_r_array = adiab_r_array
-            
-            return z_rw, adiab_r_array
-        else:          
-            # Perform optimization using parametric hot-zone
-            curr_n = len(adiab_r_array)
-            x_min = x_hz.max()
-            x_max = 100.0
-            x0_min = 0.0
-            x0_max = x_max
-            l0_min = min_hz
-            l0_max = 50.0
-            a_min = -10.0
-            a_max = 10.0
-            p0 = [x_hz.max(), x_hz[hz.argmax()], hz.max(), 0.5]
-            bounds = [[x_min, x_max], [x0_min, x0_max], [l0_min, l0_max], [a_min, a_max]]
-            
-            # Nelder-Mead is a little slow but gives good results.
-            p1 = minimize(self.profile_optimization_function, p0, bounds=bounds,
-                          args=(min_hz, curr_n, z_rw, adiab_r_array), method='Nelder-Mead').x
-            x_arr_opt0, l_arr_opt0 = self.parametric_hz(p1[0], p1[1], p1[2], p1[3], min_hz, curr_n)
-            z_arr_opt0, r_arr_opt0 = self.profile_from_hz(x_arr_opt0, l_arr_opt0)
-            z_arr_opt0, r_arr_opt0 = self.extend_profile_until_rw(z_arr_opt0, r_arr_opt0, rw, l_arr_opt0[-1])
-            
-            self.calc_z_array = z_arr_opt0
-            self.calc_r_array = r_arr_opt0
-            
-            self.calc_finished = True
-            
-            print("Found an optimized profile!")
-            return z_arr_opt0, r_arr_opt0
+            # Find f factor that allows starting hz to be feasible
+            f = 1.0  # First attempt
+            start_hz_ok = False
+            while not start_hz_ok:
+                z_rw, adiab_r_array = self.ideal_adiabatic_profile(rw, f)
+                
+                # Get hot-zone to adjust for real flame sizes
+                x_hz, hz = self.hz_from_profile(z_rw, adiab_r_array, min_hz)
+                
+                # Find point where hz <= min_hz
+                min_hz_diff = hz[1:] - min_hz
+                min_hz_idx = len(hz) - 1
+                for i in range(1, len(min_hz_diff)):
+                    if np.sign(min_hz_diff[i - 1]) != np.sign(min_hz_diff[i]):
+                        min_hz_idx = i
+                        break
+                r0 = adiab_r_array[min_hz_idx]
+                
+                if hz[0] >= min_hz and r0 <= limit_r:
+                    start_hz_ok = True
+                else:
+                    f -= f_step
+                    if f <= 0:
+                        self.calc_ongoing = False
+                        self.calc_finished = True
+                        raise Exception("Error: Could not find a feasible profile that matches the desired final radius.")
+                
+            if hz.min() >= min_hz or min_hz_idx >= len(hz) - 1:          
+                # Profile is already feasible, min_hz is not broken
+                print("Found a feasible profile!")
+                
+                self.calc_z_array = z_rw
+                self.calc_r_array = adiab_r_array
+                
+                self.calc_ongoing = False
+                self.calc_finished = True
+                return z_rw, adiab_r_array
+            else:          
+                # Perform optimization using parametric hot-zone
+                curr_n = len(adiab_r_array)
+                x_min = x_hz.max()
+                x_max = 100.0
+                x0_min = 0.0
+                x0_max = x_max
+                l0_min = min_hz
+                l0_max = 50.0
+                a_min = -10.0
+                a_max = 10.0
+                p0 = [x_hz.max(), x_hz[hz.argmax()], hz.max(), 0.5]
+                bounds = [[x_min, x_max], [x0_min, x0_max], [l0_min, l0_max], [a_min, a_max]]
+                
+                # Nelder-Mead is a little slow but gives good results.
+                p1 = minimize(self.profile_optimization_function, p0, bounds=bounds,
+                            args=(min_hz, curr_n, z_rw, adiab_r_array), method='Nelder-Mead').x
+                x_arr_opt0, l_arr_opt0 = self.parametric_hz(p1[0], p1[1], p1[2], p1[3], min_hz, curr_n)
+                z_arr_opt0, r_arr_opt0 = self.profile_from_hz(x_arr_opt0, l_arr_opt0)
+                z_arr_opt0, r_arr_opt0 = self.extend_profile_until_rw(z_arr_opt0, r_arr_opt0, rw, l_arr_opt0[-1])
+                
+                self.calc_z_array = z_arr_opt0
+                self.calc_r_array = r_arr_opt0
+                
+                print("Found an optimized profile!")
+                self.calc_ongoing = False
+                self.calc_finished = True
+                return z_arr_opt0, r_arr_opt0
+        else:
+            return self.calc_z_array, self.calc_r_array
     
     def real_adiabatic_profile_async(self, rw: float=1.0, min_hz: float=2.0, start_f: float=1.0,
                             f_step: float=0.01, limit_r: float=20e-3):

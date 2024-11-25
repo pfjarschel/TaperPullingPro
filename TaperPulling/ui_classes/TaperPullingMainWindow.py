@@ -130,6 +130,7 @@ class MainWindow(FormUI, WindowUI):
             self.initLoop_timer.stop()
             self.go2start_timer.stop()
             self.calc_timer.stop()
+            self.modecalc_timer.stop()
             self.data.stop_monitor()
             self.data.close()
             self.core.stop_pulling()
@@ -343,6 +344,10 @@ class MainWindow(FormUI, WindowUI):
         self.calc_timer.setInterval(self.main_to)
         self.calc_timer.timeout.connect(self.calcLoop)
         
+        self.modecalc_timer = QTimer()
+        self.modecalc_timer.setInterval(self.main_to)
+        self.modecalc_timer.timeout.connect(self.modecalcLoop)
+        
         # DAQ connections
         self.update_daq_combos()
         self.srateSpin.valueChanged.connect(self.daq_init)
@@ -394,12 +399,7 @@ class MainWindow(FormUI, WindowUI):
         self.loadHZBut.clicked.connect(self.load_hotzone)
         self.calcHZBut.clicked.connect(self.calc_hotzone)
         self.fiberdefsCheck.clicked.connect(self.toggle_fiber_defaults)
-        self.d0Spin.valueChanged.connect(self.set_fiber_params)
-        self.coredSpin.valueChanged.connect(self.set_fiber_params)
-        self.cladSpin.valueChanged.connect(self.set_fiber_params)
-        self.corenSpin.valueChanged.connect(self.set_fiber_params)
-        self.wlSpin.valueChanged.connect(self.set_fiber_params)
-        self.mednSpin.valueChanged.connect(self.set_fiber_params)
+        self.calcmodesBut.clicked.connect(self.set_fiber_params)
         
         # Misc. connections
         self.set0powBut.clicked.connect(self.set_ref_power)
@@ -435,7 +435,6 @@ class MainWindow(FormUI, WindowUI):
         
         self.reset_pull_stats()
         self.recalc_params()
-        self.set_fiber_params()
         self.data.start_monitor()
         
     def set_daq_params(self):
@@ -501,10 +500,12 @@ class MainWindow(FormUI, WindowUI):
         n_co = self.corenSpin.value()
         n_ratio = n_co/n_cl
         self.shape.set_parameters(self.wlSpin.value(), 1e-3*self.d0Spin.value()/2.0, 1e-3*self.coredSpin.value()/2.0, 
-                                  n_ratio, self.mednSpin.value(), self.optimpointsSpin.value())
+                                  n_ratio, self.mednSpin.value(), self.modespointsSpin.value())
         self.shape.n_cladding = n_cl
         self.shape.n_core = n_co
         self.shape.n_core_ratio = self.shape.n_core/self.shape.n_cladding
+        
+        self.shape.calculate_approx_dneffs_async()
         
     def toggle_fiber_defaults(self):
         self.d0Spin.setReadOnly(self.fiberdefsCheck.isChecked())
@@ -513,15 +514,18 @@ class MainWindow(FormUI, WindowUI):
         self.cladSpin.setReadOnly(self.fiberdefsCheck.isChecked())
         self.wlSpin.setReadOnly(self.fiberdefsCheck.isChecked())
         self.mednSpin.setReadOnly(self.fiberdefsCheck.isChecked())
+        self.modespointsSpin.setReadOnly(self.fiberdefsCheck.isChecked())
+        self.calcmodesBut.setEnabled(not self.fiberdefsCheck.isChecked())
         
         if self.fiberdefsCheck.isChecked():
             buttons = QSpinBox.ButtonSymbols.NoButtons
-            self.d0Spin.setValue(125.0)
-            self.coredSpin.setValue(8.2)
-            self.corenSpin.setValue(1.4492)
-            self.cladSpin.setValue(1.444)
-            self.wlSpin.setValue(1.55)
-            self.mednSpin.setValue(1.0)
+            self.d0Spin.setValue(self.shape.r0_smf28*2000)
+            self.coredSpin.setValue(self.shape.r_core_smf28*2000)
+            self.corenSpin.setValue(self.shape.core_refractive_index(self.shape.wl_smf28,
+                                                                     self.shape.n_core_ratio_smf28))
+            self.cladSpin.setValue(self.shape.cladding_refractive_index(self.shape.wl_smf28))
+            self.wlSpin.setValue(self.shape.wl_smf28)
+            self.mednSpin.setValue(self.shape.n_medium_smf28)
         else:
             buttons = QSpinBox.ButtonSymbols.UpDownArrows
 
@@ -531,6 +535,7 @@ class MainWindow(FormUI, WindowUI):
         self.cladSpin.setButtonSymbols(buttons)
         self.wlSpin.setButtonSymbols(buttons)
         self.mednSpin.setButtonSymbols(buttons)
+        self.modespointsSpin.setButtonSymbols(buttons)
 
     def save_settings(self, filename):
         if filename != "":
@@ -1473,6 +1478,9 @@ class MainWindow(FormUI, WindowUI):
                 self.statusBar.showMessage(f"Profile calculated successfully!")
             except Exception as e:
                 print(e)
+                
+    def modecalcLoop(self):
+        pass
         
     def enhanced_edge_warn(self):
         if self.enhanceHZCheck.isChecked():
