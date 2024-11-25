@@ -23,22 +23,14 @@ import numpy as np
 from enum import Enum
 from scipy.signal import savgol_filter
 from scipy.optimize import minimize
+from scipy.interpolate import make_interp_spline
 from threading import Timer, Thread
+from fibermodes import FiberFactory, Wavelength, Mode, ModeFamily
 
 # Get relevant paths
 thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
 rootpath = thispath
 respath = f"{rootpath}/resources"
-
-
-class Mode(Enum):
-        LP01 = 0
-        LP11 = 1
-        LP21 = 2
-        LP02 = 3
-        LP31 = 4
-        LP41 = 5
-        LP51 = 6
 
 
 class TaperShape:
@@ -65,6 +57,7 @@ class TaperShape:
     n_medium = n_medium_smf28
     n_points = 1001
     modes_points = 21
+    min_r = 0.1e-4  # mm
     calc_finished = False
     calc_ongoing = False
         
@@ -136,62 +129,65 @@ class TaperShape:
             self.calc_ongoing = True
             self.calc_finished = False
             print("Calculating modes for different diameters...")
-            time.sleep(10)
+            
+            rf = self.min_r
+            clad0 = self.initial_r
+            core0 = self.r_core
+            ncore = self.n_core
+            nclad = self.n_cladding
+            nmed = self.n_medium
+            wl = self.wavelength
+            n = self.modes_points
+            r_cls = np.flip(np.logspace(np.log10(rf), np.log10(clad0), n))
+            neffs_fm = np.zeros(n)
+            neffs_hom1 = np.zeros(n)
+            
+            r_singlemode = self.calculate_single_mode_rcore(nclad, nmed, wl)*1e-3
+            
+            t0 = time.time()
+            for i in range(n):
+                rcl = r_cls[i]
+                rco = core0*rcl/clad0
+                
+                factory = FiberFactory()
+                if rco >= 0.1*core0:
+                    factory.addLayer(name="core", radius=rco*1e-3, material="Fixed", geometry="StepIndex", index=ncore)
+                factory.addLayer(name="cladding", radius=rcl*1e-3, material="Fixed", geometry="StepIndex", index=nclad)
+                factory.addLayer(name="medium", material="Fixed", geometry="StepIndex", index=nmed)
+                fiber = factory[0]
+
+                fm = Mode(ModeFamily.HE, 1, 1)
+                hom1 = Mode(ModeFamily.HE, 1, 2)
+                
+                neffs_fm[i] = fiber.neff(fm, Wavelength(wl*1e-6), delta=1e-5)
+
+                if rcl >= r_singlemode or i == 0:
+                    neffs_hom1[i] = fiber.neff(hom1, Wavelength(wl*1e-6), delta=1e-5)
+                else:
+                    neffs_hom1[i] = neffs_hom1[i - 1]
+                
+                if np.isnan(neffs_fm[i]):
+                    neffs_fm[i] = nmed
+                if np.isnan(neffs_hom1[i]):
+                    neffs_hom1[i] = nmed
+                
+                if time.time() - t0 >= 3.0 or i == 0 or i == n - 1:
+                    print(f"Calculating modes... Step {i + 1}, {100*(i + 1)/n:.2f}%")
+                    t0 = time.time()
+            
+            raw_dneffs = np.abs(neffs_fm - neffs_hom1)
+            # Avoid zeroes
+            min_dneff = raw_dneffs[raw_dneffs > 0].min()
+            raw_dneffs[raw_dneffs < min_dneff] = min_dneff
+            
+            # Interpolate
+            dneffs_spline = make_interp_spline(np.flip(r_cls), np.flip(raw_dneffs), 1)
+            self.r_array = np.flip(np.logspace(np.log10(rf), np.log10(clad0), self.n_points))
+            self.dneffs = dneffs_spline(self.r_array)
+            
             print("Modes calculation complete!")
             self.calc_finished = True
-            self.calc_ongoing = False
-        
-        # self.r_array = np.logspace(np.log10(5e-5), np.log10(self.initial_r), self.n_points)
-        
-        # n = self.n_points
-        # n_cl = self.n_cladding
-        # n_co = self.n_core
-        # n_med = self.n_medium
-        # wl = self.wavelength
-
-        # neffs_cl_1 = np.zeros(n)
-        # neffs_cl_2 = np.zeros(n)
-        # neffs_co_1 = np.zeros(n)
-        # neffs_co_2 = np.zeros(n)
-
-        # for i in range(n):
-        #     clad_r = 1e3*self.r_array[i]
-        #     core_r = self.r_core*(clad_r/self.initial_r)
-        #     neffs_co_1[i] = self.mode_neff(core_r, n_co, n_cl, wl, Mode.LP01)
-        #     neffs_co_2[i] = self.mode_neff(core_r, n_co, n_cl, wl, Mode.LP02)
-        #     neffs_cl_1[i] = self.mode_neff(clad_r, n_cl, n_med, wl, Mode.LP01)
-        #     neffs_cl_2[i] = self.mode_neff(clad_r, n_cl, n_med, wl, Mode.LP02)
-
-        # thresh_lp01_idx = np.nonzero(np.diff(neffs_cl_1))[0][-1]
-        # thresh_lp01_r = self.r_array[thresh_lp01_idx]
-        # thresh_lp02_idx = np.nonzero(np.diff(neffs_cl_2))[0][-1]
-        # thresh_lp02_r = self.r_array[thresh_lp02_idx]
-        # neffs_lp01 = np.zeros(n)
-        # neffs_lp02 = np.zeros(n)
-        # a = 0.5
-        # for i in range(n):
-        #     if i <= thresh_lp01_idx:
-        #         neffs_lp01[i] = neffs_cl_1[i]
-        #     else:
-        #         x = 1e3*(self.r_array[i] - thresh_lp01_r)
-        #         co_weight = x/(x + a)
-        #         cl_weight = 1 - co_weight
-        #         neffs_lp01[i] = cl_weight*neffs_cl_1[i] + co_weight*neffs_co_1[i]
-        # for i in range(n):
-        #     if i <= thresh_lp02_idx:
-        #         neffs_lp02[i] = neffs_cl_2[i]
-        #     else:
-        #         x = 1e3*(self.r_array[i] - thresh_lp02_r)
-        #         co_weight = x/(x + a)
-        #         cl_weight = 1 - co_weight
-        #         neffs_lp02[i] = cl_weight*neffs_cl_2[i] + co_weight*neffs_co_2[i]
-
-        # self.dneffs = np.zeros(n)
-        # for i in range(n):
-        #     self.dneffs[i] = neffs_lp01[i] - neffs_lp02[i]
-        #     if self.dneffs[i] < 1e-5:
-        #         self.dneffs[i] = 1e-5
-        
+            self.calc_ongoing = False    
             return self.dneffs
         else:
             return self.dneffs
@@ -300,7 +296,9 @@ class TaperShape:
         x = np.linspace(0, xt, n)
         y = y0 - np.exp(a*(x - x0)) + a*(x - x0) + 1
         y[y < min_l] = min_l
-        y = savgol_filter(y, int(n/30), 1)
+        min_window = n/30
+        if min_window > 1:
+            y = savgol_filter(y, int(min_window), 1)
     
         return x, y
     

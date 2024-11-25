@@ -505,7 +505,14 @@ class MainWindow(FormUI, WindowUI):
         self.shape.n_core = n_co
         self.shape.n_core_ratio = self.shape.n_core/self.shape.n_cladding
         
-        self.shape.calculate_approx_dneffs_async()
+        if not self.shape.calc_ongoing:
+            self.statusBar.showMessage(f"Calculating fiber modes... This can take a while...")
+            self.shape.calculate_approx_dneffs_async()
+            self.modecalc_timer.start()
+        else:
+            QMessageBox.information(self, "Please wait", 
+                                    "There is a calculation ongoing, please wait for that one to be finished.",
+                                    QMessageBox.StandardButton.Ok)
         
     def toggle_fiber_defaults(self):
         self.d0Spin.setReadOnly(self.fiberdefsCheck.isChecked())
@@ -1434,10 +1441,15 @@ class MainWindow(FormUI, WindowUI):
                 self.statusBar.showMessage(f"Hotzone file loading failed! The file format is probably wrong.")
     
     def calc_hotzone(self):
-        self.statusBar.showMessage(f"Calculating ideal feasible profile. Please wait...")
-        self.shape.real_adiabatic_profile_async(0.5e-3*self.dwoptSpin.value(), self.min_hz, self.ffactorSpin.value())
-        
-        self.calc_timer.start()
+        if not self.shape.calc_ongoing:
+            self.statusBar.showMessage(f"Calculating ideal feasible profile. Please wait...")
+            self.shape.real_adiabatic_profile_async(0.5e-3*self.dwoptSpin.value(), self.min_hz, self.ffactorSpin.value())
+            
+            self.calc_timer.start()
+        else:
+            QMessageBox.information(self, "Please wait", 
+                                    "There is a calculation ongoing, please wait for that one to be finished.",
+                                    QMessageBox.StandardButton.Ok)
     
     def calcLoop(self):
         if self.shape.calc_finished:
@@ -1480,8 +1492,10 @@ class MainWindow(FormUI, WindowUI):
                 print(e)
                 
     def modecalcLoop(self):
-        pass
-        
+        if self.shape.calc_finished:
+            self.modecalc_timer.stop()
+            self.statusBar.showMessage(f"Fiber modes calculated successfully! You may now calculate an optimal profile.")
+            
     def enhanced_edge_warn(self):
         if self.enhanceHZCheck.isChecked():
             text = "When this option is enabled, the puller motors stop moving during the hot zone edges. " + \
