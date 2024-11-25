@@ -59,13 +59,20 @@ class TaperShape:
                 self.function(*self.args, **self.kwargs)
     
     
+    # SMF-28 default
+    wl_smf28 = 1.55  # µm
+    r0_smf28 = 62.5e-3  # mm
+    r_core_smf28 = 4.1e-3  # mm
+    n_core_ratio_smf28 = 1.0036
+    n_medium_smf28 = 1.0
+    
     # Basic parameters
-    wavelength = 1.55  # µm
-    initial_r = 62.5e-3  # mm
-    r_core = 4.1e-3  # mm
-    n_core_ratio = 1.0036
-    n_medium = 1.0
-    n_points = 1001
+    wavelength = wl_smf28
+    initial_r = r0_smf28
+    r_core = r_core_smf28
+    n_core_ratio = n_core_ratio_smf28
+    n_medium = n_medium_smf28
+    n_points = 101
     calc_finished = False
         
     # Modal effective index difference
@@ -73,12 +80,12 @@ class TaperShape:
     r_array = np.zeros(11)
     z_r0 = np.zeros(11)
     
-    def __init__(self, wl: float=1.55,
-                       r0: float=62.5e-3,
-                       r_core: float=4.1e-3,
-                       n_core_ratio: float=1.0036,
-                       n_medium: float=1.0,
-                       n_points: int=1001
+    def __init__(self, wl: float=wl_smf28,
+                       r0: float=r0_smf28,
+                       r_core: float=r_core_smf28,
+                       n_core_ratio: float=n_core_ratio_smf28,
+                       n_medium: float=n_medium_smf28,
+                       n_points: int=101
                        ):
         """
         This class contains all the tools related to the shape of fiber tapers.
@@ -92,10 +99,16 @@ class TaperShape:
         n_points: Number of points for the profile/hotzone function. Default is 1001.
         """
         
-        # Load default modal effective index difference if parameters are default
-        if (wl == self.wavelength and r0 == self.initial_r and r_core == self.r_core and 
-                  n_core_ratio == self.n_core_ratio and n_medium == self.n_medium):
-            self.load_dneffs(f"{respath}/dneffs_SMF28_FB_1550.txt")
+        # Modal effective index difference
+        self.dneffs = np.zeros(11)
+        
+        # Fiber info
+        self.r_array = np.zeros(11)
+        self.z_r0 = np.zeros(11)
+        
+        # Load default modal effective index difference
+        self.load_dneffs(f"{respath}/dneffs_SMF28_FB_1550.txt")
+        self.dneffs_smf28_1550 = self.dneffs
         
         self.set_parameters(wl, r0, r_core, n_core_ratio, n_medium, n_points)
         
