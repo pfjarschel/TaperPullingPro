@@ -499,8 +499,8 @@ class MainWindow(FormUI, WindowUI):
         n_cl = self.cladSpin.value()
         n_co = self.corenSpin.value()
         n_ratio = n_co/n_cl
-        self.shape.set_parameters(self.wlSpin.value(), 1e-3*self.d0Spin.value()/2.0, 1e-3*self.coredSpin.value()/2.0, 
-                                  n_ratio, self.mednSpin.value(), self.modespointsSpin.value())
+        self.shape.set_parameters(wl=self.wlSpin.value(), r0=1e-3*self.d0Spin.value()/2.0, r_core=1e-3*self.coredSpin.value()/2.0, 
+                                  n_core_ratio=n_ratio, n_medium=self.mednSpin.value(), modes_points=self.modespointsSpin.value())
         self.shape.n_cladding = n_cl
         self.shape.n_core = n_co
         self.shape.n_core_ratio = self.shape.n_core/self.shape.n_cladding
