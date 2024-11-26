@@ -180,10 +180,14 @@ class TaperShape:
             min_dneff = raw_dneffs[raw_dneffs > 0].min()
             raw_dneffs[raw_dneffs < min_dneff] = min_dneff
             
-            # Interpolate
-            dneffs_spline = make_interp_spline(np.flip(r_cls), np.flip(raw_dneffs), 1)
             self.r_array = np.flip(np.logspace(np.log10(rf), np.log10(clad0), self.n_points))
-            self.dneffs = dneffs_spline(self.r_array)
+            
+            # Interpolate (standard)
+            self.dneffs = np.interp(self.r_array, np.flip(r_cls), np.flip(raw_dneffs))
+            
+            # Interpolate (spline)
+            # dneffs_spline = make_interp_spline(np.flip(r_cls), np.flip(raw_dneffs), 1)
+            # self.dneffs = dneffs_spline(self.r_array)
             
             print("Modes calculation complete!")
             self.calc_finished = True
