@@ -1024,7 +1024,7 @@ class MainWindow(FormUI, WindowUI):
             # Check if ended
             if self.core.standby:
                 self.pullLoop_timer.stop()
-                self.stop_pulling(True)
+                self.stop_pulling(save_data=True)
                 
             self.pull_busy = False
         
@@ -1204,7 +1204,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.start_process(hz_function)
         self.pullLoop_timer.start()
         
-    def stop_pulling(self, save_data=False):
+    def stop_pulling(self, save_data=True):
         self.pullLoop_timer.stop()
         self.data.stop_spectrogram()
         self.enable_controls()
