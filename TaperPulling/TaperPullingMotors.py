@@ -236,6 +236,10 @@ class GenericTLMotor:
                         
                         # Start polling 
                         if poll_ms >= 1:
+                            if self.simulate:
+                                poll_ms = 150
+                                self.kinesis_poll = poll_ms
+                                self.monitor_interval = poll_ms
                             eval(f"self.lib.{self.lib_prfx}_StartPolling(self.serial_c, c_int(poll_ms))")
                         self.ok = True
                     else:
