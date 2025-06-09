@@ -38,13 +38,14 @@ class TaperPullingCore:
     update_loop = None
     poll_interval = 10  # ms.
     busy = False
+    rel_pull = False            # Flame brusher doesn't move, brushing is performed on top of pulling movement.
     running_process = False     # If pulling process started
     flame_approaching = False   # Stage 1
     flame_holding = False       # Stage 2
     pulling = False             # Stage 3
     stopping = False            # Stage 4
     standby = False             # Stage 5
-    cleaving = False       # Opt. Stage 6
+    cleaving = False            # Opt. Stage 6
     looping = False             # Opt. Stage 6
     pos_check_precision = 0.1   # Precision expected when checking for positions (mm)
     print_lps = False
@@ -74,6 +75,10 @@ class TaperPullingCore:
     time_bef = 0.0
     time_init = 0.0
     time_hold0 = 0.0
+    time_init_pull = 0.0
+    time_brush_check_0 = 0.0
+    time_brush_check_1 = 0.0
+    fake_brusher_pos = 0.0
     count = 0
     total_pulled = 0.0
     hotzone = 0.0
@@ -93,7 +98,7 @@ class TaperPullingCore:
     
     # Brushing control mode
     # 0: Checks for position at every loop, moves indefinitely. Less precision, faster
-    # 0: Calculates stopping point, send brusher to that position. More precise, stopping procedure is slow
+    # 1: Calculates stopping point, send brusher to that position. More precise, stopping procedure is slow
     brushing_control_mode = 0
     
     brusher_x0 = 31.0  # mm
@@ -115,7 +120,8 @@ class TaperPullingCore:
     pullers_adaptive_vel = True  # Slows down pulling if flame span is too large and/or when brusher is slower
     pullers_av_threshold = [10, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200]  # mm, thresholds to decrease pulling velocity
     pullers_av_factor = 0.75  # will decrease velocity to this factor
-    pullers_av_idx = 0  # Keep trac of speed changes
+    pullers_av_idx = 0  # Keep track of speed changes
+    pull_vel = 0.0
     brusher_enhance_edge = True  # Use acceleration information to improve HZ edges
     
     # Other vars
@@ -330,18 +336,25 @@ class TaperPullingCore:
         brusher = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
                (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
         if brusher:
+            self.fake_brusher_pos = 0.0
             self.motors.flame_io.go_to(self.flame_io_x0)
             self.flame_approaching = True
             print("Flame approaching...")
             
-            self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
-            print("Started brushing")
+            if not self.rel_pull:
+                self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+                print("Started brushing")
     
     def get_pullers_xinit(self):
         self.left_puller_xinit = self.puller_left_pos
         self.right_puller_xinit = self.puller_right_pos
-        self.motors.left_puller.set_velocity(self.motors.left_puller.pull_vel)
-        self.motors.right_puller.set_velocity(self.motors.right_puller.pull_vel)
+        self.pull_vel = self.motors.left_puller.pull_vel
+        if self.rel_pull:
+            self.motors.left_puller.set_velocity(self.motors.brusher.vel - self.brusher_dir*self.motors.left_puller.pull_vel)
+            self.motors.right_puller.set_velocity(self.motors.brusher.vel + self.brusher_dir*self.motors.right_puller.pull_vel)
+        else:
+            self.motors.left_puller.set_velocity(self.motors.left_puller.pull_vel)
+            self.motors.right_puller.set_velocity(self.motors.right_puller.pull_vel)
         self.pullers_av_idx = 0
         time.sleep(0.1)
     
@@ -356,18 +369,33 @@ class TaperPullingCore:
     def hold_flame(self):
         time_hold = time.time() - self.time_hold0
         if time_hold >= self.flame_io_hold:
-            brusher_centered = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
-                      (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
-            if brusher_centered:
+            if self.rel_pull:
+                brusher_centered = (self.puller_left_pos >= self.left_puller_x0 - self.pos_check_precision) and \
+                                   (self.puller_left_pos <= self.left_puller_x0 + self.pos_check_precision)
+                if brusher_centered:
+                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-self.brusher_dir))
+                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.brusher_dir))
+                self.time_brush_check_0 = time.time()
+                self.time_brush_check_1 = time.time()
+            else:
+                brusher_centered = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
+                                   (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
                 self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
                 self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
-                self.pulling = True
-                print("Flame hold done")
-                print("Started pulling")
+            
+            self.pulling = True
+            print("Flame hold done")
+            print("Started pulling")
+            self.time_init_pull = time.time()
     
     def check_pulling(self):
-        self.total_pulled = np.abs(self.left_puller_xinit - self.puller_left_pos) + \
-                            np.abs(self.right_puller_xinit - self.puller_right_pos)
+        if self.rel_pull:
+            total_pull_vel = self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel
+            pull_time = time.time() - self.time_init_pull
+            self.total_pulled = total_pull_vel*pull_time
+        else:
+            self.total_pulled = np.abs(self.left_puller_xinit - self.puller_left_pos) + \
+                                np.abs(self.right_puller_xinit - self.puller_right_pos)
         
         if self.pullers_adaptive_vel:
             if self.pullers_av_idx < len(self.pullers_av_threshold):
@@ -377,10 +405,17 @@ class TaperPullingCore:
                     self.motors.right_puller.stop(0)
                     new_lv = self.motors.left_puller.pull_vel*(self.pullers_av_factor**self.pullers_av_idx)
                     new_rv = self.motors.right_puller.pull_vel*(self.pullers_av_factor**self.pullers_av_idx)
-                    self.motors.left_puller.set_velocity(new_lv)
-                    self.motors.right_puller.set_velocity(new_rv)
-                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
-                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
+                    self.pull_vel = new_lv
+                    if self.rel_pull:
+                        self.motors.left_puller.set_velocity(self.motors.brusher.vel - self.brusher_dir*new_lv)
+                        self.motors.right_puller.set_velocity(self.motors.brusher.vel + self.brusher_dir*new_rv)
+                        self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-self.brusher_dir))
+                        self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.brusher_dir))
+                    else:
+                        self.motors.left_puller.set_velocity(new_lv)
+                        self.motors.right_puller.set_velocity(new_rv)
+                        self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
+                        self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
         
         if self.auto_stop and self.total_pulled >= self.hotzone_function[0][-1]:
             self.stopping = True
@@ -388,7 +423,42 @@ class TaperPullingCore:
     
     def check_brushing(self, mode=0):
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
-        if mode == 0:
+        hz_l = self.brusher_x0 - hz/2
+        hz_r = self.brusher_x0 + hz/2
+        fb_dir = self.brusher_dir
+        if self.rel_pull and self.pulling:
+            self.time_brush_check_0 = self.time_brush_check_1
+            self.time_brush_check_1 = time.time()
+            t0 = self.time_brush_check_0
+            t1 = self.time_brush_check_1
+            self.fake_brusher_pos += fb_dir*(t1 - t0)*self.motors.brusher.vel
+            if (fb_dir == 1 and self.fake_brusher_pos > hz/2) or (fb_dir == -1 and self.fake_brusher_pos < -hz/2):
+                self.brusher_dir = -self.brusher_dir
+                lp_v0 = self.motors.left_puller.pull_vel
+                rp_v0 = self.motors.right_puller.pull_vel
+                if self.pullers_adaptive_vel:
+                    if self.pullers_av_idx < len(self.pullers_av_threshold):
+                        if self.total_pulled >= self.pullers_av_threshold[self.pullers_av_idx]:
+                            self.pullers_av_idx += 1
+                            lp_v0 = lp_v0*(self.pullers_av_factor**self.pullers_av_idx)
+                            rp_v0 = rp_v0*(self.pullers_av_factor**self.pullers_av_idx)
+                lp_v = self.motors.brusher.vel - self.brusher_dir*lp_v0
+                rp_v = self.motors.brusher.vel + self.brusher_dir*rp_v0
+                if fb_dir < 0:
+                    self.motors.left_puller.stop()
+                    self.motors.right_puller.stop()
+                    self.motors.left_puller.set_velocity(lp_v)
+                    self.motors.right_puller.set_velocity(rp_v)
+                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-fb_dir))
+                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(fb_dir))
+                else:
+                    self.motors.right_puller.stop()
+                    self.motors.left_puller.stop() 
+                    self.motors.right_puller.set_velocity(rp_v)
+                    self.motors.left_puller.set_velocity(lp_v)
+                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(fb_dir))
+                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-fb_dir))
+        if not self.rel_pull and mode == 0:
             if hz - self.flame_size >= self.motors.brusher.min_span:                
                 dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
                 l = self.brusher_x0 - hz/2.0 + dist_compensation + self.flame_size/2.0
@@ -435,9 +505,9 @@ class TaperPullingCore:
                         self.motors.brusher.go_to(self.brusher_x0)
                 else:
                     self.brusher_going2x0 = False
-        else:
+        if not self.rel_pull and mode != 0:
             if hz - self.flame_size >= self.motors.brusher.min_span:
-                # This is a work in progressm, possibly useless
+                # This is a work in progress, possibly useless
                 if self.motors.brusher.movement == self.motors.brusher.MoveDirection.STOPPED:
                     # Interpolate hz function, discarding previous values
                     new_x = np.linspace(self.total_pulled,  self.hotzone_function[0][-1], 1001)
@@ -467,7 +537,7 @@ class TaperPullingCore:
             if self.total_pulled >= self.flame_io_mb_start:
                 to_pull = self.flame_io_mb_end - self.total_pulled
                 dist = np.abs(self.flame_io_mb_to - self.flame_io_x0)
-                v_pull = self.motors.left_puller.get_velocity()
+                v_pull = self.pull_vel
                 t = to_pull/(2*v_pull)
                 self.fio_v0 = self.motors.flame_io.get_velocity()
                 v_fmov = dist/t

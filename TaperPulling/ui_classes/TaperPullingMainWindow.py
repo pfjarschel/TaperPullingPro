@@ -377,6 +377,7 @@ class MainWindow(FormUI, WindowUI):
         self.fSizeSpin.valueChanged.connect(self.update_minimum_hz)
         self.enhanceHZCheck.clicked.connect(self.enhanced_edge_warn)
         self.adaptivelCheck.clicked.connect(self.set_adaptive_vel)
+        self.relPullCheck.clicked.connect(self.set_rel_pull)
         
         # Motor LEDs
         self.brInitLed_ef = self.make_led_clickable(self.brInitLed, self.core.motors.brusher)
@@ -1508,6 +1509,9 @@ class MainWindow(FormUI, WindowUI):
     def set_adaptive_vel(self):
         self.set_motors_params()
         self.timeleftLabel.setText(f"Time left: {self.core.get_time_left(self.total_to_pull, 0.0):.2f} s")
+        
+    def set_rel_pull(self):
+        self.core.rel_pull = self.relPullCheck.isChecked()
     
     # Menu functions
     def action_save_data(self):
