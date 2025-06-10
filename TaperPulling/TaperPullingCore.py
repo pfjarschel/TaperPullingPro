@@ -431,11 +431,15 @@ class TaperPullingCore:
             self.time_brush_check_1 = time.time()
             t0 = self.time_brush_check_0
             t1 = self.time_brush_check_1
+            
             self.fake_brusher_pos += fb_dir*(t1 - t0)*self.motors.brusher.vel
-            if (fb_dir == 1 and self.fake_brusher_pos > hz/2) or (fb_dir == -1 and self.fake_brusher_pos < -hz/2):
+            l = -hz/2.0 + self.flame_size/2.0
+            r = hz/2.0 - self.flame_size/2.0
+            if (fb_dir == 1 and self.fake_brusher_pos > r) or (fb_dir == -1 and self.fake_brusher_pos < l):
                 self.brusher_dir = -self.brusher_dir
                 lp_v0 = self.motors.left_puller.pull_vel
                 rp_v0 = self.motors.right_puller.pull_vel
+                self.rhz_edges.append(self.fake_brusher_pos - self.brusher_dir*self.flame_size/2.0)
                 if self.pullers_adaptive_vel:
                     if self.pullers_av_idx < len(self.pullers_av_threshold):
                         if self.total_pulled >= self.pullers_av_threshold[self.pullers_av_idx]:
@@ -549,10 +553,22 @@ class TaperPullingCore:
         stop_ok = False
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
         if self.force_hz_edge and hz >= self.motors.brusher.min_span:
-            l = self.brusher_x0 - self.hotzone_function[1][-1]/2.0
-            r = self.brusher_x0 + self.hotzone_function[1][-1]/2.0
-            if (self.brusher_pos <= l  or self.brusher_pos >= r):
-                stop_ok = True
+            if self.rel_pull:
+                self.time_brush_check_0 = self.time_brush_check_1
+                self.time_brush_check_1 = time.time()
+                t0 = self.time_brush_check_0
+                t1 = self.time_brush_check_1
+                self.fake_brusher_pos += self.brusher_dir*(t1 - t0)*self.motors.brusher.vel
+                
+                l = -self.hotzone_function[1][-1]/2.0
+                r = self.hotzone_function[1][-1]/2.0
+                if (self.fake_brusher_pos <= l  or self.fake_brusher_pos >= r):
+                    stop_ok = True
+            else:
+                l = self.brusher_x0 - self.hotzone_function[1][-1]/2.0
+                r = self.brusher_x0 + self.hotzone_function[1][-1]/2.0
+                if (self.brusher_pos <= l  or self.brusher_pos >= r):
+                    stop_ok = True
         else:
             stop_ok = True
         
@@ -673,18 +689,17 @@ class TaperPullingCore:
     def stop_pulling(self):
         self.standby = True
         
-        # Retract Flame I/O
-        if self.flame_io_moveback:
-            self.motors.flame_io.set_velocity(self.fio_v0)
-            self.flameIO_moving = False
-            time.sleep(0.1)
-        self.motors.flame_io.go_to(0.0)
-        
         # Stop all motors
         self.motors.brusher.stop()
         self.motors.left_puller.stop()
         self.motors.right_puller.stop()
         
+        # Retract Flame I/O
+        if self.flame_io_moveback:
+            self.motors.flame_io.set_velocity(self.fio_v0)
+            self.flameIO_moving = False
+            time.sleep(0.1)
+        self.motors.flame_io.go_to(0.0)     
         
         # Reset pullers velocity
         self.motors.left_puller.set_velocity(self.motors.left_puller.vel)
