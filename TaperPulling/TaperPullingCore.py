@@ -341,9 +341,11 @@ class TaperPullingCore:
             self.flame_approaching = True
             print("Flame approaching...")
             
-            if not self.rel_pull:
+            if self.rel_pull:
+                pass
+            else:
                 self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
-                print("Started brushing")
+            print("Started brushing")
     
     def get_pullers_xinit(self):
         self.left_puller_xinit = self.puller_left_pos
@@ -371,22 +373,28 @@ class TaperPullingCore:
         if time_hold >= self.flame_io_hold:
             if self.rel_pull:
                 brusher_centered = (self.puller_left_pos >= self.left_puller_x0 - self.pos_check_precision) and \
-                                   (self.puller_left_pos <= self.left_puller_x0 + self.pos_check_precision)
+                                   (self.puller_left_pos <= self.left_puller_x0 + self.pos_check_precision) and \
+                                   (self.puller_right_pos >= self.right_puller_x0 - self.pos_check_precision) and \
+                                   (self.puller_right_pos <= self.right_puller_x0 + self.pos_check_precision)
                 if brusher_centered:
                     self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-self.brusher_dir))
                     self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.brusher_dir))
-                self.time_brush_check_0 = time.time()
-                self.time_brush_check_1 = time.time()
+                    self.time_brush_check_0 = time.time()
+                    self.time_brush_check_1 = time.time()
+                    self.pulling = True
+                    print("Flame hold done")
+                    print("Started pulling")
+                    self.time_init_pull = time.time()
             else:
                 brusher_centered = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
                                    (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
                 self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
                 self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
             
-            self.pulling = True
-            print("Flame hold done")
-            print("Started pulling")
-            self.time_init_pull = time.time()
+                self.pulling = True
+                print("Flame hold done")
+                print("Started pulling")
+                self.time_init_pull = time.time()
     
     def check_pulling(self):
         if self.rel_pull:
@@ -426,7 +434,7 @@ class TaperPullingCore:
         hz_l = self.brusher_x0 - hz/2
         hz_r = self.brusher_x0 + hz/2
         fb_dir = self.brusher_dir
-        if self.rel_pull and self.pulling:
+        if self.rel_pull:  # and self.pulling:
             self.time_brush_check_0 = self.time_brush_check_1
             self.time_brush_check_1 = time.time()
             t0 = self.time_brush_check_0
@@ -437,9 +445,13 @@ class TaperPullingCore:
             r = hz/2.0 - self.flame_size/2.0
             if (fb_dir == 1 and self.fake_brusher_pos > r) or (fb_dir == -1 and self.fake_brusher_pos < l):
                 self.brusher_dir = -self.brusher_dir
-                lp_v0 = self.motors.left_puller.pull_vel
-                rp_v0 = self.motors.right_puller.pull_vel
-                self.rhz_edges.append(self.fake_brusher_pos - self.brusher_dir*self.flame_size/2.0)
+                if self.pulling:
+                    lp_v0 = self.motors.left_puller.pull_vel
+                    rp_v0 = self.motors.right_puller.pull_vel
+                    self.rhz_edges.append(self.fake_brusher_pos - self.brusher_dir*self.flame_size/2.0)
+                else:
+                    lp_v0 = 0.0
+                    rp_v0 = 0.0
                 if self.pullers_adaptive_vel:
                     if self.pullers_av_idx < len(self.pullers_av_threshold):
                         if self.total_pulled >= self.pullers_av_threshold[self.pullers_av_idx]:
