@@ -342,9 +342,11 @@ class TaperPullingCore:
             print("Flame approaching...")
             
             if self.rel_pull:
-                pass
+                self.time_brush_check_0 = time.time()
+                self.time_brush_check_1 = time.time()
             else:
                 self.motors.brusher.move(self.motors.brusher.MoveDirection(self.brusher_dir))
+            
             print("Started brushing")
     
     def get_pullers_xinit(self):
@@ -377,6 +379,7 @@ class TaperPullingCore:
                                    (self.puller_right_pos >= self.right_puller_x0 - self.pos_check_precision) and \
                                    (self.puller_right_pos <= self.right_puller_x0 + self.pos_check_precision)
                 if brusher_centered:
+                    self.brusher_dir = self.brusher_dir0
                     self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-self.brusher_dir))
                     self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.brusher_dir))
                     self.time_brush_check_0 = time.time()
@@ -460,7 +463,7 @@ class TaperPullingCore:
                             rp_v0 = rp_v0*(self.pullers_av_factor**self.pullers_av_idx)
                 lp_v = self.motors.brusher.vel - self.brusher_dir*lp_v0
                 rp_v = self.motors.brusher.vel + self.brusher_dir*rp_v0
-                if fb_dir < 0:
+                if fb_dir < 0:  # Switch order at each HZ edge
                     self.motors.left_puller.stop()
                     self.motors.right_puller.stop()
                     self.motors.left_puller.set_velocity(lp_v)
