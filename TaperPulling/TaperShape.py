@@ -409,7 +409,7 @@ class TaperShape:
             self.calc_ongoing = True
             
             # Find f factor that allows starting hz to be feasible
-            f = 1.0  # First attempt
+            f = start_f  # First attempt
             start_hz_ok = False
             while not start_hz_ok:
                 z_rw, adiab_r_array = self.ideal_adiabatic_profile(rw, f)
@@ -469,7 +469,7 @@ class TaperShape:
                 self.calc_z_array = z_arr_opt0
                 self.calc_r_array = r_arr_opt0
                 
-                print("Found an optimized profile!")
+                print(f"Found an optimized profile! f={f:.6f}")
                 self.calc_ongoing = False
                 self.calc_finished = True
                 return z_arr_opt0, r_arr_opt0
