@@ -464,19 +464,19 @@ class TaperPullingCore:
                 lp_v = self.motors.brusher.vel - self.brusher_dir*lp_v0
                 rp_v = self.motors.brusher.vel + self.brusher_dir*rp_v0
                 if fb_dir < 0:  # Switch order at each HZ edge
-                    self.motors.left_puller.stop()
-                    self.motors.right_puller.stop()
+                    self.motors.left_puller.stop(1)
+                    self.motors.right_puller.stop(1)
                     self.motors.left_puller.set_velocity(lp_v)
                     self.motors.right_puller.set_velocity(rp_v)
-                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-fb_dir))
-                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(fb_dir))
+                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-fb_dir), stop_mode=1)
+                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(fb_dir), stop_mode=1)
                 else:
-                    self.motors.right_puller.stop()
-                    self.motors.left_puller.stop() 
+                    self.motors.right_puller.stop(1)
+                    self.motors.left_puller.stop(1) 
                     self.motors.right_puller.set_velocity(rp_v)
                     self.motors.left_puller.set_velocity(lp_v)
-                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(fb_dir))
-                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-fb_dir))
+                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(fb_dir), stop_mode=1)
+                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-fb_dir), stop_mode=1)
         if not self.rel_pull and mode == 0:
             if hz - self.flame_size >= self.motors.brusher.min_span:                
                 dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
