@@ -702,7 +702,60 @@ class GenericTLMotor:
 
             return move_time
             
-    
+    def set_trigger_config(self, mode, polarity):
+        """
+        Set the trigger input configuration.
+        """
+        if self.ok:
+            try:
+                eval(f"self.lib.{self.lib_prfx}_SetTriggerConfig(self.serial_c, c_int(mode), c_int(polarity))")
+            except Exception as e:
+                print(f"Error checking status bits: {e}")
+                
+    def set_trigger_out_config(self, mode, polarity):
+        """
+        Set the trigger output configuration.
+        """
+        if self.ok:
+            try:
+                eval(f"self.lib.{self.lib_prfx}_SetTriggerOutConfig(self.serial_c, c_int(mode), c_int(polarity))")
+            except Exception as e:
+                print(f"Error checking status bits: {e}")
+
+    def set_move_absolute_position(self, pos: float):
+        """
+        Set the absolute move position for triggered moves.
+        """
+        if self.ok:
+            try:
+                pos_dev = c_longlong(int(self.real2dev(pos, 0)))
+                eval(f"self.lib.{self.lib_prfx}_SetMoveAbsolutePosition(self.serial_c, pos_dev)")
+            except Exception as e:
+                print(f"Error checking status bits: {e}")
+
+    def move_absolute(self, pos: float, wait=False):
+        """
+        Move to absolute position (or arm for trigger).
+        """
+        if self.ok:
+            try:
+                pos_dev = c_longlong(int(self.real2dev(pos, 0)))
+                # Note: c_bool might need to be passed correctly
+                eval(f"self.lib.{self.lib_prfx}_MoveAbsolute(self.serial_c, pos_dev, c_bool(wait))")
+            except Exception as e:
+                print(f"Error checking status bits: {e}")
+
+    def set_trigger_out_states(self, state):
+        """
+        Set the trigger output states (for manual firing).
+        """
+        if self.ok:
+            try:
+                eval(f"self.lib.{self.lib_prfx}_SetTriggerOutStates(self.serial_c, c_byte(state))")
+            except Exception as e:
+                print(f"Error checking status bits: {e}")
+
+
 class Brusher(GenericTLMotor):
     """
     Class for the flame brusher motor. Inherits the generic ThorLabs motors class.
