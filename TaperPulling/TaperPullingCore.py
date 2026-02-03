@@ -380,8 +380,8 @@ class TaperPullingCore:
                                    (self.puller_right_pos <= self.right_puller_x0 + self.pos_check_precision)
                 if brusher_centered:
                     self.brusher_dir = self.brusher_dir0
-                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-self.brusher_dir))
-                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.brusher_dir))
+                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-self.brusher_dir), stop_mode=1)
+                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.brusher_dir), stop_mode=1)
                     self.time_brush_check_0 = time.time()
                     self.time_brush_check_1 = time.time()
                     self.pulling = True

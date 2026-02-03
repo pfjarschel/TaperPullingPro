@@ -495,6 +495,7 @@ class MainWindow(FormUI, WindowUI):
         self.core.left_puller_x0 = self.pullerInitPosSpin.value()
         self.core.right_puller_x0 = self.pullerInitPosSpin.value()
         self.core.pullers_adaptive_vel = self.adaptivelCheck.isChecked()
+        self.set_rel_pull()
         
     def set_fiber_params(self):
         n_cl = self.cladSpin.value()
