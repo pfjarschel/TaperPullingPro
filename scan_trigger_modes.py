@@ -32,39 +32,37 @@ def run_scan():
     
     candidates = []
     
-    print("Starting Brute Force Scan of Trigger Bits (0-255)...")
-    print("Looking for settings where the motor DOES NOT move immediately.")
+    print("Starting Brute Force Scan with Safety Reset...")
+    
+    # Force Disable Triggers Initially
+    right_puller.set_trigger_switches_raw(0)
     
     for i in range(256):
-        # Always return to center first
-        right_puller.go_to(center_pos)
-        while right_puller.motor_moving(): time.sleep(0.05)
+        # 0. Safety Reset of Trigger Config (Crucial!)
+        right_puller.set_trigger_switches_raw(0x00)
+        time.sleep(0.05)
+        
+        # 1. Return to Center
+        # Check current pos first
+        cur_pos = right_puller.get_position()
+        if abs(cur_pos - center_pos) > 0.05:
+            # print(f"\rResetting... (Pos: {cur_pos:.3f})", end="")
+            right_puller.go_to(center_pos)
             
-        print(f"\rTesting Bits: 0x{i:02X} ({i})", end="")
+            # Timeout wait
+            t0 = time.time()
+            while right_puller.motor_moving():
+                if time.time() - t0 > 5.0:
+                    print(f"\nFATAL: Timeout resetting to center. Status: 0x{right_puller.get_status_bits():08X}")
+                    sys.exit(1)
+                time.sleep(0.05)
+                
+        print(f"\rTesting Bits: 0x{i:02X} ({i}) ", end="")
         
-        # Set Trigger Bits using c_ubyte
-        # We need to modify set_trigger_switches_raw to use c_ubyte or cast here?
-        # Let's import explicit types to be safe
-        from ctypes import c_ubyte
-        # We can't easily modify the TPM class method argument type on the fly
-        # unless we modify the TPM file or subclass.
-        # But wait, TaperPullingMotors.py uses c_byte. c_byte is signed (-128 to 127).
-        # 0-255 will overflow c_byte if > 127.
-        # We MUST fix TaperPullingMotors.py to use c_ubyte or handle the conversion.
-        
-        # For this script, let's just hack the call directly if possible, or
-        # better yet, let's fix the main class first.
-        
-        # Temporary workaround for this script:
-        # Cast to signed byte for the library call if it expects 'char' (which is signed mostly)
-        # But SetTriggerSwitches expects 'byte' which is usually unsigned char in Thorlabs.
-        # Let's Try passing it as an int and let ctypes handle it, or force unsigned.
-        
-        # Actually, let's just update the main file in the next step.
-        # For now, let's assume the user will apply the fix I'm about to make to TPM.
+        # 2. Set Trigger Bits
         right_puller.set_trigger_switches_raw(i)
         
-        # Command Move
+        # 3. Command Move (Relative)
         right_puller.move_relative(0.5)
         
         # Wait small amount to see if it moves
