@@ -204,7 +204,10 @@ class GenericTLMotor:
         self.simulate = simulate
         if serial != "":
             self.serial = serial
-            self.serial_c = c_char_p(bytes(serial, "utf-8"))
+        
+        if self.serial != "":
+            self.serial_c = c_char_p(bytes(self.serial, "utf-8"))
+
         if self.simulate:
                 self.lib.TLI_InitializeSimulations()
 
