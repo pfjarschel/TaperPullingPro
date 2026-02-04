@@ -20,21 +20,16 @@ def run_test():
     print("Motors connected.")
     print(f"Left: {left_puller.serial}, Right: {right_puller.serial}")
 
-    # Configuration Constants (Matches Chat Export)
-    # KMOT_TriggerPortMode: 0x02 = Absolute Move on Trigger
-    # KMOT_TriggerPortPolarity: 0x01 = Active High / Rising Edge
-    TRIG_MODE_ABS = 0x02
-    TRIG_POL_HIGH = 0x01
+    # Configuration Constants (Matches BMC Header / TBD001 Bits)
+    # Mode: 0=None, 1=Rel, 2=Abs, 3=Home
+    TRIG_MODE_ABS = 2
+    TRIG_POL_HIGH = 0
     
     print("Configuring Triggers...")
     left_puller.set_trigger_config(TRIG_MODE_ABS, TRIG_POL_HIGH)
     right_puller.set_trigger_config(TRIG_MODE_ABS, TRIG_POL_HIGH)
     
-    # Configure Output (Optional, but good practice if using Master's out)
-    # For manual firing via SetTriggerOutStates, config might not matter as much, 
-    # but let's ensure it's not set to something conflicting.
-    # 0x01 = Move Complete (we overide this with manual state control anyway)
-    # right_puller.set_trigger_out_config(0x01, 0x01) 
+    # Test Parameters
 
     # Test Parameters
     center_pos = 50.0 # mm (Safe spot)
@@ -93,21 +88,21 @@ def run_test():
         right_puller.set_move_absolute_position(target_r)
         
         # 2. Arm Triggers (simultaneous via hardware, armed via software)
-        # Using move_absolute(wait=False) which acts as the 'Arm' command in Trigger Mode
-        left_puller.move_absolute(target_l, wait=False)
-        right_puller.move_absolute(target_r, wait=False)
+        # Using move_absolute(pos) which now handles SetMoveAbsolutePosition + MoveAbsolute(serial)
+        left_puller.move_absolute(target_l)
+        right_puller.move_absolute(target_r)
         
         # Short wait to ensure both are armed
-        time.sleep(0.1)
+        print("Waiting for motors to be armed...")
+        time.sleep(1.0) # Reduced wait
         
         # 3. Fire Trigger (Master - Right Puller)
-        print("Fring trigger...")
+        print("Firing trigger...")
         # Pulse Pin 10 (Digital Out 1) High
-        # 0x01 = Pin 1 High (assuming Pin 1 maps to the DO used for Trigger Out)
-        # Check TBD001 manual or trial: usually DO1 is used for Trig Out.
-        right_puller.set_trigger_out_states(0x01)
+        # 1 here will toggle the bit we defined in the motor class
+        right_puller.set_trigger_out_states(1)
         time.sleep(0.010) # 10ms pulse
-        right_puller.set_trigger_out_states(0x00)
+        right_puller.set_trigger_out_states(0)
         
         # 4. Wait for move completion
         # We can poll the status bits or position

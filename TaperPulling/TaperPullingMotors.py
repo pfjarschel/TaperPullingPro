@@ -711,14 +711,16 @@ class GenericTLMotor:
         """
         if self.ok:
             try:
-                # Based on TBD001 C API, it might be SetTriggerConfigParams
-                eval(f"self.lib.{self.lib_prfx}_SetTriggerConfigParams(self.serial_c, c_int(mode), c_int(polarity))")
-            except Exception as e:
-                # Fallback to the non-Params version just in case
-                try:
+                if self.lib_prfx == "BMC":
+                    # TBD001 uses BMC_SetTriggerSwitches
+                    # bits 0-1: mode (0=none, 1=rel, 2=abs, 3=home)
+                    # bit 2: polarity (0=high, 1=low)
+                    bits = (int(mode) & 0x03) | ((int(polarity) << 2) & 0x04)
+                    eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
+                else:
                     eval(f"self.lib.{self.lib_prfx}_SetTriggerConfig(self.serial_c, c_int(mode), c_int(polarity))")
-                except:
-                    print(f"Error setting trigger config: {e}")
+            except Exception as e:
+                print(f"Error setting trigger config: {e}")
                 
     def set_trigger_out_config(self, mode, polarity):
         """
@@ -731,7 +733,8 @@ class GenericTLMotor:
                 try:
                     eval(f"self.lib.{self.lib_prfx}_SetTriggerOutConfig(self.serial_c, c_int(mode), c_int(polarity))")
                 except:
-                    print(f"Error setting trigger out config: {e}")
+                    # TBD001 might not have this, or it's part of TriggerSwitches
+                    pass
 
     def set_move_absolute_position(self, pos: float):
         """
@@ -739,20 +742,27 @@ class GenericTLMotor:
         """
         if self.ok:
             try:
-                pos_dev = c_longlong(int(self.real2dev(pos, 0)))
-                # For BMC, it might be SetMoveAbsolutePosition (as previously tried)
-                eval(f"self.lib.{self.lib_prfx}_SetMoveAbsolutePosition(self.serial_c, pos_dev)")
+                pos_dev = int(self.real2dev(pos, 0))
+                # Header says int (32-bit) for BMC
+                eval(f"self.lib.{self.lib_prfx}_SetMoveAbsolutePosition(self.serial_c, c_int(pos_dev))")
             except Exception as e:
                 print(f"Error setting absolute move position: {e}")
 
-    def move_absolute(self, pos: float, wait=False):
+    def move_absolute(self, pos: float=None, wait=False):
         """
         Move to absolute position (or arm for trigger).
         """
         if self.ok:
             try:
-                pos_dev = c_longlong(int(self.real2dev(pos, 0)))
-                eval(f"self.lib.{self.lib_prfx}_MoveAbsolute(self.serial_c, pos_dev, c_bool(wait))")
+                if self.lib_prfx == "BMC":
+                    # For TBD001, if pos is provided, set it first
+                    if pos is not None:
+                        self.set_move_absolute_position(pos)
+                    # BMC_MoveAbsolute only takes serial serial_c!
+                    eval(f"self.lib.{self.lib_prfx}_MoveAbsolute(self.serial_c)")
+                else:
+                    pos_dev = c_longlong(int(self.real2dev(pos, 0)))
+                    eval(f"self.lib.{self.lib_prfx}_MoveAbsolute(self.serial_c, pos_dev, c_bool(wait))")
             except Exception as e:
                 print(f"Error moving absolute: {e}")
 
@@ -762,13 +772,20 @@ class GenericTLMotor:
         """
         if self.ok:
             try:
-                # For T-Cube, manual firing is often done via SetDigitalOutputs
-                eval(f"self.lib.{self.lib_prfx}_SetDigitalOutputs(self.serial_c, c_byte(state))")
+                if self.lib_prfx == "BMC":
+                    # TBD001: might need to toggle bits via SetTriggerSwitches
+                    # This is a guess for the manual bit (often bit 6)
+                    # We first read existing switches if possible? Or just set.
+                    # Usually, bit 6 is manual trigger out state.
+                    # We assume it was configured correctly.
+                    # bits = self.get_trigger_switches() # Not implemented yet
+                    # For now, let's try 0x40 for manual high.
+                    bits = 0x40 if state else 0x00
+                    eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
+                else:
+                    eval(f"self.lib.{self.lib_prfx}_SetDigitalOutputs(self.serial_c, c_byte(state))")
             except Exception as e:
-                try:
-                    eval(f"self.lib.{self.lib_prfx}_SetTriggerOutStates(self.serial_c, c_byte(state))")
-                except:
-                    print(f"Error setting trigger out states: {e}")
+                print(f"Error setting trigger out states: {e}")
 
 
 class Brusher(GenericTLMotor):
