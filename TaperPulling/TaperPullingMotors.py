@@ -711,7 +711,8 @@ class GenericTLMotor:
         """
         if self.ok:
             try:
-                eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
+                from ctypes import c_ubyte
+                eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_ubyte(bits))")
             except Exception as e:
                 print(f"Error setting raw switches: {e}")
 

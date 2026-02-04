@@ -36,22 +36,35 @@ def run_scan():
     print("Looking for settings where the motor DOES NOT move immediately.")
     
     for i in range(256):
-        # Reset
-        if abs(right_puller.get_position() - center_pos) > 0.05:
-            right_puller.go_to(center_pos)
-            while right_puller.motor_moving(): time.sleep(0.05)
+        # Always return to center first
+        right_puller.go_to(center_pos)
+        while right_puller.motor_moving(): time.sleep(0.05)
             
         print(f"\rTesting Bits: 0x{i:02X} ({i})", end="")
         
-        # Set Trigger Bits
-        # Note: We must use the raw set method or helper
-        # Since TaperPullingMotors uses bit logic, let's use the raw call via eval hack 
-        # or add a raw method. We'll verify what we have available.
-        # TPM has `set_trigger_switches_raw`!
+        # Set Trigger Bits using c_ubyte
+        # We need to modify set_trigger_switches_raw to use c_ubyte or cast here?
+        # Let's import explicit types to be safe
+        from ctypes import c_ubyte
+        # We can't easily modify the TPM class method argument type on the fly
+        # unless we modify the TPM file or subclass.
+        # But wait, TaperPullingMotors.py uses c_byte. c_byte is signed (-128 to 127).
+        # 0-255 will overflow c_byte if > 127.
+        # We MUST fix TaperPullingMotors.py to use c_ubyte or handle the conversion.
+        
+        # For this script, let's just hack the call directly if possible, or
+        # better yet, let's fix the main class first.
+        
+        # Temporary workaround for this script:
+        # Cast to signed byte for the library call if it expects 'char' (which is signed mostly)
+        # But SetTriggerSwitches expects 'byte' which is usually unsigned char in Thorlabs.
+        # Let's Try passing it as an int and let ctypes handle it, or force unsigned.
+        
+        # Actually, let's just update the main file in the next step.
+        # For now, let's assume the user will apply the fix I'm about to make to TPM.
         right_puller.set_trigger_switches_raw(i)
         
         # Command Move
-        # Try Relative Move this time
         right_puller.move_relative(0.5)
         
         # Wait small amount to see if it moves
