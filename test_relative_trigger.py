@@ -37,8 +37,8 @@ def run_test():
     # right_puller.set_trigger_out_config(0x01, 0x01) 
 
     # Test Parameters
-    center_pos = 10.0 # mm (Safe spot)
-    brush_amp = 1.0 # mm
+    center_pos = 50.0 # mm (Safe spot)
+    brush_amp = 3.0 # mm
     cycles = 6
     
     # Go to start position normally first
@@ -46,14 +46,36 @@ def run_test():
     left_puller.go_to(center_pos)
     right_puller.go_to(center_pos)
     
-    # Wait for completion
-    while left_puller.motor_moving() or right_puller.motor_moving():
-        time.sleep(0.1)
+    # Wait for completion (with verification)
+    print("Waiting for motors to reach start position...")
+    timeout = 10.0
+    start_wait = time.time()
+    while True:
+        l_pos = left_puller.get_position()
+        r_pos = right_puller.get_position()
+        l_moving = left_puller.motor_moving()
+        r_moving = right_puller.motor_moving()
         
-    print("Start position reached. Starting Triggered Loop...")
+        if not l_moving and not r_moving:
+            if abs(l_pos - center_pos) < 0.1 and abs(r_pos - center_pos) < 0.1:
+                break
+        
+        if time.time() - start_wait > timeout:
+            print(f"Timeout! Positions: L={l_pos:.3f}, R={r_pos:.3f}")
+            # If not at center, try move one more time
+            if abs(r_pos - center_pos) > 0.1:
+                print("Retrying Right Puller move...")
+                right_puller.go_to(center_pos)
+                start_wait = time.time() # Reset timeout
+            else:
+                break
+        time.sleep(0.2)
+        
+    print(f"Start position reached: L={left_puller.get_position():.3f}, R={right_puller.get_position():.3f}")
+    print("Starting Triggered Loop...")
     
-    current_pos_l = center_pos
-    current_pos_r = center_pos
+    current_pos_l = left_puller.get_position()
+    current_pos_r = right_puller.get_position()
     
     for i in range(cycles):
         # Determine direction
@@ -61,7 +83,7 @@ def run_test():
         delta = brush_amp * direction
         
         target_l = current_pos_l + delta
-        target_r = current_pos_r + delta # Both move same direction for simpler 'brushing' test
+        target_r = current_pos_r - delta # Flipped direction: as L increases, R decreases
         # Note: real pulling involves them moving apart, but for sync test, parallel motion is fine.
         
         print(f"Cycle {i+1}: Preparing move to L={target_l:.3f}, R={target_r:.3f}")
