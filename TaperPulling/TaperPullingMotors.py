@@ -705,6 +705,18 @@ class GenericTLMotor:
 
             return move_time
             
+    def get_trigger_switches(self):
+        """
+        Get the current trigger indicator bits.
+        """
+        if self.ok:
+            try:
+                # Header says returns byte
+                return eval(f"self.lib.{self.lib_prfx}_GetTriggerSwitches(self.serial_c)")
+            except Exception as e:
+                print(f"Error getting trigger switches: {e}")
+        return 0
+
     def set_trigger_config(self, mode, polarity):
         """
         Set the trigger input configuration.
@@ -712,10 +724,14 @@ class GenericTLMotor:
         if self.ok:
             try:
                 if self.lib_prfx == "BMC":
-                    # TBD001 uses BMC_SetTriggerSwitches
-                    # bits 0-1: mode (0=none, 1=rel, 2=abs, 3=home)
-                    # bit 2: polarity (0=high, 1=low)
-                    bits = (int(mode) & 0x03) | ((int(polarity) << 2) & 0x04)
+                    # TBD001 / TDS001 Bit Layout:
+                    # bits 0-2: Mode (0=None, 1=GPI, 2=Rel, 3=Abs, 4=Home)
+                    # bit 3: Polarity (0=High/Rising, 1=Low/Falling)
+                    # We preserve output bits (4-7)
+                    current = self.get_trigger_switches()
+                    output_bits = current & 0xF0
+                    input_bits = (int(mode) & 0x07) | ((int(polarity) << 3) & 0x08)
+                    bits = output_bits | input_bits
                     eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
                 else:
                     eval(f"self.lib.{self.lib_prfx}_SetTriggerConfig(self.serial_c, c_int(mode), c_int(polarity))")
@@ -728,13 +744,18 @@ class GenericTLMotor:
         """
         if self.ok:
             try:
-                eval(f"self.lib.{self.lib_prfx}_SetTriggerOutConfigParams(self.serial_c, c_int(mode), c_int(polarity))")
-            except Exception as e:
-                try:
+                if self.lib_prfx == "BMC":
+                    # bits 4-6: Mode (0=None, 1=GPO, 2=InMotion, 3=MaxVel)
+                    # bit 7: Polarity (0=High, 1=Low)
+                    current = self.get_trigger_switches()
+                    input_bits = current & 0x0F
+                    output_bits = ((int(mode) & 0x07) << 4) | ((int(polarity) << 7) & 0x80)
+                    bits = input_bits | output_bits
+                    eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
+                else:
                     eval(f"self.lib.{self.lib_prfx}_SetTriggerOutConfig(self.serial_c, c_int(mode), c_int(polarity))")
-                except:
-                    # TBD001 might not have this, or it's part of TriggerSwitches
-                    pass
+            except Exception as e:
+                pass
 
     def set_move_absolute_position(self, pos: float):
         """
@@ -743,7 +764,6 @@ class GenericTLMotor:
         if self.ok:
             try:
                 pos_dev = int(self.real2dev(pos, 0))
-                # Header says int (32-bit) for BMC
                 eval(f"self.lib.{self.lib_prfx}_SetMoveAbsolutePosition(self.serial_c, c_int(pos_dev))")
             except Exception as e:
                 print(f"Error setting absolute move position: {e}")
@@ -755,10 +775,8 @@ class GenericTLMotor:
         if self.ok:
             try:
                 if self.lib_prfx == "BMC":
-                    # For TBD001, if pos is provided, set it first
                     if pos is not None:
                         self.set_move_absolute_position(pos)
-                    # BMC_MoveAbsolute only takes serial serial_c!
                     eval(f"self.lib.{self.lib_prfx}_MoveAbsolute(self.serial_c)")
                 else:
                     pos_dev = c_longlong(int(self.real2dev(pos, 0)))
@@ -773,14 +791,15 @@ class GenericTLMotor:
         if self.ok:
             try:
                 if self.lib_prfx == "BMC":
-                    # TBD001: might need to toggle bits via SetTriggerSwitches
-                    # This is a guess for the manual bit (often bit 6)
-                    # We first read existing switches if possible? Or just set.
-                    # Usually, bit 6 is manual trigger out state.
-                    # We assume it was configured correctly.
-                    # bits = self.get_trigger_switches() # Not implemented yet
-                    # For now, let's try 0x40 for manual high.
-                    bits = 0x40 if state else 0x00
+                    # If Mode is GPO (1), the output follows Polarity bit (7)
+                    # To toggle, we change the polarity bit while keeping Mode=1
+                    current = self.get_trigger_switches()
+                    # Ensure Output Mode is 1 (GPO)
+                    bits = (current & 0x8F) | (1 << 4) # Clear mode bits 4-6, then set mode=1
+                    if state:
+                        bits &= ~0x80 # Polarity 0 = High
+                    else:
+                        bits |= 0x80 # Polarity 1 = Low
                     eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
                 else:
                     eval(f"self.lib.{self.lib_prfx}_SetDigitalOutputs(self.serial_c, c_byte(state))")

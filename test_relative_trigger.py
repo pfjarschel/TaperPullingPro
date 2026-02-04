@@ -20,14 +20,18 @@ def run_test():
     print("Motors connected.")
     print(f"Left: {left_puller.serial}, Right: {right_puller.serial}")
 
-    # Configuration Constants (Matches BMC Header / TBD001 Bits)
-    # Mode: 0=None, 1=Rel, 2=Abs, 3=Home
-    TRIG_MODE_ABS = 2
+    # Configuration Constants (Matches TBD001/TDS001 Bits)
+    # Mode: 0=None, 1=GPI, 2=Rel, 3=Abs, 4=Home
+    TRIG_MODE_ABS = 3
     TRIG_POL_HIGH = 0
     
     print("Configuring Triggers...")
     left_puller.set_trigger_config(TRIG_MODE_ABS, TRIG_POL_HIGH)
     right_puller.set_trigger_config(TRIG_MODE_ABS, TRIG_POL_HIGH)
+    
+    # Verify configuration
+    print(f"Left Switches: 0x{left_puller.get_trigger_switches():02X}")
+    print(f"Right Switches: 0x{right_puller.get_trigger_switches():02X}")
     
     # Test Parameters
 
@@ -83,27 +87,22 @@ def run_test():
         
         print(f"Cycle {i+1}: Preparing move to L={target_l:.3f}, R={target_r:.3f}")
         
-        # 1. Pre-load positions
-        left_puller.set_move_absolute_position(target_l)
-        right_puller.set_move_absolute_position(target_r)
-        
-        # 2. Arm Triggers (simultaneous via hardware, armed via software)
+        # 1. Arm Triggers
         # Using move_absolute(pos) which now handles SetMoveAbsolutePosition + MoveAbsolute(serial)
+        print("Arming Left...")
         left_puller.move_absolute(target_l)
-        
-         # Wait a little between each command to make sure (visually) that they are moving together
-        time.sleep(1.0)
-        
+        print("Arming Right...")
         right_puller.move_absolute(target_r)
         
         # Short wait to ensure both are armed
         print("Waiting for motors to be armed...")
-        time.sleep(1.0) # Reduced wait
+        time.sleep(1.0) 
         
-        # 3. Fire Trigger (Master - Right Puller)
-        print("Firing trigger...")
-        # Pulse Pin 10 (Digital Out 1) High
-        # 1 here will toggle the bit we defined in the motor class
+        # Diagnostic: Check moving status
+        print(f"Status: L_moving={left_puller.motor_moving()}, R_moving={right_puller.motor_moving()}")
+        
+        # 2. Fire Trigger (Master - Right Puller)
+        print("Firing trigger pulse (GPO Toggle)...")
         right_puller.set_trigger_out_states(1)
         time.sleep(0.010) # 10ms pulse
         right_puller.set_trigger_out_states(0)
