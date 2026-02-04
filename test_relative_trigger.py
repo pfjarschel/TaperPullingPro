@@ -90,6 +90,10 @@ def run_test():
         # 2. Arm Triggers (simultaneous via hardware, armed via software)
         # Using move_absolute(pos) which now handles SetMoveAbsolutePosition + MoveAbsolute(serial)
         left_puller.move_absolute(target_l)
+        
+         # Wait a little between each command to make sure (visually) that they are moving together
+        time.sleep(1.0)
+        
         right_puller.move_absolute(target_r)
         
         # Short wait to ensure both are armed
