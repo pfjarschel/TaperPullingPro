@@ -3,6 +3,11 @@ import TaperPulling.TaperPullingMotors as TPM
 import time
 import sys
 
+def get_di_state(motor):
+    status = motor.get_status_bits()
+    # Bit 20 (0-indexed) is Digital Input 1
+    return (status >> 20) & 1
+
 def run_test():
     print("Initializing motors...")
     # LEFT is MASTER (Out), RIGHT is SLAVE (In)
@@ -18,71 +23,84 @@ def run_test():
         
     print("Motors connected.")
     
-    # 1. Initialize Left (MASTER) as GPO, State Low (Polarity 1)
-    print("Initializing Master (Left) Trigger Out to LOW (Inactive)...")
+    # 1. Initialize Left (MASTER) as GPO
+    print("\n--- GPO STATE DIAGNOSTICS ---")
+    
+    # Set Low
+    print("Setting Master Out to LOW...")
     left_puller.set_trigger_out_states(0) 
-    left_puller.set_trigger_config(0, 0) # Input Mode None on Master
+    time.sleep(0.5)
+    di_state = get_di_state(right_puller)
+    print(f"Master=LOW -> Slave DI1 Read: {di_state} (Should be 0)")
     
-    print(f"Left (Master) Switches: 0x{left_puller.get_trigger_switches():02X}")
+    # Set High
+    print("Setting Master Out to HIGH...")
+    left_puller.set_trigger_out_states(1) 
+    time.sleep(0.5)
+    di_state = get_di_state(right_puller)
+    print(f"Master=HIGH -> Slave DI1 Read: {di_state} (Should be 1)")
     
-    # 2. Start testing modes for Right (SLAVE)
-    modes_to_test = [2, 3, 4]
+    # Reset to Low
+    print("Resetting Master Out to LOW...")
+    left_puller.set_trigger_out_states(0)
+    time.sleep(0.5)
+    
+    # 2. Test Mode 3 (Abs) with Polarity Variations
+    # Previously Mode 3 + Pol 0 moved immediately.
+    # Let's test Pol 0 and Pol 1.
     
     center_pos = 50.0
     test_delta = 3.0
     
-    print(f"Moving BOTH to start position: {center_pos} mm")
-    left_puller.go_to(center_pos)
+    # Ensure centered
     right_puller.go_to(center_pos)
-    while left_puller.motor_moving() or right_puller.motor_moving(): time.sleep(0.1)
+    while right_puller.motor_moving(): time.sleep(0.1)
+
+    polarities = [0, 1]
     
-    for mode in modes_to_test:
-        print(f"\n--- TESTING SLAVE (RIGHT) TRIGGER MODE: {mode} ---")
+    for pol in polarities:
+        mode = 3 # Absolute
+        print(f"\n--- TESTING MODE 3 (ABS) with POLARITY {pol} ---")
         
-        # Reset position for clean test
-        print(f"Centering Slave (Right) at {center_pos}...")
+        # Reset position
         right_puller.go_to(center_pos)
         while right_puller.motor_moving(): time.sleep(0.1)
         
-        # Configure Slave (Right)
-        # Pol 0 = Active High / Rising Edge
-        right_puller.set_trigger_config(mode, 0) 
-        print(f"Right (Slave) Switches Configured: 0x{right_puller.get_trigger_switches():02X}")
+        # Configure Slave
+        # Pol 0 = Active High?, Pol 1 = Active Low?
+        right_puller.set_trigger_config(mode, pol) 
+        print(f"Right (Slave) Switches: 0x{right_puller.get_trigger_switches():02X}")
         
         target = center_pos + test_delta
-        print(f"Arming Slave (Right) to position {target:.3f}...")
+        print(f"Arming Slave to {target:.3f}...")
         right_puller.move_absolute(target)
         
-        # Check if it moved immediately
-        print("Checking if Slave (Right) stayed put...")
+        # Check immediate movement
         time.sleep(1.0)
         pos = right_puller.get_position()
-        status = right_puller.get_status_bits()
-        print(f"Post-Arm: Pos={pos:.3f}, StatusBits=0x{status:08X}")
         
         if abs(pos - target) < 0.1:
-            print(f"Mode {mode} FAILED: Moved immediately upon arming.")
+            print(f"FAILED: Moved immediately. (Current Position: {pos:.3f})")
         else:
-            print(f"Mode {mode} successfully ARMED (did not move).")
-            print("Firing trigger pulse from Master (Left)...")
-            left_puller.set_trigger_out_states(1) # State 1 = High
-            time.sleep(0.1)
-            left_puller.set_trigger_out_states(0) # State 0 = Low
+            print(f"ARMED SUCCESSFULLY! (Position stuck at {pos:.3f})")
+            print("Firing TRIGGER PULSE (Master Low -> High -> Low)...")
             
-            # Check if it moved
-            print("Checking if Slave (Right) moved now...")
+            # Pulse
+            left_puller.set_trigger_out_states(1)
+            time.sleep(0.05)
+            left_puller.set_trigger_out_states(0)
+            
+            # Check move
             time.sleep(1.0)
             pos = right_puller.get_position()
-            print(f"Post-Trigger: Pos={pos:.3f}")
+            
             if abs(pos - target) < 0.1:
-                print(f"*** SUCCESS: Mode {mode} worked with hardware trigger! ***")
+                print(f"*** SUCCESS! Triggered Move Completed. ***")
+                break # Found it!
             else:
-                print(f"Mode {mode} FAILED: Did not move after trigger pulse.")
-        
-        # Invert delta for next iteration
-        test_delta *= -1
+                print(f"FAILED: Did not move after trigger. (Pos: {pos:.3f})")
 
-    print("\nSearch Finished.")
+    print("\nTest Finished.")
     left_puller.disconnect()
     right_puller.disconnect()
 
