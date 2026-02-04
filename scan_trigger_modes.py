@@ -51,8 +51,8 @@ def run_scan():
         right_puller.set_trigger_switches_raw(i)
         
         # Command Move
-        # We need to set target first because move_absolute handles it
-        right_puller.move_absolute(scan_target)
+        # Try Relative Move this time
+        right_puller.move_relative(0.5)
         
         # Wait small amount to see if it moves
         time.sleep(0.2)
