@@ -62,12 +62,12 @@ def run_scan():
         if abs(pos - center_pos) < 0.01:
             # It stayed put! (or failed to move for other reasons)
             # Verify it's not just broken by sending a Stop
-            right_puller.stop_profiled()
+            right_puller.stop(1)
             print(f" -> CANDIDATE FOUND: 0x{i:02X}")
             candidates.append(i)
         else:
             # It moved. Stop it.
-            right_puller.stop_profiled()
+            right_puller.stop(1)
             
     print("\nScan Finished.")
     print("Candidates (Values that waited):", [f"0x{c:02X}" for c in candidates])
