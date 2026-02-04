@@ -2,17 +2,8 @@
 import TaperPulling.TaperPullingMotors as TPM
 import time
 import sys
-import ctypes
 
-def get_di_state(motor):
-    status = motor.get_status_bits()
-    # Bit 20 (0-indexed) is Digital Input 1
-    # Note: Python integers have infinite precision, so no need to mask specifically for sign
-    # But let's mask to 32-bit just in case:
-    status &= 0xFFFFFFFF
-    return (status >> 20) & 1
-
-def run_strict_test():
+def run_test():
     print("Initializing motors...")
     # LEFT is MASTER (Out)
     # RIGHT is SLAVE (In)
@@ -27,86 +18,73 @@ def run_strict_test():
         sys.exit(1)
         
     print("Motors connected.")
-
+    
     center_pos = 50.0
     target_pos = 53.0
     
-    # 0. Preparation
-    print(f"Moving BOTH to start position: {center_pos} mm")
-    left_puller.go_to(center_pos)
+    # 1. Reset everything
+    print("Resetting states...")
+    left_puller.set_trigger_out_states(0) # Ensure Master is Low
+    
+    # Clear Slave Config first
+    right_puller.set_trigger_config(0, 0) 
+    
+    # Move to Start
+    print(f"Moving to Start: {center_pos}")
     right_puller.go_to(center_pos)
-    while left_puller.motor_moving() or right_puller.motor_moving(): time.sleep(0.1)
+    while right_puller.motor_moving(): time.sleep(0.1)
     
-    # 1. Ensure Line is LOW
-    print("Setting Master Out to LOW...")
-    left_puller.set_trigger_out_states(0) 
-    left_puller.set_trigger_config(0, 0) # Clear Master Config
+    # 2. Set Target Position (BUT DO NOT CALL MOVE)
+    print(f"Pre-Setting Target Position to {target_pos}...")
+    right_puller.set_move_absolute_position(target_pos)
     
-    print("Waiting for Slave DI1 to read LOW...")
-    for _ in range(50):
-        if get_di_state(right_puller) == 0:
-            print("Line confirmed LOW.")
-            break
-        time.sleep(0.1)
-    else:
-        print("FATAL: Line did not settle to LOW.")
-        sys.exit(1)
-        
-    # 2. Configure Slave: Mode 3 (Abs), Polarity 0 (Active High?)
-    print("\n--- CONFIGURING SLAVE: Mode 3, Polarity 0 ---")
+    # 3. Enable Trigger Mode
+    # Hypothesis: Enabling the mode is the "Arm" command.
+    print("Enabling Trigger Mode (Mode 3=Abs, Polarity 0)...")
     right_puller.set_trigger_config(3, 0)
-    switches = right_puller.get_trigger_switches()
-    print(f"Right (Slave) Switches: 0x{switches:02X}")
     
-    # 3. Arm
-    print(f"Arming Slave to {target_pos:.3f}...")
-    right_puller.move_absolute(target_pos)
+    print(f"Slave Switches: 0x{right_puller.get_trigger_switches():02X}")
     
-    # 4. Check Wait State
-    print("Checking if Waiting...")
-    time.sleep(1.0)
+    # 4. Check if it waits (Armed State)
+    print("Checking for immediate movement (Waiting 2s)...")
+    time.sleep(2.0)
+    
     pos = right_puller.get_position()
-    status = right_puller.get_status_bits() & 0xFFFFFFFF
-    print(f"Post-Arm Status: Pos={pos:.3f}, Status=0x{status:08X}, DI1={get_di_state(right_puller)}")
-    
     if abs(pos - center_pos) > 0.1:
-        print("FAILED: Moved immediately.")
-        sys.exit(0)
-    
-    print("Unit is WAITING (Success so far). Now Firing Trigger...")
-    
-    # 5. Fire and HOLD High
-    print("Setting Master Out to HIGH (Holding)...")
-    left_puller.set_trigger_out_states(1)
-    
-    # Monitor for movement while High
-    start_time = time.time()
-    moved = False
-    while time.time() - start_time < 3.0:
-        pos = right_puller.get_position()
-        if abs(pos - center_pos) > 0.1:
-            print(f"*** MOVEMENT DETECTED! Pos={pos:.3f} ***")
-            moved = True
-            break
-        time.sleep(0.1)
-        
-    status = right_puller.get_status_bits() & 0xFFFFFFFF
-    print(f"Status while HIGH: 0x{status:08X}, DI1={get_di_state(right_puller)}")
-    
-    print("Setting Master Out to LOW...")
-    left_puller.set_trigger_out_states(0)
-    
-    if moved:
-        print("TEST PASSED: Mode 3/Pol 0 triggers on HIGH level.")
+        print(f"FAILED: Moved immediately upon setting config! Pos: {pos:.3f}")
+        # Disable trigger to stop weirdness
+        right_puller.set_trigger_config(0, 0)
     else:
-        print("TEST FAILED: Timed out waiting for move while Trigger was HIGH.")
+        print(f"ARMED SUCCESSFULLY! (Pos: {pos:.3f})")
+        
+        # 5. Fire Trigger
+        print("Firing Trigger Pulse (Master High -> Low)...")
+        left_puller.set_trigger_out_states(1)
+        time.sleep(0.2)
+        left_puller.set_trigger_out_states(0)
+        
+        # 6. Check for move
+        print("Waiting for move...")
+        time.sleep(2.0)
+        pos = right_puller.get_position()
+        
+        dist = pos - center_pos
+        print(f"Final Position: {pos:.3f} (Delta: {dist:.3f})")
+        
+        if abs(pos - target_pos) < 0.1:
+            print("SUCCESS! Motor moved to target after trigger.")
+        else:
+            print("FAILED: Did not move after trigger.")
 
+    # Cleanup
+    print("Disabling Triggers and Disconnecting...")
+    right_puller.set_trigger_config(0, 0)
     left_puller.disconnect()
     right_puller.disconnect()
 
 if __name__ == "__main__":
     try:
-        run_strict_test()
+        run_test()
     except Exception as e:
         print(f"An error occurred: {e}")
         import traceback
