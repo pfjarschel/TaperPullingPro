@@ -45,9 +45,8 @@ def run_test():
     left_puller.set_trigger_out_states(0)
     time.sleep(0.5)
     
-    # 2. Test Mode 3 (Abs) with Polarity Variations
-    # Previously Mode 3 + Pol 0 moved immediately.
-    # Let's test Pol 0 and Pol 1.
+    # 2. Test Modes: 2 (Rel) and 3 (Abs)
+    # Mode 2 is usually Relative Move. Mode 3 is Absolute.
     
     center_pos = 50.0
     test_delta = 3.0
@@ -56,49 +55,60 @@ def run_test():
     right_puller.go_to(center_pos)
     while right_puller.motor_moving(): time.sleep(0.1)
 
-    polarities = [0, 1]
+    # Test Cases: (Mode, UseRelativeCommand)
+    test_cases = [
+        (2, True, "Mode 2 (Relative) + MoveRelative"),
+        (3, False, "Mode 3 (Absolute) + MoveAbsolute")
+    ]
     
-    for pol in polarities:
-        mode = 3 # Absolute
-        print(f"\n--- TESTING MODE 3 (ABS) with POLARITY {pol} ---")
+    for mode, use_rel, desc in test_cases:
+        print(f"\n--- TESTING {desc} ---")
         
         # Reset position
         right_puller.go_to(center_pos)
         while right_puller.motor_moving(): time.sleep(0.1)
         
-        # Configure Slave
-        # Pol 0 = Active High?, Pol 1 = Active Low?
-        right_puller.set_trigger_config(mode, pol) 
+        # Configure Slave: Mode=mode, Polarity=0 (High/Rising)
+        right_puller.set_trigger_config(mode, 0) 
         print(f"Right (Slave) Switches: 0x{right_puller.get_trigger_switches():02X}")
         
-        target = center_pos + test_delta
-        print(f"Arming Slave to {target:.3f}...")
-        right_puller.move_absolute(target)
+        if use_rel:
+            print(f"Arming Slave (Relative {test_delta}mm)...")
+            right_puller.move_relative(test_delta)
+        else:
+            target = center_pos + test_delta
+            print(f"Arming Slave (Absolute {target:.3f}mm)...")
+            right_puller.move_absolute(target)
         
         # Check immediate movement
         time.sleep(1.0)
         pos = right_puller.get_position()
+        status = right_puller.get_status_bits() & 0xFFFFFFFF # Ensure unsigned
         
-        if abs(pos - target) < 0.1:
-            print(f"FAILED: Moved immediately. (Current Position: {pos:.3f})")
+        if abs(pos - center_pos) > 0.1: # Moved from center?
+            print(f"FAILED: Moved immediately. (Pos: {pos:.3f})")
         else:
-            print(f"ARMED SUCCESSFULLY! (Position stuck at {pos:.3f})")
-            print("Firing TRIGGER PULSE (Master Low -> High -> Low)...")
+            print(f"ARMED (Pos: {pos:.3f}, Status: 0x{status:08X})")
+            print("Firing TRIGGER PULSE (0.2s)...")
             
             # Pulse
             left_puller.set_trigger_out_states(1)
-            time.sleep(0.05)
+            time.sleep(0.2) # Longer pulse
             left_puller.set_trigger_out_states(0)
             
             # Check move
-            time.sleep(1.0)
+            time.sleep(1.5) # Wait for move
             pos = right_puller.get_position()
+            status = right_puller.get_status_bits() & 0xFFFFFFFF
             
-            if abs(pos - target) < 0.1:
+            dist = pos - center_pos
+            print(f"Post-Trigger: Pos={pos:.3f} (Delta={dist:.3f}), Status: 0x{status:08X}")
+            
+            if abs(dist) > 0.1:
                 print(f"*** SUCCESS! Triggered Move Completed. ***")
-                break # Found it!
+                break 
             else:
-                print(f"FAILED: Did not move after trigger. (Pos: {pos:.3f})")
+                print(f"FAILED: Did not move.")
 
     print("\nTest Finished.")
     left_puller.disconnect()
