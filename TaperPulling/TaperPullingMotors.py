@@ -705,13 +705,22 @@ class GenericTLMotor:
 
             return move_time
             
+    def set_trigger_switches_raw(self, bits):
+        """
+        Set the raw trigger switches byte.
+        """
+        if self.ok:
+            try:
+                eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
+            except Exception as e:
+                print(f"Error setting raw switches: {e}")
+
     def get_trigger_switches(self):
         """
         Get the current trigger indicator bits.
         """
         if self.ok:
             try:
-                # Header says returns byte
                 return eval(f"self.lib.{self.lib_prfx}_GetTriggerSwitches(self.serial_c)")
             except Exception as e:
                 print(f"Error getting trigger switches: {e}")
@@ -725,14 +734,15 @@ class GenericTLMotor:
             try:
                 if self.lib_prfx == "BMC":
                     # TBD001 / TDS001 Bit Layout:
-                    # bits 0-2: Mode (0=None, 1=GPI, 2=Rel, 3=Abs, 4=Home)
-                    # bit 3: Polarity (0=High/Rising, 1=Low/Falling)
-                    # We preserve output bits (4-7)
+                    # bits 0-2: Input Mode (0=None, 1=GPI, 2=Rel, 3=Abs, 4=Home)
+                    # bit 3: Input Polarity (0=High/Rising, 1=Low/Falling)
+                    # bits 4-6: Output Mode
+                    # bit 7: Output Polarity
                     current = self.get_trigger_switches()
                     output_bits = current & 0xF0
                     input_bits = (int(mode) & 0x07) | ((int(polarity) << 3) & 0x08)
                     bits = output_bits | input_bits
-                    eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
+                    self.set_trigger_switches_raw(bits)
                 else:
                     eval(f"self.lib.{self.lib_prfx}_SetTriggerConfig(self.serial_c, c_int(mode), c_int(polarity))")
             except Exception as e:
@@ -745,13 +755,13 @@ class GenericTLMotor:
         if self.ok:
             try:
                 if self.lib_prfx == "BMC":
-                    # bits 4-6: Mode (0=None, 1=GPO, 2=InMotion, 3=MaxVel)
-                    # bit 7: Polarity (0=High, 1=Low)
+                    # bits 4-6: Output Mode (0=None, 1=GPO, 2=InMotion, 3=MaxVel)
+                    # bit 7: Output Polarity (0=High/Rising, 1=Low/Falling)
                     current = self.get_trigger_switches()
                     input_bits = current & 0x0F
                     output_bits = ((int(mode) & 0x07) << 4) | ((int(polarity) << 7) & 0x80)
                     bits = input_bits | output_bits
-                    eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
+                    self.set_trigger_switches_raw(bits)
                 else:
                     eval(f"self.lib.{self.lib_prfx}_SetTriggerOutConfig(self.serial_c, c_int(mode), c_int(polarity))")
             except Exception as e:
@@ -791,16 +801,15 @@ class GenericTLMotor:
         if self.ok:
             try:
                 if self.lib_prfx == "BMC":
-                    # If Mode is GPO (1), the output follows Polarity bit (7)
-                    # To toggle, we change the polarity bit while keeping Mode=1
+                    # We ensure GPO mode (1) and toggle bit 7 (Output Polarity)
+                    # State 1 = High = Polarity 0
+                    # State 0 = Low = Polarity 1
                     current = self.get_trigger_switches()
-                    # Ensure Output Mode is 1 (GPO)
-                    bits = (current & 0x8F) | (1 << 4) # Clear mode bits 4-6, then set mode=1
-                    if state:
-                        bits &= ~0x80 # Polarity 0 = High
-                    else:
-                        bits |= 0x80 # Polarity 1 = Low
-                    eval(f"self.lib.{self.lib_prfx}_SetTriggerSwitches(self.serial_c, c_byte(bits))")
+                    input_bits = current & 0x0F
+                    gpo_mode = 1 << 4
+                    polarity_bit = 0 if state else 0x80
+                    bits = input_bits | gpo_mode | polarity_bit
+                    self.set_trigger_switches_raw(bits)
                 else:
                     eval(f"self.lib.{self.lib_prfx}_SetDigitalOutputs(self.serial_c, c_byte(state))")
             except Exception as e:

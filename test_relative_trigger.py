@@ -5,8 +5,7 @@ import sys
 
 def run_test():
     print("Initializing motors...")
-    # Initialize motors
-    # Note: These classes attempt to connect upon initialization if not simulated
+    # LEFT is MASTER (Out), RIGHT is SLAVE (In)
     left_puller = TPM.LeftPuller()
     right_puller = TPM.RightPuller()
     
@@ -18,120 +17,72 @@ def run_test():
         sys.exit(1)
         
     print("Motors connected.")
-    print(f"Left: {left_puller.serial}, Right: {right_puller.serial}")
-
-    # Configuration Constants (Matches TBD001/TDS001 Bits)
-    # Mode: 0=None, 1=GPI, 2=Rel, 3=Abs, 4=Home
-    TRIG_MODE_ABS = 3
-    TRIG_POL_HIGH = 0
     
-    print("Configuring Triggers...")
-    left_puller.set_trigger_config(TRIG_MODE_ABS, TRIG_POL_HIGH)
-    right_puller.set_trigger_config(TRIG_MODE_ABS, TRIG_POL_HIGH)
+    # 1. Initialize Left (MASTER) as GPO, State Low (Polarity 1)
+    print("Initializing Master (Left) Trigger Out to LOW (Inactive)...")
+    left_puller.set_trigger_out_states(0) 
+    left_puller.set_trigger_config(0, 0) # Input Mode None on Master
     
-    # Verify configuration
-    print(f"Left Switches: 0x{left_puller.get_trigger_switches():02X}")
-    print(f"Right Switches: 0x{right_puller.get_trigger_switches():02X}")
+    print(f"Left (Master) Switches: 0x{left_puller.get_trigger_switches():02X}")
     
-    # Test Parameters
-
-    # Test Parameters
-    center_pos = 50.0 # mm (Safe spot)
-    brush_amp = 3.0 # mm
-    cycles = 6
+    # 2. Start testing modes for Right (SLAVE)
+    modes_to_test = [2, 3, 4]
     
-    # Go to start position normally first
-    print(f"Moving to start position: {center_pos} mm")
+    center_pos = 50.0
+    test_delta = 3.0
+    
+    print(f"Moving BOTH to start position: {center_pos} mm")
     left_puller.go_to(center_pos)
     right_puller.go_to(center_pos)
+    while left_puller.motor_moving() or right_puller.motor_moving(): time.sleep(0.1)
     
-    # Wait for completion (with verification)
-    print("Waiting for motors to reach start position...")
-    timeout = 10.0
-    start_wait = time.time()
-    while True:
-        l_pos = left_puller.get_position()
-        r_pos = right_puller.get_position()
-        l_moving = left_puller.motor_moving()
-        r_moving = right_puller.motor_moving()
+    for mode in modes_to_test:
+        print(f"\n--- TESTING SLAVE (RIGHT) TRIGGER MODE: {mode} ---")
         
-        if not l_moving and not r_moving:
-            if abs(l_pos - center_pos) < 0.1 and abs(r_pos - center_pos) < 0.1:
-                break
+        # Reset position for clean test
+        print(f"Centering Slave (Right) at {center_pos}...")
+        right_puller.go_to(center_pos)
+        while right_puller.motor_moving(): time.sleep(0.1)
         
-        if time.time() - start_wait > timeout:
-            print(f"Timeout! Positions: L={l_pos:.3f}, R={r_pos:.3f}")
-            # If not at center, try move one more time
-            if abs(r_pos - center_pos) > 0.1:
-                print("Retrying Right Puller move...")
-                right_puller.go_to(center_pos)
-                start_wait = time.time() # Reset timeout
+        # Configure Slave (Right)
+        # Pol 0 = Active High / Rising Edge
+        right_puller.set_trigger_config(mode, 0) 
+        print(f"Right (Slave) Switches Configured: 0x{right_puller.get_trigger_switches():02X}")
+        
+        target = center_pos + test_delta
+        print(f"Arming Slave (Right) to position {target:.3f}...")
+        right_puller.move_absolute(target)
+        
+        # Check if it moved immediately
+        print("Checking if Slave (Right) stayed put...")
+        time.sleep(1.0)
+        pos = right_puller.get_position()
+        status = right_puller.get_status_bits()
+        print(f"Post-Arm: Pos={pos:.3f}, StatusBits=0x{status:08X}")
+        
+        if abs(pos - target) < 0.1:
+            print(f"Mode {mode} FAILED: Moved immediately upon arming.")
+        else:
+            print(f"Mode {mode} successfully ARMED (did not move).")
+            print("Firing trigger pulse from Master (Left)...")
+            left_puller.set_trigger_out_states(1) # State 1 = High
+            time.sleep(0.1)
+            left_puller.set_trigger_out_states(0) # State 0 = Low
+            
+            # Check if it moved
+            print("Checking if Slave (Right) moved now...")
+            time.sleep(1.0)
+            pos = right_puller.get_position()
+            print(f"Post-Trigger: Pos={pos:.3f}")
+            if abs(pos - target) < 0.1:
+                print(f"*** SUCCESS: Mode {mode} worked with hardware trigger! ***")
             else:
-                break
-        time.sleep(0.2)
+                print(f"Mode {mode} FAILED: Did not move after trigger pulse.")
         
-    print(f"Start position reached: L={left_puller.get_position():.3f}, R={right_puller.get_position():.3f}")
-    print("Starting Triggered Loop...")
-    
-    current_pos_l = left_puller.get_position()
-    current_pos_r = right_puller.get_position()
-    
-    for i in range(cycles):
-        # Determine direction
-        direction = 1 if i % 2 == 0 else -1
-        delta = brush_amp * direction
-        
-        target_l = current_pos_l + delta
-        target_r = current_pos_r - delta # Flipped direction: as L increases, R decreases
-        # Note: real pulling involves them moving apart, but for sync test, parallel motion is fine.
-        
-        print(f"Cycle {i+1}: Preparing move to L={target_l:.3f}, R={target_r:.3f}")
-        
-        # 1. Arm Triggers
-        # Using move_absolute(pos) which now handles SetMoveAbsolutePosition + MoveAbsolute(serial)
-        print("Arming Left...")
-        left_puller.move_absolute(target_l)
-        print("Arming Right...")
-        right_puller.move_absolute(target_r)
-        
-        # Short wait to ensure both are armed
-        print("Waiting for motors to be armed...")
-        time.sleep(1.0) 
-        
-        # Diagnostic: Check moving status
-        print(f"Status: L_moving={left_puller.motor_moving()}, R_moving={right_puller.motor_moving()}")
-        
-        # 2. Fire Trigger (Master - Right Puller)
-        print("Firing trigger pulse (GPO Toggle)...")
-        right_puller.set_trigger_out_states(1)
-        time.sleep(0.010) # 10ms pulse
-        right_puller.set_trigger_out_states(0)
-        
-        # 4. Wait for move completion
-        # We can poll the status bits or position
-        print("Waiting for move completion...")
-        timeout = 5.0
-        start_wait = time.time()
-        while True:
-            l_moving = left_puller.motor_moving()
-            r_moving = right_puller.motor_moving()
-            
-            if not l_moving and not r_moving:
-                break
-                
-            if time.time() - start_wait > timeout:
-                print("Timeout waiting for move!")
-                break
-            time.sleep(0.05)
-            
-        print(f"Move Complete. L={left_puller.get_position():.4f}, R={right_puller.get_position():.4f}")
-        
-        current_pos_l = left_puller.get_position()
-        current_pos_r = right_puller.get_position()
-        
-        time.sleep(0.5)
+        # Invert delta for next iteration
+        test_delta *= -1
 
-    print("Test Finished.")
+    print("\nSearch Finished.")
     left_puller.disconnect()
     right_puller.disconnect()
 
