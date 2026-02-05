@@ -61,10 +61,9 @@ def run_test():
     print(f"Stored Relative Distance: {stored_rel:.3f}")
     
     # 3. Enable Trigger Mode
-    # Hypothesis: Use Mode 2 (Relative) explicitly to see if it behaves same as Mode 3.
-    # If Mode 3 was actually functioning as Rel, then Mode 2 should do the exact same thing (0.5mm move)
-    print("Enabling Trigger Mode (Mode 2=Rel, Polarity 0)...")
-    err = right_puller.set_trigger_config(2, 0) # Testing Mode 2 instead of 3
+    # Hypothesis: Enabling the mode is the "Arm" command.
+    print("Enabling Trigger Mode (Mode 3=Abs, Polarity 0)...")
+    err = right_puller.set_trigger_config(3, 0)
     print(f"SetTriggerConfig Return Code: {err}")
     
     print(f"Slave Switches: 0x{right_puller.get_trigger_switches():02X}")
@@ -95,12 +94,12 @@ def run_test():
         dist = pos - center_pos
         print(f"Final Position: {pos:.3f} (Delta: {dist:.3f})")
         
-        if abs(pos - (center_pos + test_rel_dist)) < 0.1:
-             print("RESULT: Moved Relative 0.5mm as expected for Mode 2.")
-        elif abs(pos - target_pos) < 0.1:
-            print("RESULT: Moved Absolute to Target (Unexpected for Mode 2)")
+        if abs(pos - target_pos) < 0.1:
+            print("SUCCESS! Motor moved to target after trigger (Absolute Mode Working!).")
+        elif abs(pos - (center_pos + test_rel_dist)) < 0.1:
+             print("RESULT: Still moved Relative 0.5mm (Absolute Mode failed).")
         else:
-             print("RESULT: Movement didn't match Rel (0.5) or Abs (3.0).")
+             print(f"RESULT: Movement didn't match Rel ({test_rel_dist}) or Abs ({target_pos}).")
 
     # Cleanup
     print("Disabling Triggers and Disconnecting...")
