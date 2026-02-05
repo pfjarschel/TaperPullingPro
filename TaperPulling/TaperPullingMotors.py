@@ -744,10 +744,12 @@ class GenericTLMotor:
                     input_bits = (int(mode) & 0x07) | ((int(polarity) << 3) & 0x08)
                     bits = output_bits | input_bits
                     self.set_trigger_switches_raw(bits)
+                    return 0 # Simulated OK
                 else:
-                    eval(f"self.lib.{self.lib_prfx}_SetTriggerConfig(self.serial_c, c_int(mode), c_int(polarity))")
+                    return eval(f"self.lib.{self.lib_prfx}_SetTriggerConfig(self.serial_c, c_int(mode), c_int(polarity))")
             except Exception as e:
                 print(f"Error setting trigger config: {e}")
+        return -1
                 
     def set_trigger_out_config(self, mode, polarity):
         """
@@ -775,9 +777,10 @@ class GenericTLMotor:
         if self.ok:
             try:
                 pos_dev = int(self.real2dev(pos, 0))
-                eval(f"self.lib.{self.lib_prfx}_SetMoveAbsolutePosition(self.serial_c, c_int(pos_dev))")
+                return eval(f"self.lib.{self.lib_prfx}_SetMoveAbsolutePosition(self.serial_c, c_int(pos_dev))")
             except Exception as e:
                 print(f"Error setting absolute move position: {e}")
+        return -1
 
     def get_move_absolute_position(self):
         """
@@ -798,9 +801,10 @@ class GenericTLMotor:
         if self.ok:
             try:
                 dist_dev = int(self.real2dev(dist, 0))
-                eval(f"self.lib.{self.lib_prfx}_SetMoveRelativeDistance(self.serial_c, c_int(dist_dev))")
+                return eval(f"self.lib.{self.lib_prfx}_SetMoveRelativeDistance(self.serial_c, c_int(dist_dev))")
             except Exception as e:
                 print(f"Error setting relative move distance: {e}")
+        return -1
 
     def get_move_relative_distance(self):
         """

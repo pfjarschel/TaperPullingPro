@@ -36,7 +36,7 @@ def run_test():
     left_puller.set_trigger_out_states(0) # Ensure Master is Low
     
     # Clear Slave Config first
-    right_puller.set_trigger_config(0, 0) 
+    print(f"Clearing Trigger Config: {right_puller.set_trigger_config(0, 0)}")
     
     # Move to Start
     print(f"Moving to Start: {center_pos}")
@@ -45,7 +45,8 @@ def run_test():
     
     # 2. Set Target Position (BUT DO NOT CALL MOVE)
     print(f"Pre-Setting Target Position to {target_pos}...")
-    right_puller.set_move_absolute_position(target_pos)
+    err = right_puller.set_move_absolute_position(target_pos)
+    print(f"SetAbsPos Return Code: {err}")
     
     # Verify Absolute Position
     stored_target = right_puller.get_move_absolute_position()
@@ -54,14 +55,17 @@ def run_test():
     # Set defined Relative Distance to rule out/in relative mode
     test_rel_dist = 0.5
     print(f"Setting Relative Distance to {test_rel_dist}mm to test mode hypothesis...")
-    right_puller.set_move_relative_distance(test_rel_dist)
+    err = right_puller.set_move_relative_distance(test_rel_dist)
+    print(f"SetRelDist Return Code: {err}")
     stored_rel = right_puller.get_move_relative_distance()
     print(f"Stored Relative Distance: {stored_rel:.3f}")
     
     # 3. Enable Trigger Mode
-    # Hypothesis: Enabling the mode is the "Arm" command.
-    print("Enabling Trigger Mode (Mode 3=Abs, Polarity 0)...")
-    right_puller.set_trigger_config(3, 0)
+    # Hypothesis: Use Mode 2 (Relative) explicitly to see if it behaves same as Mode 3.
+    # If Mode 3 was actually functioning as Rel, then Mode 2 should do the exact same thing (0.5mm move)
+    print("Enabling Trigger Mode (Mode 2=Rel, Polarity 0)...")
+    err = right_puller.set_trigger_config(2, 0) # Testing Mode 2 instead of 3
+    print(f"SetTriggerConfig Return Code: {err}")
     
     print(f"Slave Switches: 0x{right_puller.get_trigger_switches():02X}")
     
@@ -91,10 +95,12 @@ def run_test():
         dist = pos - center_pos
         print(f"Final Position: {pos:.3f} (Delta: {dist:.3f})")
         
-        if abs(pos - target_pos) < 0.1:
-            print("SUCCESS! Motor moved to target after trigger.")
+        if abs(pos - (center_pos + test_rel_dist)) < 0.1:
+             print("RESULT: Moved Relative 0.5mm as expected for Mode 2.")
+        elif abs(pos - target_pos) < 0.1:
+            print("RESULT: Moved Absolute to Target (Unexpected for Mode 2)")
         else:
-            print("FAILED: Did not move after trigger.")
+             print("RESULT: Movement didn't match Rel (0.5) or Abs (3.0).")
 
     # Cleanup
     print("Disabling Triggers and Disconnecting...")
