@@ -47,6 +47,17 @@ def run_test():
     print(f"Pre-Setting Target Position to {target_pos}...")
     right_puller.set_move_absolute_position(target_pos)
     
+    # Verify Absolute Position
+    stored_target = right_puller.get_move_absolute_position()
+    print(f"Stored Target Position: {stored_target:.3f}")
+    
+    # Set defined Relative Distance to rule out/in relative mode
+    test_rel_dist = 0.5
+    print(f"Setting Relative Distance to {test_rel_dist}mm to test mode hypothesis...")
+    right_puller.set_move_relative_distance(test_rel_dist)
+    stored_rel = right_puller.get_move_relative_distance()
+    print(f"Stored Relative Distance: {stored_rel:.3f}")
+    
     # 3. Enable Trigger Mode
     # Hypothesis: Enabling the mode is the "Arm" command.
     print("Enabling Trigger Mode (Mode 3=Abs, Polarity 0)...")

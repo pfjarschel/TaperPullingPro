@@ -779,6 +779,41 @@ class GenericTLMotor:
             except Exception as e:
                 print(f"Error setting absolute move position: {e}")
 
+    def get_move_absolute_position(self):
+        """
+        Get the absolute move position for triggered moves.
+        """
+        if self.ok:
+            try:
+                pos_dev = eval(f"self.lib.{self.lib_prfx}_GetMoveAbsolutePosition(self.serial_c)")
+                return self.dev2real(pos_dev, 0)
+            except Exception as e:
+                print(f"Error getting absolute move position: {e}")
+        return -1.0
+
+    def set_move_relative_distance(self, dist: float):
+        """
+        Set the relative move distance.
+        """
+        if self.ok:
+            try:
+                dist_dev = int(self.real2dev(dist, 0))
+                eval(f"self.lib.{self.lib_prfx}_SetMoveRelativeDistance(self.serial_c, c_int(dist_dev))")
+            except Exception as e:
+                print(f"Error setting relative move distance: {e}")
+
+    def get_move_relative_distance(self):
+        """
+        Get the relative move distance.
+        """
+        if self.ok:
+            try:
+                dist_dev = eval(f"self.lib.{self.lib_prfx}_GetMoveRelativeDistance(self.serial_c)")
+                return self.dev2real(dist_dev, 0)
+            except Exception as e:
+                print(f"Error getting relative move distance: {e}")
+        return 0.0
+
     def move_absolute(self, pos: float=None, wait=False):
         """
         Move to absolute position (or arm for trigger).
