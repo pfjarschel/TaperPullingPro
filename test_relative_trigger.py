@@ -61,12 +61,9 @@ def run_test():
     print(f"Stored Relative Distance: {stored_rel:.3f}")
     
     # 3. Enable Trigger Mode
-    # Kinesis Logs showed "bIndicatorBits - 5" when it worked!
-    # 5 (decimal) = 101 (binary). 
-    # If bits 0-2 are mode, then Mode is 5.
-    # Documentation said 3, but Kinesis uses 5. Let's try 5!
-    print("Enabling Trigger Mode (Mode 5, Polarity 0)...")
-    err = right_puller.set_trigger_config(5, 0)
+    # We now expect Mode 3 (Standard Abs) to be automatically mapped to Mode 5 (BMC Abs) by the class.
+    print("Enabling Trigger Mode (Mode 3=Abs, Polarity 0)...")
+    err = right_puller.set_trigger_config(3, 0)
     print(f"SetTriggerConfig Return Code: {err}")
     
     print(f"Slave Switches: 0x{right_puller.get_trigger_switches():02X}")

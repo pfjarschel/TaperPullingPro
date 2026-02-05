@@ -741,6 +741,12 @@ class GenericTLMotor:
                     # bit 7: Output Polarity
                     current = self.get_trigger_switches()
                     output_bits = current & 0xF0
+                    
+                    # FIX: BMC Controller uses Mode 5 for Absolute Move, not 3.
+                    # We map 3 -> 5 transparently.
+                    if mode == 3:
+                        mode = 5
+                        
                     input_bits = (int(mode) & 0x07) | ((int(polarity) << 3) & 0x08)
                     bits = output_bits | input_bits
                     self.set_trigger_switches_raw(bits)
