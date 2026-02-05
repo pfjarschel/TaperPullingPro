@@ -13,6 +13,15 @@ def run_test():
     left_puller.connect()
     right_puller.connect()
     
+    print("Initializing settings...")
+    left_puller.initialize()
+    left_puller.set_velocity(left_puller.vel)
+    left_puller.set_acceleration(left_puller.accel)
+    
+    right_puller.initialize()
+    right_puller.set_velocity(right_puller.vel)
+    right_puller.set_acceleration(right_puller.accel)
+    
     if not left_puller.ok or not right_puller.ok:
         print("Failed to connect to motors.")
         sys.exit(1)
