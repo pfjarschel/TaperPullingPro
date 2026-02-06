@@ -47,9 +47,14 @@ def run_test():
     
     # 1. Move to START POS (55.0)
     print(f"\n1. Moving to Start Position: {start_pos}...")
+    status = right_puller.get_status_bits()
+    print(f"   Status Bits before move: 0x{status:08X}")
     current = right_puller.get_position()
     print(f"   Current position before move: {current:.3f}")
+    
     right_puller.go_to(start_pos)
+    # Give the controller a moment to set the 'moving' bit
+    time.sleep(0.5) 
     
     timeout = 15.0
     t0 = time.time()
@@ -60,9 +65,12 @@ def run_test():
             break
             
     print(f"   Reached: {right_puller.get_position():.3f}")
+    print(f"   Status Bits after reaching: 0x{right_puller.get_status_bits():08X}")
 
     # 2. Configure Trigger for Target 65.0
     print(f"\n2. Configuring Trigger for Target: {target_pos}...")
+    # Add a small delay for safety
+    time.sleep(0.5)
     right_puller.set_move_absolute_position(target_pos)
     right_puller.set_trigger_config(3, 0) # Maps to 5 internally
     print("   Trigger Configured.")
