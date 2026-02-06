@@ -28,24 +28,35 @@ def run_test():
         
     print("Motors connected.")
     
-    start_pos = 70.0
-    target_pos = 73.0
-    intermediate_pos = 60.0
+    # Using positions closer to the ones we know work (50 area)
+    start_pos = 50.0
+    target_pos = 53.0
+    intermediate_pos = 45.0
     
     # Hypothesis:
     # If "Fake Absolute":
-    #   At 70, Config Target 73 -> Calculates Delta (+3.0).
-    #   Move to 60.
-    #   Trigger -> Moves +3.0 -> Lands at 63.
+    #   At 50, Config Target 53 -> Calculates Delta (+3.0).
+    #   Move to 45.
+    #   Trigger -> Moves +3.0 -> Lands at 48.
     # If "True Absolute":
-    #   At 70, Config Target 73.
-    #   Move to 60.
-    #   Trigger -> Moves to 73 -> Lands at 73.
+    #   At 50, Config Target 53.
+    #   Move to 45.
+    #   Trigger -> Moves to 53 -> Lands at 53.
 
-    # 1. Move to START POS (70.0)
+    # 1. Move to START POS (50.0)
     print(f"\n1. Moving to Start Position: {start_pos}...")
+    current = right_puller.get_position()
+    print(f"   Current position before move: {current:.3f}")
     right_puller.go_to(start_pos)
-    while right_puller.motor_moving(): time.sleep(0.1)
+    
+    timeout = 10.0
+    t0 = time.time()
+    while right_puller.motor_moving(): 
+        time.sleep(0.1)
+        if time.time() - t0 > timeout:
+            print("   TIMEOUT: Motor still thinks it is moving but took too long!")
+            break
+            
     print(f"   Reached: {right_puller.get_position():.3f}")
 
     # 2. Configure Trigger (Target 73.0)
@@ -59,10 +70,17 @@ def run_test():
     switches = right_puller.get_trigger_switches()
     print(f"   Switches: 0x{switches:02X}")
 
-    # 3. Move to INTERMEDIATE POS (60.0) - The "Trap"
+    # 3. Move to INTERMEDIATE POS (45.0) - The "Trap"
     print(f"\n3. Moving to Intermediate Position: {intermediate_pos}...")
     right_puller.go_to(intermediate_pos)
-    while right_puller.motor_moving(): time.sleep(0.1)
+    
+    t0 = time.time()
+    while right_puller.motor_moving(): 
+        time.sleep(0.1)
+        if time.time() - t0 > timeout:
+            print("   TIMEOUT: Motor still thinks it is moving but took too long!")
+            break
+            
     print(f"   Reached: {right_puller.get_position():.3f}")
     
     # Check if config persisted after move
