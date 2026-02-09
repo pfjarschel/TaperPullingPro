@@ -148,6 +148,10 @@ class TaperPullingCore:
         """        
         self.motors = TaperPullingMotors()
         
+        # Velocity Tracking State
+        self.last_pos_poll_time = 0.0
+        self.tracking_kp = 1.5
+        
         self.start_update()
         
     def __del__(self):
@@ -188,6 +192,10 @@ class TaperPullingCore:
         self.brusher_zeroed = False
         self.pullers_zeroed = False
         self.flameIO_moving = False
+        self.last_pos_poll_time = 0.0
+        self.l_golden_pos = 0.0
+        self.r_golden_pos = 0.0
+        self.pull_started_init = False
         self.current_profile_step = 0
         self.last_total_pulled = 0.0
     
@@ -273,11 +281,13 @@ class TaperPullingCore:
                     self.loop_time = self.time_now
                 self.loop_i += 1
             
-            # Get current positions
-            self.brusher_pos = self.motors.brusher.get_position()
-            self.flame_io_pos = self.motors.flame_io.get_position()
-            self.puller_left_pos = self.motors.left_puller.get_position()
-            self.puller_right_pos = self.motors.right_puller.get_position()
+            # Get current positions (Throttled to 10Hz for stability)
+            if (self.time_now - self.last_pos_poll_time) >= 0.100:
+                self.brusher_pos = self.motors.brusher.get_position()
+                self.flame_io_pos = self.motors.flame_io.get_position()
+                self.puller_left_pos = self.motors.left_puller.get_position()
+                self.puller_right_pos = self.motors.right_puller.get_position()
+                self.last_pos_poll_time = self.time_now
             
             # Assess if flame tip is in danger zone
             if self.check_all_motors_ok():
@@ -412,19 +422,19 @@ class TaperPullingCore:
             if self.pullers_av_idx < len(self.pullers_av_threshold):
                 if self.total_pulled >= self.pullers_av_threshold[self.pullers_av_idx]:
                     self.pullers_av_idx += 1
-                    self.motors.left_puller.stop(0)
-                    self.motors.right_puller.stop(0)
-                    new_lv = self.motors.left_puller.pull_vel*(self.pullers_av_factor**self.pullers_av_idx)
-                    new_rv = self.motors.right_puller.pull_vel*(self.pullers_av_factor**self.pullers_av_idx)
-                    self.pull_vel = new_lv
-                    if self.rel_pull:
-                        self.motors.left_puller.set_velocity(self.motors.brusher.vel - self.brusher_dir*new_lv)
-                        self.motors.right_puller.set_velocity(self.motors.brusher.vel + self.brusher_dir*new_rv)
-                        self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-self.brusher_dir))
-                        self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.brusher_dir))
-                    else:
-                        self.motors.left_puller.set_velocity(new_lv)
-                        self.motors.right_puller.set_velocity(new_rv)
+                    # Update the base pull_vel in the motor objects
+                    # so that check_brushing follower picks up the new speed
+                    self.motors.left_puller.pull_vel *= self.pullers_av_factor
+                    self.motors.right_puller.pull_vel *= self.pullers_av_factor
+                    
+                    self.pull_vel = self.motors.left_puller.pull_vel
+                    
+                    if not self.rel_pull:
+                        # Only handle discrete moves here if NOT in rel_pull mode
+                        self.motors.left_puller.stop(0)
+                        self.motors.right_puller.stop(0)
+                        self.motors.left_puller.set_velocity(self.pull_vel)
+                        self.motors.right_puller.set_velocity(self.pull_vel)
                         self.motors.left_puller.move(self.motors.left_puller.MoveDirection(self.puller_left_dir))
                         self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.puller_right_dir))
         
@@ -437,46 +447,71 @@ class TaperPullingCore:
         hz_l = self.brusher_x0 - hz/2
         hz_r = self.brusher_x0 + hz/2
         fb_dir = self.brusher_dir
-        if self.rel_pull:  # and self.pulling:
+        if self.rel_pull:
+            # 1. Update Integration Clock
             self.time_brush_check_0 = self.time_brush_check_1
             self.time_brush_check_1 = time.time()
-            t0 = self.time_brush_check_0
-            t1 = self.time_brush_check_1
+            dt = self.time_brush_check_1 - self.time_brush_check_0
             
-            self.fake_brusher_pos += fb_dir*(t1 - t0)*self.motors.brusher.vel
+            # 2. Update Virtual (Golden) Brush Position
+            self.fake_brusher_pos += fb_dir * dt * self.motors.brusher.vel
+            
+            # 3. Handle Direction Flip logic
+            # Range: -hz/2 + flame/2 to hz/2 - flame/2
             l = -hz/2.0 + self.flame_size/2.0
             r = hz/2.0 - self.flame_size/2.0
             if (fb_dir == 1 and self.fake_brusher_pos > r) or (fb_dir == -1 and self.fake_brusher_pos < l):
                 self.brusher_dir = -self.brusher_dir
                 if self.pulling:
-                    lp_v0 = self.motors.left_puller.pull_vel
-                    rp_v0 = self.motors.right_puller.pull_vel
                     self.rhz_edges.append(self.fake_brusher_pos - self.brusher_dir*self.flame_size/2.0)
-                else:
-                    lp_v0 = 0.0
-                    rp_v0 = 0.0
-                if self.pullers_adaptive_vel:
-                    if self.pullers_av_idx < len(self.pullers_av_threshold):
-                        if self.total_pulled >= self.pullers_av_threshold[self.pullers_av_idx]:
-                            self.pullers_av_idx += 1
-                            lp_v0 = lp_v0*(self.pullers_av_factor**self.pullers_av_idx)
-                            rp_v0 = rp_v0*(self.pullers_av_factor**self.pullers_av_idx)
-                lp_v = self.motors.brusher.vel - self.brusher_dir*lp_v0
-                rp_v = self.motors.brusher.vel + self.brusher_dir*rp_v0
-                if fb_dir < 0:  # Switch order at each HZ edge
-                    self.motors.left_puller.stop(1)
-                    self.motors.right_puller.stop(1)
-                    self.motors.left_puller.set_velocity(lp_v)
-                    self.motors.right_puller.set_velocity(rp_v)
-                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-fb_dir), stop_mode=1)
-                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(fb_dir), stop_mode=1)
-                else:
-                    self.motors.right_puller.stop(1)
-                    self.motors.left_puller.stop(1) 
-                    self.motors.right_puller.set_velocity(rp_v)
-                    self.motors.left_puller.set_velocity(lp_v)
-                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(fb_dir), stop_mode=1)
-                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-fb_dir), stop_mode=1)
+            
+            # 4. Calculate P-Control Target Velocities
+            lp_v0 = self.motors.left_puller.pull_vel if self.pulling else 0.0
+            rp_v0 = self.motors.right_puller.pull_vel if self.pulling else 0.0
+            
+            # Trajectory Logic (Mirror system where 0 is Outer Limit for both)
+            # Brushing Move Right (Dir=1): Fiber moves Left relative to flame. 
+            # L: moves toward 0 (NEGATIVE)
+            # R: moves toward Center (POSITIVE)
+            v_l_ideal = - (self.brusher_dir * self.motors.brusher.vel + lp_v0)
+            v_r_ideal = self.brusher_dir * self.motors.brusher.vel - rp_v0
+            
+            # Update Golden Trajectory Positions
+            # Reset golden position to current hardware state when stage transitions happen
+            # or when Stage 0 (start) just finished.
+            if not hasattr(self, 'l_golden_pos') or self.l_golden_pos == 0.0:
+                self.l_golden_pos = self.puller_left_pos
+                self.r_golden_pos = self.puller_right_pos
+            
+            if self.pulling and not getattr(self, 'pull_started_init', False):
+                self.pull_started_init = True
+                self.l_golden_pos = self.puller_left_pos
+                self.r_golden_pos = self.puller_right_pos
+            if not self.pulling:
+                self.pull_started_init = False
+
+            self.l_golden_pos += v_l_ideal * dt
+            self.r_golden_pos += v_r_ideal * dt
+            
+            # P-Control Correction
+            # V_cmd = V_ideal + Kp * (Expected - Actual)
+            v_l_cmd = v_l_ideal + self.tracking_kp * (self.l_golden_pos - self.puller_left_pos)
+            v_r_cmd = v_r_ideal + self.tracking_kp * (self.r_golden_pos - self.puller_right_pos)
+            
+            # Clamp for safety
+            v_l_cmd = np.clip(v_l_cmd, -12, 12)
+            v_r_cmd = np.clip(v_r_cmd, -12, 12)
+            
+            # 5. Active Velocity Update (Force drive to apply new speed immediately)
+            self.motors.left_puller.set_velocity(max(0.001, abs(v_l_cmd)))
+            self.motors.right_puller.set_velocity(max(0.001, abs(v_r_cmd)))
+            
+            l_dir = self.motors.left_puller.MoveDirection.POSITIVE if v_l_cmd > 0 else self.motors.left_puller.MoveDirection.NEGATIVE
+            r_dir = self.motors.right_puller.MoveDirection.POSITIVE if v_r_cmd > 0 else self.motors.right_puller.MoveDirection.NEGATIVE
+            
+            # stop=False is critical to avoid decelerating to zero between updates
+            self.motors.left_puller.move(l_dir, stop=False)
+            self.motors.right_puller.move(r_dir, stop=False)
         if not self.rel_pull and mode == 0:
             if hz - self.flame_size >= self.motors.brusher.min_span:                
                 dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
