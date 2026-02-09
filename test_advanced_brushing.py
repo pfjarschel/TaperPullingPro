@@ -117,21 +117,31 @@ def run_test():
                 left_target = center_pos - amplitude
                 right_target = center_pos + amplitude
                 
-            # Pre-load Targets
-            left_puller.set_move_absolute_position(left_target)
-            right_puller.set_move_absolute_position(right_target)
+            # Pre-load Targets with error checking
+            err_l = left_puller.set_move_absolute_position(left_target)
+            err_r = right_puller.set_move_absolute_position(right_target)
             
+            if err_l != 0 or err_r != 0:
+                print(f"Warning: Set Target Failed (L:{err_l}, R:{err_r}) at t={current_sim_time:.2f}")
+
             # Fire Trigger
             left_puller.set_trigger_out_states(1)
             
-            # Minimal Wait: 100ms then check moving
-            time.sleep(0.1)
+            # Robust Wait: 
+            # 1. Wait enough time for the command to be registered and motion to likely start.
+            #    Latencies can be 100-200ms. Let's use 0.3s to be safe.
+            time.sleep(0.3)
             
-            # Wait for move to complete
+            # 2. Wait for move to complete
+            #    We check status bit.
+            busy_count = 0
             while left_puller.motor_moving() or right_puller.motor_moving():
-                # We can do a tight poll here if we wanted to be super precise, 
-                # but "motor_moving" check usually has ~10ms latency anyway.
-                time.sleep(0.01) 
+                busy_count += 1
+                time.sleep(0.05) 
+            
+            # Debug: Check if we ever waited?
+            # if busy_count == 0:
+            #    print("Warning: Motors were not busy after 0.3s wait.")
             
             # End Pulse
             left_puller.set_trigger_out_states(0)
@@ -144,7 +154,6 @@ def run_test():
             r_pos = right_puller.get_position()
             
             # Calculate "Real Amplitude" (Sum of absolute diffs from center)
-            # This represents the total span achieved at this point
             measured_span = abs(l_pos - center_pos) + abs(r_pos - center_pos)
             
             recorded_points.append([t_now_real, measured_span])
