@@ -57,9 +57,17 @@ def run_test():
     else:
         print("Motor is moving...")
         
-        # ACT: Update Target to B while moving
-        print(f"!!! UPDATING TARGET TO {target_B} NOW !!!")
+        # ACT: Update Target to B while moving AND RE-FIRE TRIGGER
+        print(f"!!! UPDATING TARGET TO {target_B} AND RE-FIRING TRIGGER !!!")
         motor.set_move_absolute_position(target_B)
+        time.sleep(0.05) # Small delay for comms
+        
+        # Reset Trigger first (pulse needs edge)
+        left.set_trigger_out_states(0)
+        time.sleep(0.05)
+        
+        # Fire Trigger AGAIN
+        left.set_trigger_out_states(1)
         
         # Wait for completion
         while motor.motor_moving():
