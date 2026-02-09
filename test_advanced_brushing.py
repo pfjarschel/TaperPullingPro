@@ -111,24 +111,36 @@ def run_test():
         # Loop until we exceed the profile time
         while current_sim_time < ref_times[-1]:
             # At what time will the motor REACH the next target?
-            # Roughly: t_now + 0.3s (wait) + move_time (~0.8s)
-            # Let's use t_now + 0.7s as an estimated "center-of-move" time for span lookup
-            t_predict = (time.time() - start_time_global) + 0.7
+            # Roughly: t_now + 0.3s (wait) + move_time (~0.5s) + overhead
+            # The oscillation was ~0.5mm, implying ~1.0s lag.
+            # Let's target t_now + 0.9s
+            t_predict = (time.time() - start_time_global) + 0.9
             
             # Interpolate required span for the predicted time
             current_span = np.interp(t_predict, ref_times, ref_spans)
             amplitude = current_span / 2.0
             
-            # Calculate Pulling Drift for the current time
-            pull_offset = v_pull_each * (time.time() - start_time_global)
+            # Calculate Pulling Drift for the TARGET time
+            # We must target where the center WILL BE.
+            pull_offset = v_pull_each * t_predict
             
             # Calculate targets: Center + Drift +/- Amplitude
+            # Standard Taper Pulling: Motors move APART.
+            # Assuming L:0..50..100 and R:0..50..100 is not valid, usually independent coordinates.
+            # If Left Puller (0-50) is at 50, Pulling means going to 0 (Negative).
+            # If Right Puller (0-50) is at 50, Pulling means going to 0? Or is it 50..100?
+            # Let's Stick to the "Expanding" logic relative to a virtual center if that's what we tested.
+            # But the previous test had L=C+P (Increasing), R=C-P (Decreasing).
+            # If C=50, L->60, R->40. They move TOWARDS each other (Collision risk).
+            # I will SWAP THIS to be Safe/Standard: L moves -, R moves +.
+            # L = C - P. R = C + P.
+            
             if current_direction == 1:
-                left_target = center_pos + pull_offset + amplitude
-                right_target = center_pos - pull_offset - amplitude
+                left_target = center_pos - pull_offset + amplitude
+                right_target = center_pos + pull_offset - amplitude
             else:
-                left_target = center_pos + pull_offset - amplitude
-                right_target = center_pos - pull_offset + amplitude
+                left_target = center_pos - pull_offset - amplitude
+                right_target = center_pos + pull_offset + amplitude
                 
             # Pre-load Targets with error checking
             err_l = left_puller.set_move_absolute_position(left_target)
@@ -162,10 +174,10 @@ def run_test():
             l_pos = left_puller.get_position()
             r_pos = right_puller.get_position()
             
-            # Calculate Measured Span: $|L - (Center + Pull)| + |R - (Center - Pull)|$
-            # This should match the reference "Brushing Span" profile.
+            # Calculate Measured Span: $|L - (Center - Pull)| + |R - (Center + Pull)|$
+            # Matching the corrected direction above (L-, R+).
             m_pull = v_pull_each * t_now_real
-            m_span = abs(l_pos - (center_pos + m_pull)) + abs(r_pos - (center_pos - m_pull))
+            m_span = abs(l_pos - (center_pos - m_pull)) + abs(r_pos - (center_pos + m_pull))
             
             recorded_points.append([t_now_real, m_span])
             
