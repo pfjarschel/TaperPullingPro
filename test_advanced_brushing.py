@@ -119,9 +119,30 @@ def run_test():
             # Initial Guess: Previous duration or default
             t_wait_overhead = 0.3 + 0.15 # 0.3 wait + 0.15 accel/latency
             
-            # First pass
-            t_guess = t_now_loop + t_wait_overhead + 0.5 
+            # Determine Direction based on Current Position relative to Pulling Center
+            # This self-corrects if we get out of sync.
             
+            # Current Pulling Center at t_now
+            pull_now = v_pull_each * t_now_loop
+            c_l_now = center_pos - pull_now
+            # c_r_now = center_pos + pull_now
+            
+            # Check L motor position relative to its center
+            if l_curr < c_l_now:
+                # Left motor is to the LEFT of its center (More Negative)
+                # It must be at the "Outward" limit.
+                # Next move should be INWARD (Return).
+                current_direction = -1 
+            else:
+                # Left motor is to the RIGHT of its center (Less Negative)
+                # It must be at the "Inward" limit (or center).
+                # Next move should be OUTWARD.
+                current_direction = 1
+                
+            # Override for first loop (t=0, pos=center)
+            if t_now_loop < 0.5:
+                current_direction = 1 # Force Outward First
+                
             for _ in range(3): # Converge in 2-3 steps
                 # 1. Lookup Params at Guess
                 curr_span = np.interp(t_guess, ref_times, ref_spans)
@@ -231,8 +252,8 @@ def run_test():
             
             recorded_points.append([t_now_real, m_span])
             
-            # Flip direction
-            current_direction *= -1
+            # Flip direction (REMOVED: Now handled by state detection at start of loop)
+            # current_direction *= -1
 
     finally:
         # Reset
