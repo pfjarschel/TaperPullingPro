@@ -28,6 +28,35 @@ def load_amplitude_profile(filename):
         print(f"Error loading profile: {e}")
         return None, None
 
+def calculate_move_duration(distance, v=5.0, a=40.0):
+    """
+    Calculates time to move 'distance' with trapezoidal velocity profile.
+    """
+    if distance == 0:
+        return 0.0
+        
+    # Time to reach max velocity: t_acc = v / a
+    t_acc = v / a
+    # Distance covered during accel: d_acc = 0.5 * a * t_acc^2
+    d_acc = 0.5 * a * (t_acc**2)
+    
+    # Total distance for full triangular profile (accel + decel)
+    d_tri = 2 * d_acc
+    
+    if distance >= d_tri:
+        # Trapezoidal Profile (Hit max velocity)
+        # Time at constant velocity
+        d_const = distance - d_tri
+        t_const = d_const / v
+        return 2*t_acc + t_const
+    else:
+        # Triangular Profile (Did not reach max velocity)
+        # distance = a * t_peak^2 (since d = 0.5*a*t^2 accel + 0.5*a*t^2 decel)
+        # t_peak = sqrt(distance / a)
+        # Total time = 2 * t_peak
+        t_peak = np.sqrt(distance / a)
+        return 2 * t_peak
+
 def run_test():
     print("=== Advanced Brushing Synchronization Test ===")
     
@@ -94,7 +123,8 @@ def run_test():
     right_puller.set_trigger_config(3, 0)
     
     # Data storage
-    recorded_points = [] # [time, measured_span]
+    recorded_endpoints = [] # [time, span, l_pos, r_pos] - Only at end of moves
+    recorded_trajectory = [] # [time, span, l_pos, r_pos] - High freq during moves
     
     current_direction = 1 # 1: Outward, -1: Inward
     
@@ -116,6 +146,10 @@ def run_test():
             
             t_now_loop = time.time() - start_time_global
             
+            # 1. READ POSITIONS FIRST (Needed for direction check)
+            l_curr = left_puller.get_position()
+            r_curr = right_puller.get_position()
+            
             # Initial Guess: Previous duration or default
             t_wait_overhead = 0.3 + 0.15 # 0.3 wait + 0.15 accel/latency
             
@@ -125,7 +159,7 @@ def run_test():
             # Current Pulling Center at t_now
             pull_now = v_pull_each * t_now_loop
             c_l_now = center_pos - pull_now
-            # c_r_now = center_pos + pull_now
+            c_r_now = center_pos - pull_now # BOTH centers move towards 0 (Outer Limit)
             
             # Check L motor position relative to its center
             if l_curr < c_l_now:
@@ -142,6 +176,9 @@ def run_test():
             # Override for first loop (t=0, pos=center)
             if t_now_loop < 0.5:
                 current_direction = 1 # Force Outward First
+            
+            # First pass guess
+            t_guess = t_now_loop + t_wait_overhead + 0.5 
                 
             for _ in range(3): # Converge in 2-3 steps
                 # 1. Lookup Params at Guess
@@ -150,12 +187,20 @@ def run_test():
                 pull = v_pull_each * t_guess
                 
                 # 2. Calculate Tentative Targets
+                # Pulling Center for both is (Start - Pull)
+                c_l = center_pos - pull
+                c_r = center_pos - pull
+                
                 if current_direction == 1:
-                    l_targ = center_pos - pull + amp
-                    r_targ = center_pos + pull - amp
+                    # Outward: Away from Gap Center
+                    # L (Left): moves Left (-) -> CenterL - Amp
+                    # R (Right): moves Right (+) -> CenterR + Amp (Phase Flipped)
+                    l_targ = c_l - amp
+                    r_targ = c_r + amp
                 else:
-                    l_targ = center_pos - pull - amp
-                    r_targ = center_pos + pull + amp
+                    # Inward: Towards Gap Center
+                    l_targ = c_l + amp
+                    r_targ = c_r - amp
                     
                 # 3. Calculate Move Distance (vs Current Physical Pos)
                 # Note: We don't want to poll get_position() inside the calculation loop (slow).
@@ -166,12 +211,12 @@ def run_test():
                 # 4. Calculate Duration
                 # Max dist / V
                 # We need actual current positions for accurate duration.
-                # Let's assume we read them at start of loop.
+                # We read them at start of loop (l_curr, r_curr).
                 pass 
 
-            # Read positions ONCE for calculation
-            l_curr = left_puller.get_position()
-            r_curr = right_puller.get_position()
+            # Read positions ONCE for calculation (ALREADY DONE AT START)
+            # l_curr = left_puller.get_position()
+            # r_curr = right_puller.get_position()
             
             # Iteration Loop
             t_pred = t_now_loop + 1.0 # Start with dummy
@@ -183,25 +228,28 @@ def run_test():
                 pull_offset = v_pull_each * t_pred
                 
                 # Targets
+                # Center for both: Start - Pull
+                c_l = center_pos - pull_offset
+                c_r = center_pos - pull_offset
+                
                 if current_direction == 1:
                     # Simulation proved this order is stable/correct (Outward First)
                     # L goes Left (More Negative) -> (Center - Pull) - Amp
-                    # R goes Right (More Positive) -> (Center + Pull) + Amp
-                    l_try = center_pos - pull_offset - amplitude
-                    r_try = center_pos + pull_offset + amplitude
+                    # R goes Right (More Positive) -> (Center + Pull) + Amp (OLD) -> (Center - Pull) + Amp (Phase Flipped)
+                    l_try = c_l - amplitude
+                    r_try = c_r + amplitude
                 else:
                     # Inward (Return)
-                    # L goes Right (Less Negative) -> (Center - Pull) + Amp
-                    # R goes Left (Less Positive) -> (Center + Pull) - Amp
-                    l_try = center_pos - pull_offset + amplitude
-                    r_try = center_pos + pull_offset - amplitude
+                    l_try = c_l + amplitude
+                    r_try = c_r - amplitude
                 
                 # Time
                 dist_l = abs(l_try - l_curr)
                 dist_r = abs(r_try - r_curr)
                 max_dist = max(dist_l, dist_r)
                 
-                duration = max_dist / 5.0 # V=5.0
+                # Use Kinematic Calculation
+                duration = calculate_move_duration(max_dist, v=5.0, a=40.0)
                 
                 # Refine Prediction
                 t_pred = t_now_loop + t_wait_overhead + duration
@@ -217,14 +265,70 @@ def run_test():
             if err_l != 0 or err_r != 0:
                 print(f"Warning: Set Target Failed (L:{err_l}, R:{err_r}) at t={current_sim_time:.2f}")
 
-            # Fire Trigger (Pulse High)
-            left_puller.set_trigger_out_states(1)
+            # Fire Trigger (Pulse Train - Burst of 3)
+            # This ensures that if the first is missed, the next catches it immediately.
+            for _ in range(3):
+                left_puller.set_trigger_out_states(1)
+                time.sleep(0.01) # 10ms pulse
+                left_puller.set_trigger_out_states(0)
+                time.sleep(0.01) # 10ms gap
             
-            # Robust Busy-Wait Sequence:
+            # Wait for driver to register (Latency)
             time.sleep(0.3)
             
+            # TRIGGER VERIFICATION & RETRY
+            # Check if motors actually started. If not, re-fire.
+            retry_count = 0
+            while retry_count < 3:
+                l_moving = left_puller.motor_moving()
+                r_moving = right_puller.motor_moving()
+                
+                if l_moving and r_moving:
+                    break # Both moving, good.
+                
+                # Identify who missed it
+                missing = []
+                if not l_moving: missing.append("LEFT")
+                if not r_moving: missing.append("RIGHT")
+                
+                print(f"WARNING: Missed Trigger! {missing}. Retrying ({retry_count+1}/3)...")
+                
+                # Reset and Re-fire
+                left_puller.set_trigger_out_states(0)
+                time.sleep(0.05)
+                left_puller.set_trigger_out_states(1)
+                
+                # Wait again for driver to register
+                time.sleep(0.3)
+                retry_count += 1
+            
             while left_puller.motor_moving() or right_puller.motor_moving():
+                # High-Freq Logging
+                t_log = time.time() - start_time_global
+                l_log = left_puller.get_position()
+                r_log = right_puller.get_position()
+                
+                # Calculate metric for consistency
+                m_pull_log = v_pull_each * t_log
+                span_log = abs(l_log - (center_pos - m_pull_log)) + abs(r_log - (center_pos + m_pull_log))
+                
+                # Store: [Time, Span, LeftPos, RightPos]
+                recorded_trajectory.append([t_log, span_log, l_log, r_log])
                 time.sleep(0.05) 
+            
+            # Check for Premature Stop / Errors
+            l_final = left_puller.get_position()
+            r_final = right_puller.get_position()
+            
+            # Tolerances
+            tol = 0.05
+            if abs(l_final - left_target) > tol:
+                stat_l = left_puller.get_status_bits()
+                print(f"!!! LEFT MOTOR STOPPED EARLY: Pos={l_final:.3f}, Tgt={left_target:.3f}, Diff={l_final-left_target:.3f}, Status=0x{stat_l:08X}")
+                
+            if abs(r_final - right_target) > tol:
+                stat_r = right_puller.get_status_bits()
+                print(f"!!! RIGHT MOTOR STOPPED EARLY: Pos={r_final:.3f}, Tgt={right_target:.3f}, Diff={r_final-right_target:.3f}, Status=0x{stat_r:08X}")
             
             left_puller.set_trigger_out_states(0)
             time.sleep(0.05)
@@ -242,15 +346,15 @@ def run_test():
             
             # Calculate Measured Span matches t_now_real
             m_pull = v_pull_each * t_now_real
+            c_l_m = center_pos - m_pull
+            c_r_m = center_pos - m_pull
             
-            # The Span is |Pos - (Center +/- Pull)|
-            # Regardless of Brushing Phase, we measure deviation from the "Pulling Center".
-            # Left Center: Center - Pull
-            # Right Center: Center + Pull
+            # Span = Sum of deviations from respective pulling centers
+            m_span = abs(l_pos - c_l_m) + abs(r_pos - c_r_m)
             
-            m_span = abs(l_pos - (center_pos - m_pull)) + abs(r_pos - (center_pos + m_pull))
-            
-            recorded_points.append([t_now_real, m_span])
+            recorded_endpoints.append([t_now_real, m_span, l_pos, r_pos])
+            # Also add to trajectory for continuity
+            recorded_trajectory.append([t_now_real, m_span, l_pos, r_pos])
             
             # Flip direction (REMOVED: Now handled by state detection at start of loop)
             # current_direction *= -1
@@ -264,26 +368,67 @@ def run_test():
         right_puller.disconnect()
     
     print("Generating plot...")
-    path_data = np.array(recorded_points)
+    print("Generating plot...")
     
-    if len(path_data) > 0:
-        times_rec = path_data[:, 0]
-        spans_rec = path_data[:, 1]
+    # 1. Endpoint Data (For Span Plot)
+    ep_data = np.array(recorded_endpoints)
+    if len(ep_data) > 0:
+        t_ep = ep_data[:, 0]
+        s_ep = ep_data[:, 1]
+        dist_ep = t_ep * 0.25
+    else:
+        dist_ep = []
+        s_ep = []
         
-        plt.figure(figsize=(12, 6))
+    # 2. Trajectory Data (For Motor Plot)
+    tj_data = np.array(recorded_trajectory)
+    if len(tj_data) > 0:
+        t_tj = tj_data[:, 0]
+        l_pos_tj = tj_data[:, 2]
+        r_pos_tj = tj_data[:, 3]
+        dist_tj = t_tj * 0.25
         
-        # Plot Reference Profile
-        plt.plot(ref_times, ref_spans, 'k-', label='Reference Profile', alpha=0.5, linewidth=1)
+        # Calculate Reference Centers for Trajectory
+        center_l_ref = center_pos - (t_tj * 0.125)
+        center_r_ref = center_pos - (t_tj * 0.125) # Right also decreases
+    else:
+        dist_tj = []
+        l_pos_tj = []
+        r_pos_tj = []
+        center_l_ref = []
+        center_r_ref = []
         
-        # Plot Measured Data
-        plt.plot(times_rec, spans_rec, 'r.', label='Measured Span', markersize=4)
+    if len(ep_data) > 0:
+        ref_dist = ref_times * 0.25
         
-        plt.title("Advanced Brushing Test: Dynamic Amplitude")
-        plt.xlabel("Time (s)")
+        plt.figure(figsize=(10, 10))
+        
+        # Subplot 1: Span vs Pulled Distance (Endpoints Only)
+        plt.subplot(2, 1, 1)
+        plt.plot(ref_dist, ref_spans, 'k-', label='Reference', alpha=0.5, linewidth=1)
+        plt.plot(dist_ep, s_ep, 'r.', label='Measured Span (Endpoints)', markersize=4)
+        plt.title("Advanced Brushing Test: Span vs Pulled Distance")
+        plt.xlabel("Total Pulled Distance (mm)")
         plt.ylabel("Total Span (mm)")
         plt.legend()
         plt.grid(True)
         
+        # Subplot 2: Motor Positions vs Pulled Distance (Full Trajectory)
+        plt.subplot(2, 1, 2)
+        plt.plot(dist_tj, l_pos_tj, 'b-', label='Left Motor', linewidth=1)
+        plt.plot(dist_tj, r_pos_tj, 'g-', label='Right Motor', linewidth=1)
+        
+        # Add Reference Pulling Centers
+        plt.plot(dist_tj, center_l_ref, 'b--', alpha=0.3, label='Left Center')
+        plt.plot(dist_tj, center_r_ref, 'g--', alpha=0.3, label='Right Center')
+        
+        plt.title("Individual Motor Trajectories (Full History)")
+        plt.xlabel("Total Pulled Distance (mm)")
+        plt.ylabel("Position (mm)")
+        plt.legend()
+        plt.grid(True)
+        
+        plt.tight_layout()
         plot_file = "advanced_brushing_test.png"
         plt.savefig(plot_file)
         print(f"Plot saved to {plot_file}")
