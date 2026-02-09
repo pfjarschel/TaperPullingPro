@@ -110,47 +110,79 @@ def run_test():
     try:
         # Loop until we exceed the profile time
         while current_sim_time < ref_times[-1]:
-            # Adaptive Target Prediction:
-            # 1. Get current time `t_now`.
-            # 2. Estimate `current_span` (amplitude*2) at `t_now` to gauge move time.
+            # ITERATIVE TARGET PREDICTION
+            # We need to find t_arrival such that:
+            # t_arrival = t_now + t_wait + move_time(Target(t_arrival))
+            
             t_now_loop = time.time() - start_time_global
-            approx_span = np.interp(t_now_loop, ref_times, ref_spans)
             
-            # Move Duration = Distance / Velocity
-            # Distance is approx `approx_span` (half-cycle).
-            # Velocity = 5.0 mm/s.
-            move_duration = approx_span / 5.0 
+            # Initial Guess: Previous duration or default
+            t_wait_overhead = 0.3 + 0.15 # 0.3 wait + 0.15 accel/latency
             
-            # Predict arrival time: t_now + 0.3s (wait) + move_duration + overhead (~0.1s?)
-            # Let's add 0.2s overhead for safety/accel ramp.
-            t_predict = t_now_loop + 0.3 + move_duration + 0.2
+            # First pass
+            t_guess = t_now_loop + t_wait_overhead + 0.5 
             
-            # Interpolate required span for the predicted time
-            current_span = np.interp(t_predict, ref_times, ref_spans)
-            amplitude = current_span / 2.0
-            
-            # Calculate Pulling Drift for the TARGET time
-            # We must target where the center WILL BE.
-            pull_offset = v_pull_each * t_predict
-            
-            # Calculate targets: Center + Drift +/- Amplitude
-            # Standard Taper Pulling: Motors move APART.
-            # Assuming L:0..50..100 and R:0..50..100 is not valid, usually independent coordinates.
-            # If Left Puller (0-50) is at 50, Pulling means going to 0 (Negative).
-            # If Right Puller (0-50) is at 50, Pulling means going to 0? Or is it 50..100?
-            # Let's Stick to the "Expanding" logic relative to a virtual center if that's what we tested.
-            # But the previous test had L=C+P (Increasing), R=C-P (Decreasing).
-            # If C=50, L->60, R->40. They move TOWARDS each other (Collision risk).
-            # I will SWAP THIS to be Safe/Standard: L moves -, R moves +.
-            # L = C - P. R = C + P.
-            
-            if current_direction == 1:
-                left_target = center_pos - pull_offset + amplitude
-                right_target = center_pos + pull_offset - amplitude
-            else:
-                left_target = center_pos - pull_offset - amplitude
-                right_target = center_pos + pull_offset + amplitude
+            for _ in range(3): # Converge in 2-3 steps
+                # 1. Lookup Params at Guess
+                curr_span = np.interp(t_guess, ref_times, ref_spans)
+                amp = curr_span / 2.0
+                pull = v_pull_each * t_guess
                 
+                # 2. Calculate Tentative Targets
+                if current_direction == 1:
+                    l_targ = center_pos - pull + amp
+                    r_targ = center_pos + pull - amp
+                else:
+                    l_targ = center_pos - pull - amp
+                    r_targ = center_pos + pull + amp
+                    
+                # 3. Calculate Move Distance (vs Current Physical Pos)
+                # Note: We don't want to poll get_position() inside the calculation loop (slow).
+                # We assume current pos is roughly where we left it (Target of previous move).
+                # OR we read it once.
+                # Let's read it once outside.
+                
+                # 4. Calculate Duration
+                # Max dist / V
+                # We need actual current positions for accurate duration.
+                # Let's assume we read them at start of loop.
+                pass 
+
+            # Read positions ONCE for calculation
+            l_curr = left_puller.get_position()
+            r_curr = right_puller.get_position()
+            
+            # Iteration Loop
+            t_pred = t_now_loop + 1.0 # Start with dummy
+            
+            for _ in range(3):
+                # Lookup
+                current_span = np.interp(t_pred, ref_times, ref_spans)
+                amplitude = current_span / 2.0
+                pull_offset = v_pull_each * t_pred
+                
+                # Targets
+                if current_direction == 1:
+                    l_try = center_pos - pull_offset + amplitude
+                    r_try = center_pos + pull_offset - amplitude
+                else:
+                    l_try = center_pos - pull_offset - amplitude
+                    r_try = center_pos + pull_offset + amplitude
+                
+                # Time
+                dist_l = abs(l_try - l_curr)
+                dist_r = abs(r_try - r_curr)
+                max_dist = max(dist_l, dist_r)
+                
+                duration = max_dist / 5.0 # V=5.0
+                
+                # Refine Prediction
+                t_pred = t_now_loop + t_wait_overhead + duration
+            
+            # Final Targets
+            left_target = l_try
+            right_target = r_try
+            
             # Pre-load Targets with error checking
             err_l = left_puller.set_move_absolute_position(left_target)
             err_r = right_puller.set_move_absolute_position(right_target)
@@ -162,29 +194,26 @@ def run_test():
             left_puller.set_trigger_out_states(1)
             
             # Robust Busy-Wait Sequence:
-            # 1. Wait long enough for the driver/hardware to register "Moving"
-            #    We use 0.3s as specified by user/previous experience.
             time.sleep(0.3)
             
-            # 2. Wait for it to FINISH (IDLE state)
-            #    If it never became busy, this returns immediately.
             while left_puller.motor_moving() or right_puller.motor_moving():
                 time.sleep(0.05) 
             
-            # 3. Reset Trigger Pulse and add a tiny delay to ensure the next 
-            #    transition is seen as a new edge.
             left_puller.set_trigger_out_states(0)
             time.sleep(0.05)
             
-            # Record Data at the end of the stroke
+            # End of Move Analysis
             t_now_real = time.time() - start_time_global
             current_sim_time = t_now_real 
+            
+            # Debug Timing
+            # time_err = t_now_real - t_pred
+            # print(f"Time Err: {time_err:.3f}s") # User can check stdout if needed
             
             l_pos = left_puller.get_position()
             r_pos = right_puller.get_position()
             
-            # Calculate Measured Span: $|L - (Center - Pull)| + |R - (Center + Pull)|$
-            # Matching the corrected direction above (L-, R+).
+            # Calculate Measured Span matches t_now_real
             m_pull = v_pull_each * t_now_real
             m_span = abs(l_pos - (center_pos - m_pull)) + abs(r_pos - (center_pos + m_pull))
             
