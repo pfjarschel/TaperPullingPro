@@ -110,11 +110,20 @@ def run_test():
     try:
         # Loop until we exceed the profile time
         while current_sim_time < ref_times[-1]:
-            # At what time will the motor REACH the next target?
-            # Roughly: t_now + 0.3s (wait) + move_time (~0.5s) + overhead
-            # The oscillation was ~0.5mm, implying ~1.0s lag.
-            # Let's target t_now + 0.9s
-            t_predict = (time.time() - start_time_global) + 0.9
+            # Adaptive Target Prediction:
+            # 1. Get current time `t_now`.
+            # 2. Estimate `current_span` (amplitude*2) at `t_now` to gauge move time.
+            t_now_loop = time.time() - start_time_global
+            approx_span = np.interp(t_now_loop, ref_times, ref_spans)
+            
+            # Move Duration = Distance / Velocity
+            # Distance is approx `approx_span` (half-cycle).
+            # Velocity = 5.0 mm/s.
+            move_duration = approx_span / 5.0 
+            
+            # Predict arrival time: t_now + 0.3s (wait) + move_duration + overhead (~0.1s?)
+            # Let's add 0.2s overhead for safety/accel ramp.
+            t_predict = t_now_loop + 0.3 + move_duration + 0.2
             
             # Interpolate required span for the predicted time
             current_span = np.interp(t_predict, ref_times, ref_spans)
