@@ -163,11 +163,17 @@ def run_test():
                 
                 # Targets
                 if current_direction == 1:
-                    l_try = center_pos - pull_offset + amplitude
-                    r_try = center_pos + pull_offset - amplitude
-                else:
+                    # Simulation proved this order is stable/correct (Outward First)
+                    # L goes Left (More Negative) -> (Center - Pull) - Amp
+                    # R goes Right (More Positive) -> (Center + Pull) + Amp
                     l_try = center_pos - pull_offset - amplitude
                     r_try = center_pos + pull_offset + amplitude
+                else:
+                    # Inward (Return)
+                    # L goes Right (Less Negative) -> (Center - Pull) + Amp
+                    # R goes Left (Less Positive) -> (Center + Pull) - Amp
+                    l_try = center_pos - pull_offset + amplitude
+                    r_try = center_pos + pull_offset - amplitude
                 
                 # Time
                 dist_l = abs(l_try - l_curr)
@@ -207,14 +213,20 @@ def run_test():
             current_sim_time = t_now_real 
             
             # Debug Timing
-            time_err = t_now_real - t_pred
-            print(f"Time Err: {time_err:.3f}s") # User can check stdout if needed
+            # time_err = t_now_real - t_pred
+            # print(f"Time Err: {time_err:.3f}s") # User can check stdout if needed
             
             l_pos = left_puller.get_position()
             r_pos = right_puller.get_position()
             
             # Calculate Measured Span matches t_now_real
             m_pull = v_pull_each * t_now_real
+            
+            # The Span is |Pos - (Center +/- Pull)|
+            # Regardless of Brushing Phase, we measure deviation from the "Pulling Center".
+            # Left Center: Center - Pull
+            # Right Center: Center + Pull
+            
             m_span = abs(l_pos - (center_pos - m_pull)) + abs(r_pos - (center_pos + m_pull))
             
             recorded_points.append([t_now_real, m_span])
