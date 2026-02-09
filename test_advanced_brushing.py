@@ -98,24 +98,37 @@ def run_test():
     
     current_direction = 1 # 1: Outward, -1: Inward
     
+    # User-specified Pulling Velocity: 0.25 mm/s total -> 0.125 mm/s each motor
+    v_pull_each = 0.125 
+    
     start_time_global = time.time()
     current_sim_time = 0.0
     
+    print("\nStarting Brushing Loop. Pulling Velocity: 0.25 mm/s total.")
+    print("Each half-cycle includes a 0.3s pre-wait and a robust busy-wait.")
+
     try:
         # Loop until we exceed the profile time
         while current_sim_time < ref_times[-1]:
+            # At what time will the motor REACH the next target?
+            # Roughly: t_now + 0.3s (wait) + move_time (~0.8s)
+            # Let's use t_now + 0.7s as an estimated "center-of-move" time for span lookup
+            t_predict = (time.time() - start_time_global) + 0.7
             
-            # Interpolate current required span
-            current_span = np.interp(current_sim_time, ref_times, ref_spans)
+            # Interpolate required span for the predicted time
+            current_span = np.interp(t_predict, ref_times, ref_spans)
             amplitude = current_span / 2.0
             
-            # Calculate targets
+            # Calculate Pulling Drift for the current time
+            pull_offset = v_pull_each * (time.time() - start_time_global)
+            
+            # Calculate targets: Center + Drift +/- Amplitude
             if current_direction == 1:
-                left_target = center_pos + amplitude
-                right_target = center_pos - amplitude
+                left_target = center_pos + pull_offset + amplitude
+                right_target = center_pos - pull_offset - amplitude
             else:
-                left_target = center_pos - amplitude
-                right_target = center_pos + amplitude
+                left_target = center_pos + pull_offset - amplitude
+                right_target = center_pos - pull_offset + amplitude
                 
             # Pre-load Targets with error checking
             err_l = left_puller.set_move_absolute_position(left_target)
@@ -124,48 +137,40 @@ def run_test():
             if err_l != 0 or err_r != 0:
                 print(f"Warning: Set Target Failed (L:{err_l}, R:{err_r}) at t={current_sim_time:.2f}")
 
-            # Fire Trigger
+            # Fire Trigger (Pulse High)
             left_puller.set_trigger_out_states(1)
             
-            # Robust Wait: 
-            # 1. Wait enough time for the command to be registered and motion to likely start.
-            #    Latencies can be 100-200ms. Let's use 0.3s to be safe.
+            # Robust Busy-Wait Sequence:
+            # 1. Wait long enough for the driver/hardware to register "Moving"
+            #    We use 0.3s as specified by user/previous experience.
             time.sleep(0.3)
             
-            # 2. Wait for move to complete
-            #    We check status bit.
-            busy_count = 0
+            # 2. Wait for it to FINISH (IDLE state)
+            #    If it never became busy, this returns immediately.
             while left_puller.motor_moving() or right_puller.motor_moving():
-                busy_count += 1
                 time.sleep(0.05) 
             
-            # Debug: Check if we ever waited?
-            # if busy_count == 0:
-            #    print("Warning: Motors were not busy after 0.3s wait.")
-            
-            # End Pulse
+            # 3. Reset Trigger Pulse and add a tiny delay to ensure the next 
+            #    transition is seen as a new edge.
             left_puller.set_trigger_out_states(0)
+            time.sleep(0.05)
             
-            # Record Data ONCE at the end of the stroke (as requested)
+            # Record Data at the end of the stroke
             t_now_real = time.time() - start_time_global
-            current_sim_time = t_now_real # Update simulation time based on real elapsed time
+            current_sim_time = t_now_real 
             
             l_pos = left_puller.get_position()
             r_pos = right_puller.get_position()
             
-            # Calculate "Real Amplitude" (Sum of absolute diffs from center)
-            measured_span = abs(l_pos - center_pos) + abs(r_pos - center_pos)
+            # Calculate Measured Span: $|L - (Center + Pull)| + |R - (Center - Pull)|$
+            # This should match the reference "Brushing Span" profile.
+            m_pull = v_pull_each * t_now_real
+            m_span = abs(l_pos - (center_pos + m_pull)) + abs(r_pos - (center_pos - m_pull))
             
-            recorded_points.append([t_now_real, measured_span])
-            
-            # print(f"T: {t_now_real:.2f}s | Target Span: {current_span:.3f} | Measured: {measured_span:.3f}")
+            recorded_points.append([t_now_real, m_span])
             
             # Flip direction
             current_direction *= -1
-            
-            # Small safety sleep? Maybe unneeded if we want max speed. 
-            # User said "Minimize the time the motors remain stopped".
-            # So no extra sleep.
 
     finally:
         # Reset
