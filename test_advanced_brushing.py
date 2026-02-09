@@ -207,8 +207,8 @@ def run_test():
             current_sim_time = t_now_real 
             
             # Debug Timing
-            # time_err = t_now_real - t_pred
-            # print(f"Time Err: {time_err:.3f}s") # User can check stdout if needed
+            time_err = t_now_real - t_pred
+            print(f"Time Err: {time_err:.3f}s") # User can check stdout if needed
             
             l_pos = left_puller.get_position()
             r_pos = right_puller.get_position()
