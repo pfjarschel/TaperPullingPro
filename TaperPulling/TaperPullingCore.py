@@ -36,7 +36,7 @@ class TaperPullingCore:
     
     # Flow control
     update_loop = None
-    poll_interval = 10  # ms.
+    poll_interval = 50  # ms.
     busy = False
     rel_pull = False            # Flame brusher doesn't move, brushing is performed on top of pulling movement.
     running_process = False     # If pulling process started
@@ -192,12 +192,18 @@ class TaperPullingCore:
         self.brusher_zeroed = False
         self.pullers_zeroed = False
         self.flameIO_moving = False
+        self.puller_left_pos = None
+        self.puller_right_pos = None
         self.last_pos_poll_time = 0.0
         self.l_golden_pos = 0.0
         self.r_golden_pos = 0.0
         self.pull_started_init = False
         self.current_profile_step = 0
         self.last_total_pulled = 0.0
+        self.l_last_cmd_v = 0.0
+        self.r_last_cmd_v = 0.0
+        self.l_last_cmd_dir = 0
+        self.r_last_cmd_dir = 0
     
     def init_brusher_as_default(self, async_init=False, simulate=False):
         if async_init:
@@ -268,78 +274,91 @@ class TaperPullingCore:
         if not self.busy:
             self.busy = True
 
-            # Get current time
-            self.time_bef = self.time_now
-            self.time_now = time.time()
-            
-            if self.print_lps:
-                if self.loop_i == 0:
-                    self.loop_time = self.time_now
-                elif self.loop_i >= self.max_i:
-                    print("Loops per second:", int(self.max_i/(time.time() - self.loop_time)))
-                    self.loop_i = 0
-                    self.loop_time = self.time_now
-                self.loop_i += 1
-            
-            # Get current positions (Throttled to 10Hz for stability)
-            if (self.time_now - self.last_pos_poll_time) >= 0.100:
-                self.brusher_pos = self.motors.brusher.get_position()
-                self.flame_io_pos = self.motors.flame_io.get_position()
-                self.puller_left_pos = self.motors.left_puller.get_position()
-                self.puller_right_pos = self.motors.right_puller.get_position()
-                self.last_pos_poll_time = self.time_now
-            
-            # Assess if flame tip is in danger zone
-            if self.check_all_motors_ok():
-                fio_dz = self.motors.flame_io.danger_zone()
-                br_dz = self.motors.brusher.danger_zone()
-                lp_dz = self.motors.left_puller.danger_zone()
-                rp_dz = self.motors.right_puller.danger_zone()
+            try:
+                # Get current time
+                self.time_bef = self.time_now
+                self.time_now = time.time()
                 
-                is_in_danger = all([fio_dz, br_dz, lp_dz]) or all([fio_dz, br_dz, rp_dz])
-                if is_in_danger:
-                    if not self.emergency_stopped:
-                        self.emergency_stopped = True
-                        print("Flame tip was dangerously close to another motor! For safety, all movement ceased and all processes stopped.")
-                        self.stop_pulling()
-                elif self.emergency_stopped:
-                    self.emergency_stopped = False
-        
-            if self.running_process:
-                # Process stages
-                # Convert all stage switches to a 7-bit number
-                stage_array = [self.flame_approaching, self.flame_holding, self.pulling, self.stopping,
-                               self.standby, self.looping, self.cleaving]
-                stage = sum(map(lambda x: x[1] << x[0], enumerate(stage_array)))
+                if self.print_lps:
+                    if self.loop_i == 0:
+                        self.loop_time = self.time_now
+                    elif self.loop_i >= self.max_i:
+                        print("Loops per second:", int(self.max_i/(time.time() - self.loop_time)))
+                        self.loop_i = 0
+                        self.loop_time = self.time_now
+                    self.loop_i += 1
                 
-                if stage == 0:
-                    # Stage 0, Sending brusher to start position
-                    self.going_to_start()
-                elif stage < 2:
-                    # Stage 1: Flame approaching
-                    self.check_brushing(self.brushing_control_mode)
-                    self.approach_flame()
-                elif stage < 4:
-                    # Stage 2: Flame holding
-                    self.check_brushing(self.brushing_control_mode)
-                    self.hold_flame()
-                elif stage < 8:
-                    # Stage 3: Pulling
-                    self.check_pulling()
-                    self.check_brushing(self.brushing_control_mode)
-                    self.check_io_mb()
-                elif stage < 16:
-                    # Stage 4: Stopping
-                    self.check_stopping()
-                elif stage < 32:
-                    # Stage 5: Stand-by, do nothing (for now?)
-                    pass
-                elif stage < 64:
-                    # Opt. Stage 6: Looping
-                    self.perform_loop()
-                elif stage < 128:
-                    # Opt. Stage 6: Cleaving
-                    self.perform_cleave()
+                # Get current positions (Throttled to 10Hz for stability)
+                if (self.time_now - self.last_pos_poll_time) >= 0.100:
+                    self.brusher_pos = self.motors.brusher.get_position()
+                    self.flame_io_pos = self.motors.flame_io.get_position()
+                    self.puller_left_pos = self.motors.left_puller.get_position()
+                    self.puller_right_pos = self.motors.right_puller.get_position()
+                    self.last_pos_poll_time = self.time_now
+                
+                # Guard: If still initializing (None), skip logic
+                if self.puller_left_pos is None or self.puller_right_pos is None:
+                    self.busy = False
+                    return
+                
+                # Assess if flame tip is in danger zone
+                if self.check_all_motors_ok():
+                    fio_dz = self.motors.flame_io.danger_zone()
+                    br_dz = self.motors.brusher.danger_zone()
+                    lp_dz = self.motors.left_puller.danger_zone()
+                    rp_dz = self.motors.right_puller.danger_zone()
+                    
+                    is_in_danger = all([fio_dz, br_dz, lp_dz]) or all([fio_dz, br_dz, rp_dz])
+                    if is_in_danger:
+                        if not self.emergency_stopped:
+                            self.emergency_stopped = True
+                            print("Flame tip was dangerously close to another motor! For safety, all movement ceased and all processes stopped.")
+                            self.stop_pulling()
+                    elif self.emergency_stopped:
+                        self.emergency_stopped = False
+            
+                if self.running_process:
+                    # Process stages
+                    # Convert all stage switches to a 7-bit number
+                    stage_array = [self.flame_approaching, self.flame_holding, self.pulling, self.stopping,
+                                   self.standby, self.looping, self.cleaving]
+                    stage = sum(map(lambda x: x[1] << x[0], enumerate(stage_array)))
+                    
+                    if stage == 0:
+                        # Stage 0, Sending brusher to start position
+                        self.going_to_start()
+                    elif stage < 2:
+                        # Stage 1: Flame approaching
+                        self.check_brushing(self.brushing_control_mode)
+                        self.approach_flame()
+                    elif stage < 4:
+                        # Stage 2: Flame holding
+                        self.check_brushing(self.brushing_control_mode)
+                        self.hold_flame()
+                    elif stage < 8:
+                        # Stage 3: Pulling
+                        self.check_pulling()
+                        self.check_brushing(self.brushing_control_mode)
+                        self.check_io_mb()
+                    elif stage < 16:
+                        # Stage 4: Stopping
+                        self.check_stopping()
+                    elif stage < 32:
+                        # Stage 5: Stand-by, do nothing (for now?)
+                        pass
+                    elif stage < 64:
+                        # Opt. Stage 6: Looping
+                        self.perform_loop()
+                    elif stage < 128:
+                        # Opt. Stage 6: Cleaving
+                        self.perform_cleave()
+            except Exception as e:
+                print("CRITICAL ERROR in update_function:", e)
+                import traceback
+                traceback.print_exc()
+                self.stop_pulling()
+                self.busy = False
+            
             self.busy = False
                 
     def going_to_start(self):
@@ -360,6 +379,10 @@ class TaperPullingCore:
             print("Started brushing")
     
     def get_pullers_xinit(self):
+        # Force hardware poll to ensure we don't carry over None from reset_pull_stats
+        self.puller_left_pos = self.motors.left_puller.get_position()
+        self.puller_right_pos = self.motors.right_puller.get_position()
+
         self.left_puller_xinit = self.puller_left_pos
         self.right_puller_xinit = self.puller_right_pos
         self.pull_vel = self.motors.left_puller.pull_vel
@@ -390,8 +413,9 @@ class TaperPullingCore:
                                    (self.puller_right_pos <= self.right_puller_x0 + self.pos_check_precision)
                 if brusher_centered:
                     self.brusher_dir = self.brusher_dir0
-                    self.motors.left_puller.move(self.motors.left_puller.MoveDirection(-self.brusher_dir), stop_mode=1)
-                    self.motors.right_puller.move(self.motors.right_puller.MoveDirection(self.brusher_dir), stop_mode=1)
+                    # CONFLICT FIX: Do not manually move motors here. 
+                    # check_brushing() is running in parallel and handles the maintenance/centering.
+                    
                     self.time_brush_check_0 = time.time()
                     self.time_brush_check_1 = time.time()
                     self.pulling = True
@@ -453,6 +477,10 @@ class TaperPullingCore:
             self.time_brush_check_1 = time.time()
             dt = self.time_brush_check_1 - self.time_brush_check_0
             
+            # Safety: Clamp dt to prevent massive jumps on startup or after pauses
+            if dt > 0.1:
+                dt = 0.0
+            
             # 2. Update Virtual (Golden) Brush Position
             self.fake_brusher_pos += fb_dir * dt * self.motors.brusher.vel
             
@@ -502,16 +530,34 @@ class TaperPullingCore:
             v_l_cmd = np.clip(v_l_cmd, -12, 12)
             v_r_cmd = np.clip(v_r_cmd, -12, 12)
             
-            # 5. Active Velocity Update (Force drive to apply new speed immediately)
-            self.motors.left_puller.set_velocity(max(0.001, abs(v_l_cmd)))
-            self.motors.right_puller.set_velocity(max(0.001, abs(v_r_cmd)))
+            # 5. Active Velocity Update (Throttled to prevent USB flood)
+            # Threshold: 0.005 mm/s
+            
+            l_v_abs = max(0.001, abs(v_l_cmd))
+            r_v_abs = max(0.001, abs(v_r_cmd))
             
             l_dir = self.motors.left_puller.MoveDirection.POSITIVE if v_l_cmd > 0 else self.motors.left_puller.MoveDirection.NEGATIVE
             r_dir = self.motors.right_puller.MoveDirection.POSITIVE if v_r_cmd > 0 else self.motors.right_puller.MoveDirection.NEGATIVE
             
-            # stop=False is critical to avoid decelerating to zero between updates
-            self.motors.left_puller.move(l_dir, stop=False)
-            self.motors.right_puller.move(r_dir, stop=False)
+            # Check Left Motor
+            l_v_diff = abs(l_v_abs - self.l_last_cmd_v)
+            l_dir_change = (l_dir != self.l_last_cmd_dir)
+            
+            if l_v_diff > 0.005 or l_dir_change:
+                self.motors.left_puller.set_velocity(l_v_abs)
+                self.motors.left_puller.move(l_dir, stop=False)
+                self.l_last_cmd_v = l_v_abs
+                self.l_last_cmd_dir = l_dir
+                
+            # Check Right Motor
+            r_v_diff = abs(r_v_abs - self.r_last_cmd_v)
+            r_dir_change = (r_dir != self.r_last_cmd_dir)
+            
+            if r_v_diff > 0.005 or r_dir_change:
+                self.motors.right_puller.set_velocity(r_v_abs)
+                self.motors.right_puller.move(r_dir, stop=False)
+                self.r_last_cmd_v = r_v_abs
+                self.r_last_cmd_dir = r_dir
         if not self.rel_pull and mode == 0:
             if hz - self.flame_size >= self.motors.brusher.min_span:                
                 dist_compensation = 1.66*self.motors.brusher.vel*self.poll_interval/1000.0
@@ -723,12 +769,19 @@ class TaperPullingCore:
             # Set hotzone function
             try:
                 self.hotzone_function = np.array(hotzone_function)
+                
+                # Verify shape and transpose if necessary (N, 2) -> (2, N)
+                if self.hotzone_function.shape[0] > 2 and self.hotzone_function.shape[1] == 2:
+                    self.hotzone_function = self.hotzone_function.T
+                    
             except:
                 raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
-            if self.hotzone_function.shape[0] >= 2:
+            
+            # Now expect shape[0] == 2 (2 rows: Distance, Span)
+            if self.hotzone_function.shape[0] == 2:
                 self.running_process = True
             else:
-                raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
+                raise Exception(f"Error: hotzone_function shape {self.hotzone_function.shape} invalid. Must be (2, N) or (N, 2).")
             
             # Set initial time
             self.time_init = time.time()
