@@ -764,12 +764,13 @@ class MainWindow(FormUI, WindowUI):
         self.waistLengthIndSpin.setValue(0.0)
         self.transLengthIndSpin.setValue(0.0)
         self.hotzoneIndSpin.setValue(0.0)
-        self.rhz_array = []
-        self.rhz_x_array = []
+        self.rhz_array = [self.hz_function[1][0]]
+        self.rhz_x_array = [0.0]
         self.transm_array = np.zeros((60000, 2))
         self.transm_i = 0
-        self.update_graph([[0.0], [self.hz_function[1][0]]], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
+        self.update_graph([self.rhz_x_array, self.rhz_array], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
         self.hz_sweep_n = 0
+        self._pull_data_started = False
 
     # Timer functions
     def mainLoop(self):
@@ -942,6 +943,11 @@ class MainWindow(FormUI, WindowUI):
             tp = self.core.total_pulled
             
             # Update real hotzone
+            # When pulling just starts, skip all edges accumulated during flame_hold
+            if self.core.pulling and not self._pull_data_started:
+                self._pull_data_started = True
+                self.hz_sweep_n = len(self.core.rhz_edges)
+            
             curr_hz_sweep_n = len(self.core.rhz_edges)
             if len(self.core.rhz_edges) > self.hz_sweep_n:
                 if curr_hz_sweep_n > 1:
@@ -960,13 +966,8 @@ class MainWindow(FormUI, WindowUI):
                         curr_d = 2000*self.realish_profile[1][-1]
                         self.waistDiamIndSpin.setValue(curr_d)
                 else:
-                    rhz = self.hz_function[1][0]
-                    self.hotzoneIndSpin.setValue(rhz)
-                    if self.core.pulling:
-                        self.rhz_array.append(rhz)
-                        self.rhz_x_array.append(0.0)
-                        rhz_data = np.array([self.rhz_x_array, self.rhz_array])
-                        self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
+                    # Wait for at least 2 edges to calculate width
+                    pass
                 self.hz_sweep_n += 1
                 
             # Update est. values
@@ -1215,6 +1216,18 @@ class MainWindow(FormUI, WindowUI):
         self.core.motors.right_puller.set_velocity(self.pullerVelSpin.value())
         self.timeleftBar.setValue(0)
         self.timeleftLabel.setText(f"Time left: 0.0 s")
+        
+        # Ensure the last data point covers the final total_pulled distance
+        final_tp = self.totalPulledIndSpin.value()  # core value was set to 0 after process stopped.
+        if len(self.rhz_x_array) > 0 and self.rhz_x_array[-1] < final_tp:
+            # Interpolate target hotzone at final distance
+            final_hz = np.interp(final_tp, self.hz_function[0], self.hz_function[1])
+            self.rhz_array.append(final_hz)
+            self.rhz_x_array.append(final_tp)
+            rhz_data = np.array([self.rhz_x_array, self.rhz_array])
+            self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
+            self.realish_profile = self.shape.profile_from_hz(np.array(self.rhz_x_array), np.array(self.rhz_array))
+            self.update_graph(self.realish_profile, self.graph_profmini_line_realish, self.graph_profmini_ax, self.graph_profmini)
         
         # Save data just to be safe
         if save_data:
