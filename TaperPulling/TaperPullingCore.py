@@ -151,6 +151,7 @@ class TaperPullingCore:
         # Velocity Tracking State
         self.last_pos_poll_time = 0.0
         self.tracking_kp = 1.5
+        self.tracking_ki = 0.3
         
         self.start_update()
         
@@ -204,6 +205,8 @@ class TaperPullingCore:
         self.r_last_cmd_v = 0.0
         self.l_last_cmd_dir = 0
         self.r_last_cmd_dir = 0
+        self.l_err_integral = 0.0
+        self.r_err_integral = 0.0
     
     def init_brusher_as_default(self, async_init=False, simulate=False):
         if async_init:
@@ -480,7 +483,7 @@ class TaperPullingCore:
             self.time_brush_check_0 = self.time_brush_check_1
             self.time_brush_check_1 = time.time()
             dt = self.time_brush_check_1 - self.time_brush_check_0
-            if dt > 0.1: dt = 0.0 # Safety clamp
+            if dt > 0.15: dt = 0.15 # Clamp to max reasonable step, don't freeze
             
             # 2. Update Virtual Brusher State (The "Conductor")
             # This remains the source of truth for "where the flame should be relative to the fiber"
@@ -504,11 +507,19 @@ class TaperPullingCore:
                     self.fake_brusher_pos = r
                     self.brusher_dir = -1
                     self.rhz_edges.append(self.fake_brusher_pos + self.flame_size/2.0) # Record exact limit (Right Edge)
+                    # Fresh poll at reversal for tight P-control
+                    self.puller_left_pos = self.motors.left_puller.get_position()
+                    self.puller_right_pos = self.motors.right_puller.get_position()
+                    self.last_pos_poll_time = time.time()
                 elif (self.brusher_dir == -1 and next_pos < l):
                     # We would undershoot. Stop at the wall and flip.
                     self.fake_brusher_pos = l
                     self.brusher_dir = 1
                     self.rhz_edges.append(self.fake_brusher_pos - self.flame_size/2.0) # Record exact limit (Left Edge)
+                    # Fresh poll at reversal for tight P-control
+                    self.puller_left_pos = self.motors.left_puller.get_position()
+                    self.puller_right_pos = self.motors.right_puller.get_position()
+                    self.last_pos_poll_time = time.time()
                 else:
                     # Safe to move
                     self.fake_brusher_pos = next_pos
@@ -585,10 +596,17 @@ class TaperPullingCore:
             self.l_golden_pos = abs_target_l
             self.r_golden_pos = abs_target_r
             
-            # 7. P-Control Correction
-            # V_cmd = V_ideal + Kp * (Target - Actual)
-            v_l_cmd = v_l_ideal + self.tracking_kp * (self.l_golden_pos - self.puller_left_pos)
-            v_r_cmd = v_r_ideal + self.tracking_kp * (self.r_golden_pos - self.puller_right_pos)
+            # 7. PI-Control Correction
+            # V_cmd = V_ideal + Kp * error + Ki * integral(error)
+            err_l = self.l_golden_pos - self.puller_left_pos
+            err_r = self.r_golden_pos - self.puller_right_pos
+            
+            # Integral accumulation with anti-windup clamp
+            self.l_err_integral = np.clip(self.l_err_integral + err_l * dt, -0.5, 0.5)
+            self.r_err_integral = np.clip(self.r_err_integral + err_r * dt, -0.5, 0.5)
+            
+            v_l_cmd = v_l_ideal + self.tracking_kp * err_l + self.tracking_ki * self.l_err_integral
+            v_r_cmd = v_r_ideal + self.tracking_kp * err_r + self.tracking_ki * self.r_err_integral
             
             # Clamp for safety
             v_l_cmd = np.clip(v_l_cmd, -12, 12)
@@ -601,23 +619,42 @@ class TaperPullingCore:
             l_dir = self.motors.left_puller.MoveDirection.POSITIVE if v_l_cmd > 0 else self.motors.left_puller.MoveDirection.NEGATIVE
             r_dir = self.motors.right_puller.MoveDirection.POSITIVE if v_r_cmd > 0 else self.motors.right_puller.MoveDirection.NEGATIVE
             
-            # Check Left Motor
-            l_v_diff = abs(l_v_abs - self.l_last_cmd_v)
+            # Determine which motor needs an update (relative deadband)
             l_dir_change = (l_dir != self.l_last_cmd_dir)
+            l_v_threshold = max(0.005, 0.05 * self.l_last_cmd_v)
+            l_needs_update = abs(l_v_abs - self.l_last_cmd_v) > l_v_threshold or l_dir_change
             
-            if l_v_diff > 0.005 or l_dir_change:
-                self.motors.left_puller.set_velocity(l_v_abs)
-                self.motors.left_puller.move(l_dir, stop=False)
+            r_dir_change = (r_dir != self.r_last_cmd_dir)
+            r_v_threshold = max(0.005, 0.05 * self.r_last_cmd_v)
+            r_needs_update = abs(r_v_abs - self.r_last_cmd_v) > r_v_threshold or r_dir_change
+            
+            # Interleaved + Alternating: swap L/R order each cycle
+            if self.count % 2 == 0:
+                motors_order = [
+                    (l_needs_update, self.motors.left_puller, l_v_abs, l_dir),
+                    (r_needs_update, self.motors.right_puller, r_v_abs, r_dir),
+                ]
+            else:
+                motors_order = [
+                    (r_needs_update, self.motors.right_puller, r_v_abs, r_dir),
+                    (l_needs_update, self.motors.left_puller, l_v_abs, l_dir),
+                ]
+            
+            # Phase 1: set_velocity for both
+            for needs, motor, v_abs, _ in motors_order:
+                if needs:
+                    motor.set_velocity(v_abs)
+            
+            # Phase 2: move for both
+            for needs, motor, _, direction in motors_order:
+                if needs:
+                    motor.move(direction, stop=False)
+            
+            # Update tracking state
+            if l_needs_update:
                 self.l_last_cmd_v = l_v_abs
                 self.l_last_cmd_dir = l_dir
-                
-            # Check Right Motor
-            r_v_diff = abs(r_v_abs - self.r_last_cmd_v)
-            r_dir_change = (r_dir != self.r_last_cmd_dir)
-            
-            if r_v_diff > 0.005 or r_dir_change:
-                self.motors.right_puller.set_velocity(r_v_abs)
-                self.motors.right_puller.move(r_dir, stop=False)
+            if r_needs_update:
                 self.r_last_cmd_v = r_v_abs
                 self.r_last_cmd_dir = r_dir
         else:
