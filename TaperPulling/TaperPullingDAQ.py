@@ -106,18 +106,24 @@ class TaperPullingDAQ:
                 print(f"Device from {dev_chan} not found")
                 return None
     
-    def get_volt_ranges(self, dev):
+    def get_volt_ranges(self, dev=None):
         """
         Gets the AI voltage ranges for a device.
         """
         ranges = []
         
-        if self.sys_ok:
-            dev_ranges = dev.ai_voltage_rngs
-            for i in range(len(dev_ranges)//2):
-                ranges.append(np.abs(dev_ranges[i*2]))
+        if self.sys_ok and dev is not None:
+            try:
+                dev_ranges = dev.ai_voltage_rngs
+                for i in range(len(dev_ranges)//2):
+                    ranges.append(float(np.abs(dev_ranges[i*2])))
+            except Exception as e:
+                print(f"Error reading voltage ranges: {e}")
+        
+        if not ranges:
+            ranges = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0]
             
-        return ranges
+        return sorted(list(set(ranges)))
     
     def get_term_configs(self, channel):
         """

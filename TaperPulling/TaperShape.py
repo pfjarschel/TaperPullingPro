@@ -24,6 +24,10 @@ from enum import Enum
 from scipy.signal import savgol_filter
 from scipy.optimize import minimize
 from scipy.interpolate import make_interp_spline
+try:
+    from scipy.integrate import trapezoid as trapz
+except ImportError:
+    trapz = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
 from threading import Timer, Thread
 from fibermodes import FiberFactory, Wavelength, Mode, ModeFamily
 
@@ -312,7 +316,7 @@ class TaperShape:
         rw = np.min(r_array)
         l_z = []
         for i in range(len(z_array)):
-            l_zi = lw*((rw/r_array[i])**2) + (2/((r_array[i])**2))*np.trapz((r_array[i:])**2, z_array[i:])
+            l_zi = lw*((rw/r_array[i])**2) + (2/((r_array[i])**2))*trapz((r_array[i:])**2, z_array[i:])
             l_z.append(l_zi)
         l_z = np.array(l_z)
         
@@ -325,7 +329,7 @@ class TaperShape:
         n = len(x_arr)
         r_arr = np.zeros(n)
         for i in range(n):
-            r_arr[i] = self.initial_r*np.exp(-0.5*np.trapz(1/l_arr[:i + 1], x_arr[:i + 1]))
+            r_arr[i] = self.initial_r*np.exp(-0.5*trapz(1/l_arr[:i + 1], x_arr[:i + 1]))
         z_arr = (x_arr - l_arr + l_arr[0])/2
         
         return z_arr, r_arr

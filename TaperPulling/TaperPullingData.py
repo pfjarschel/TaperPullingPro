@@ -64,6 +64,13 @@ class TaperPullingData:
     soft_buffer = np.zeros((soft_buffer_ratio, buffer_slice))
     buffer = np.zeros(buffer_size)
     
+    # Photodetector calibration and acquisition settings
+    gain_v_mw = 10.0  # V/mW (Responsivity / Gain)
+    offset_v = 0.0  # V (Dark offset voltage)
+    max_power_mw = 1.0  # mW (Max expected optical power)
+    auto_v_range = True  # Automatically set DAQ scale to optimal range
+    
+    # Legacy parameters (kept for backward compatibility)
     impedance = 1e4  # Ohms
     responsivity = 1.0  # A/W
     
@@ -102,6 +109,48 @@ class TaperPullingData:
         self.spectrogram_loop = None
         self.monitor_loop = None
         self.continuous_loop = None
+
+    def set_calibration(self, gain_v_mw: float = 10.0, offset_v: float = 0.0, max_power_mw: float = 1.0):
+        """
+        Sets photodetector calibration parameters.
+        
+        Args:
+            gain_v_mw (float): Responsivity / Gain in V/mW.
+            offset_v (float): Dark offset voltage in V.
+            max_power_mw (float): Max expected power in mW.
+        """
+        self.gain_v_mw = gain_v_mw if gain_v_mw != 0 else 1e-9
+        self.offset_v = offset_v
+        self.max_power_mw = max_power_mw
+
+    def get_optimal_voltage_range(self, max_power_mw: float = None, dev=None) -> float:
+        """
+        Calculates the optimal DAQ voltage range based on calibration and max expected power.
+        
+        Args:
+            max_power_mw (float, optional): Max expected power in mW. Defaults to self.max_power_mw.
+            dev: NI DAQ device object (optional).
+            
+        Returns:
+            float: Smallest hardware bipolar voltage scale (e.g. 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0)
+                   that covers the expected signal voltage without saturation.
+        """
+        if max_power_mw is None:
+            max_power_mw = self.max_power_mw
+            
+        v_max = self.offset_v + max_power_mw * self.gain_v_mw
+        v_min = self.offset_v
+        v_peak = max(abs(v_min), abs(v_max))
+        
+        ranges = self.daq.get_volt_ranges(dev)
+        if not ranges:
+            ranges = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0]
+        ranges = sorted(list(set(ranges)))
+        
+        for r in ranges:
+            if r >= v_peak:
+                return r
+        return ranges[-1]
         
     def __del__(self):
         self.close()
@@ -205,21 +254,31 @@ class TaperPullingData:
         else:
             return -1
     
-    def get_single_power(self, db=False):
-        pwr = 1e3*self.get_single_value()/(self.impedance*self.responsivity)
+    def get_power_from_voltage(self, volt: float, db: bool = False) -> float:
+        """
+        Converts voltage from photodetector into optical power (mW or dBm) using calibration.
+        
+        Args:
+            volt (float): Voltage measured in V.
+            db (bool, optional): If True, returns power in dBm (10*log10(P_mW)). Defaults to False.
+            
+        Returns:
+            float: Optical power in mW (or dBm if db=True).
+        """
+        gain = self.gain_v_mw if self.gain_v_mw != 0 else 1e-9
+        pwr = (volt - self.offset_v) / gain
         if db:
-            if pwr <= 0: pwr = 1e-99
-            return 10*np.log10(pwr)
+            if pwr <= 0:
+                pwr = 1e-99
+            return 10.0 * np.log10(pwr)
         else:
             return pwr
+
+    def get_single_power(self, db=False):
+        return self.get_power_from_voltage(self.get_single_value(), db=db)
         
     def get_monitor_power(self, db=False):
-        pwr = 1e3*self.monitor_val/(self.impedance*self.responsivity)
-        if db:
-            if pwr <= 0: pwr = 1e-99
-            return 10*np.log10(pwr)
-        else:
-            return pwr
+        return self.get_power_from_voltage(self.monitor_val, db=db)
     
     def get_points(self, n:int):
         if not self.daq_busy:

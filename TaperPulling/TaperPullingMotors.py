@@ -42,7 +42,8 @@ class KinesisDLL:
         self.motor_type = motor_type
             
         try:
-            os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
+            if hasattr(os, "add_dll_directory"):
+                os.add_dll_directory(r"C:\Program Files\Thorlabs\Kinesis")
             if motor_type == MotorType.TCUBE_DCSERVO:
                 self.lib_prfx = "CC"
                 self.lib: CDLL = cdll.LoadLibrary("Thorlabs.MotionControl.TCube.DCServo.dll")

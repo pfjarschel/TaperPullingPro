@@ -828,256 +828,323 @@
           <attribute name="title">
            <string>DAQ</string>
           </attribute>
-          <layout class="QGridLayout" name="gridLayout_9">
-           <item row="5" column="0">
-            <spacer name="verticalSpacer_5">
-             <property name="orientation">
-              <enum>Qt::Orientation::Vertical</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>20</width>
-               <height>40</height>
-              </size>
-             </property>
-            </spacer>
-           </item>
-           <item row="2" column="0">
-            <layout class="QVBoxLayout" name="verticalLayout_51">
-             <property name="spacing">
-              <number>0</number>
-             </property>
-             <item>
-              <widget class="QLabel" name="label_48">
-               <property name="text">
-                <string>Device/Channel</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QComboBox" name="daqChannelCombo">
-               <item>
+           <layout class="QGridLayout" name="gridLayout_9">
+            <item row="0" column="0">
+             <layout class="QVBoxLayout" name="verticalLayout_46">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_43">
                 <property name="text">
-                 <string>Simulation</string>
+                 <string>Responsivity (V/mW)</string>
                 </property>
-               </item>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="1" column="2">
-            <layout class="QVBoxLayout" name="verticalLayout_49">
-             <property name="spacing">
-              <number>0</number>
-             </property>
-             <item>
-              <widget class="QLabel" name="label_46">
-               <property name="text">
-                <string>Sampling Rate (Hz)</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QDoubleSpinBox" name="srateSpin">
-               <property name="keyboardTracking">
-                <bool>false</bool>
-               </property>
-               <property name="maximum">
-                <double>1000000000.000000000000000</double>
-               </property>
-               <property name="value">
-                <double>1000.000000000000000</double>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="2" column="2">
-            <layout class="QVBoxLayout" name="verticalLayout_50">
-             <property name="spacing">
-              <number>0</number>
-             </property>
-             <item>
-              <widget class="QLabel" name="label_47">
-               <property name="text">
-                <string>Terminal Config.</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QComboBox" name="daqConfCombo">
-               <item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QDoubleSpinBox" name="responSpin">
+                <property name="decimals">
+                 <number>4</number>
+                </property>
+                <property name="minimum">
+                 <double>0.000100000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>1000000.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="value">
+                 <double>1.000000000000000</double>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="0" column="2">
+             <layout class="QVBoxLayout" name="verticalLayout_47">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_44">
                 <property name="text">
-                 <string>DEFAULT</string>
+                 <string>Offset Voltage (V)</string>
                 </property>
-               </item>
-               <item>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_det_offset">
+                <item>
+                 <widget class="QDoubleSpinBox" name="detOffsetSpin">
+                  <property name="decimals">
+                   <number>4</number>
+                  </property>
+                  <property name="minimum">
+                   <double>-10.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>10.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.001000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>0.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="zeroOffsetBut">
+                  <property name="text">
+                   <string>Zero</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </item>
+            <item row="1" column="0">
+             <layout class="QVBoxLayout" name="verticalLayout_max_power">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_max_power">
                 <property name="text">
-                 <string>RSE</string>
+                 <string>Max Power (mW)</string>
                 </property>
-               </item>
-               <item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QDoubleSpinBox" name="maxPowerSpin">
+                <property name="decimals">
+                 <number>3</number>
+                </property>
+                <property name="minimum">
+                 <double>0.001000000000000</double>
+                </property>
+                <property name="maximum">
+                 <double>1000.000000000000000</double>
+                </property>
+                <property name="singleStep">
+                 <double>0.100000000000000</double>
+                </property>
+                <property name="value">
+                 <double>1.000000000000000</double>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="1" column="2">
+             <layout class="QVBoxLayout" name="verticalLayout_49">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_46">
                 <property name="text">
-                 <string>NRSE</string>
+                 <string>Sampling Rate (Hz)</string>
                 </property>
-               </item>
-               <item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QDoubleSpinBox" name="srateSpin">
+                <property name="keyboardTracking">
+                 <bool>false</bool>
+                </property>
+                <property name="maximum">
+                 <double>1000000000.000000000000000</double>
+                </property>
+                <property name="value">
+                 <double>1000.000000000000000</double>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="2" column="0">
+             <layout class="QVBoxLayout" name="verticalLayout_51">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_48">
                 <property name="text">
-                 <string>Differential</string>
+                 <string>Device/Channel</string>
                 </property>
-               </item>
-               <item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="daqChannelCombo">
+                <item>
+                 <property name="text">
+                  <string>Simulation</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="2" column="2">
+             <layout class="QVBoxLayout" name="verticalLayout_50">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_47">
                 <property name="text">
-                 <string>Pseudodifferential</string>
+                 <string>Terminal Config.</string>
                 </property>
-               </item>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="0" column="2">
-            <layout class="QVBoxLayout" name="verticalLayout_47">
-             <property name="spacing">
-              <number>0</number>
-             </property>
-             <item>
-              <widget class="QLabel" name="label_44">
-               <property name="text">
-                <string>Impedance (Ohms)</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QDoubleSpinBox" name="impedanceSpin">
-               <property name="maximum">
-                <double>100000000.000000000000000</double>
-               </property>
-               <property name="value">
-                <double>10000.000000000000000</double>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="4" column="0">
-            <layout class="QVBoxLayout" name="verticalLayout_52">
-             <property name="spacing">
-              <number>0</number>
-             </property>
-             <item>
-              <widget class="QLabel" name="label_49">
-               <property name="text">
-                <string>Mode</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QComboBox" name="daqmodeCombo">
-               <item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="daqConfCombo">
+                <item>
+                 <property name="text">
+                  <string>DEFAULT</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>RSE</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>NRSE</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Differential</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Pseudodifferential</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="3" column="0">
+             <layout class="QVBoxLayout" name="verticalLayout_48">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_45">
                 <property name="text">
-                 <string>FINITE</string>
+                 <string>Spectrogram Samples</string>
                 </property>
-               </item>
-               <item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QSpinBox" name="specsamplesSpin">
+                <property name="minimum">
+                 <number>8</number>
+                </property>
+                <property name="maximum">
+                 <number>10240</number>
+                </property>
+                <property name="value">
+                 <number>1024</number>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="3" column="2">
+             <layout class="QVBoxLayout" name="verticalLayout_54">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_51">
                 <property name="text">
-                 <string>CONTINUOUS</string>
+                 <string>V Range (V)</string>
                 </property>
-               </item>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="0" column="0">
-            <layout class="QVBoxLayout" name="verticalLayout_46">
-             <property name="spacing">
-              <number>0</number>
-             </property>
-             <item>
-              <widget class="QLabel" name="label_43">
-               <property name="text">
-                <string>Responsivity (A/W)</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QDoubleSpinBox" name="responSpin">
-               <property name="decimals">
-                <number>3</number>
-               </property>
-               <property name="minimum">
-                <double>0.001000000000000</double>
-               </property>
-               <property name="maximum">
-                <double>1000000.000000000000000</double>
-               </property>
-               <property name="singleStep">
-                <double>0.100000000000000</double>
-               </property>
-               <property name="value">
-                <double>1.000000000000000</double>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="1" column="0">
-            <layout class="QVBoxLayout" name="verticalLayout_48">
-             <property name="spacing">
-              <number>0</number>
-             </property>
-             <item>
-              <widget class="QLabel" name="label_45">
-               <property name="text">
-                <string>Spectrogram Samples</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QSpinBox" name="specsamplesSpin">
-               <property name="minimum">
-                <number>8</number>
-               </property>
-               <property name="maximum">
-                <number>10240</number>
-               </property>
-               <property name="value">
-                <number>1024</number>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-           <item row="4" column="2">
-            <layout class="QVBoxLayout" name="verticalLayout_54">
-             <property name="spacing">
-              <number>0</number>
-             </property>
-             <item>
-              <widget class="QLabel" name="label_51">
-               <property name="text">
-                <string>V Range (V)</string>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QDoubleSpinBox" name="daqvrangeSpin">
-               <property name="keyboardTracking">
-                <bool>false</bool>
-               </property>
-               <property name="minimum">
-                <double>1.000000000000000</double>
-               </property>
-               <property name="maximum">
-                <double>20.000000000000000</double>
-               </property>
-               <property name="value">
-                <double>1.000000000000000</double>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
-          </layout>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_v_range">
+                <item>
+                 <widget class="QDoubleSpinBox" name="daqvrangeSpin">
+                  <property name="keyboardTracking">
+                   <bool>false</bool>
+                  </property>
+                  <property name="minimum">
+                   <double>0.010000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>20.000000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>1.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QCheckBox" name="autoVRangeCheck">
+                  <property name="text">
+                   <string>Auto</string>
+                  </property>
+                  <property name="checked">
+                   <bool>true</bool>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </item>
+            <item row="4" column="0">
+             <layout class="QVBoxLayout" name="verticalLayout_52">
+              <property name="spacing">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="label_49">
+                <property name="text">
+                 <string>Mode</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="daqmodeCombo">
+                <item>
+                 <property name="text">
+                  <string>FINITE</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>CONTINUOUS</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item row="5" column="0">
+             <spacer name="verticalSpacer_5">
+              <property name="orientation">
+               <enum>Qt::Orientation::Vertical</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>40</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
          </widget>
         </widget>
        </item>

@@ -356,7 +356,10 @@ class MainWindow(FormUI, WindowUI):
         self.daqmodeCombo.currentIndexChanged.connect(self.daq_init)
         self.daqvrangeSpin.valueChanged.connect(self.daq_init)
         self.responSpin.valueChanged.connect(self.daq_init)
-        self.impedanceSpin.valueChanged.connect(self.daq_init)
+        self.detOffsetSpin.valueChanged.connect(self.daq_init)
+        self.maxPowerSpin.valueChanged.connect(self.daq_init)
+        self.autoVRangeCheck.clicked.connect(self.toggle_auto_vrange)
+        self.zeroOffsetBut.clicked.connect(self.zero_offset)
         self.specsamplesSpin.valueChanged.connect(self.daq_init)
         
         # Motors connections
@@ -446,16 +449,35 @@ class MainWindow(FormUI, WindowUI):
         self.data.daq.term_config = self.daqConfCombo.currentText()
         self.data.daq.mode = self.daqmodeCombo.currentText()
         self.data.spectrum_points = self.specsamplesSpin.value()
-        self.data.responsivity = self.responSpin.value()
-        self.data.impedance = self.impedanceSpin.value()
+        self.data.gain_v_mw = self.responSpin.value()
+        self.data.offset_v = self.detOffsetSpin.value()
+        self.data.max_power_mw = self.maxPowerSpin.value()
+        self.data.auto_v_range = self.autoVRangeCheck.isChecked()
         self.data.set_buffer(2*self.specsamplesSpin.value())
         
+        dev = None
         if daq_dev_chan != "Simulation":
-            volt_ranges = self.data.daq.get_volt_ranges(self.data.daq.get_dev_from_name(daq_dev_chan))
-            closest_v_i = np.abs(np.array(volt_ranges) - self.daqvrangeSpin.value()).argmin()
-            self.data.daq.scale = volt_ranges[closest_v_i]
+            dev = self.data.daq.get_dev_from_name(daq_dev_chan)
+            
+        volt_ranges = self.data.daq.get_volt_ranges(dev)
+        if volt_ranges:
+            self.daqvrangeSpin.setMinimum(volt_ranges[0])
+            self.daqvrangeSpin.setMaximum(volt_ranges[-1])
+            
+        if self.autoVRangeCheck.isChecked():
+            optimal_v = self.data.get_optimal_voltage_range(self.maxPowerSpin.value(), dev)
+            self.daqvrangeSpin.blockSignals(True)
+            self.daqvrangeSpin.setValue(optimal_v)
+            self.daqvrangeSpin.blockSignals(False)
+            self.daqvrangeSpin.setEnabled(False)
+            self.data.daq.scale = optimal_v
         else:
-            self.data.daq.scale = self.daqvrangeSpin.value()
+            self.daqvrangeSpin.setEnabled(True)
+            if daq_dev_chan != "Simulation" and len(volt_ranges) > 0:
+                closest_v_i = np.abs(np.array(volt_ranges) - self.daqvrangeSpin.value()).argmin()
+                self.data.daq.scale = volt_ranges[closest_v_i]
+            else:
+                self.data.daq.scale = self.daqvrangeSpin.value()
     
     def set_motors_params(self):
         # Brusher
@@ -639,9 +661,11 @@ class MainWindow(FormUI, WindowUI):
         parameters_dict["DAQ"]["Mode"] = self.daqmodeCombo.currentText()
         parameters_dict["DAQ"]["Sampling_rate"] = self.srateSpin.value()
         parameters_dict["DAQ"]["V_range"] = self.daqvrangeSpin.value()
+        parameters_dict["DAQ"]["Auto_V_range"] = self.autoVRangeCheck.isChecked()
         parameters_dict["DAQ"]["Spectrogram_samples"] = self.specsamplesSpin.value()
-        parameters_dict["DAQ"]["Impedance"] = self.impedanceSpin.value()
-        parameters_dict["DAQ"]["Responsivity"] = self.responSpin.value()
+        parameters_dict["DAQ"]["Responsivity_V_per_mW"] = self.responSpin.value()
+        parameters_dict["DAQ"]["Offset_V"] = self.detOffsetSpin.value()
+        parameters_dict["DAQ"]["Max_power_mW"] = self.maxPowerSpin.value()
         
         parameters_dict["Profile"] = {}
         parameters_dict["Profile"]["Mode"] = self.profile_mode
@@ -1083,17 +1107,35 @@ class MainWindow(FormUI, WindowUI):
                     if prev_term in conf_names:
                         self.daqConfCombo.setCurrentText(prev_term)
                         
+            dev = None
             if daq_dev_chan != "Simulation":
-                volt_ranges = self.data.daq.get_volt_ranges(self.data.daq.get_dev_from_name(daq_dev_chan))
-            else:
-                volt_ranges = [0.01, 100]
-            self.daqvrangeSpin.setMinimum(volt_ranges[0])
-            self.daqvrangeSpin.setMaximum(volt_ranges[-1])
+                dev = self.data.daq.get_dev_from_name(daq_dev_chan)
+            volt_ranges = self.data.daq.get_volt_ranges(dev)
+            if volt_ranges:
+                self.daqvrangeSpin.setMinimum(volt_ranges[0])
+                self.daqvrangeSpin.setMaximum(volt_ranges[-1])
                 
             self.daq_busy = False
             
             self.daq_init()
                
+    def toggle_auto_vrange(self):
+        self.daqvrangeSpin.setEnabled(not self.autoVRangeCheck.isChecked())
+        self.daq_init()
+        
+    def zero_offset(self):
+        if not self.data.daq_busy:
+            try:
+                # Read multiple points to average out noise
+                pts = self.data.get_points(50)
+                if len(pts) > 0 and pts[0] != -1:
+                    avg_v = float(np.mean(pts))
+                else:
+                    avg_v = float(self.data.get_single_value())
+                self.detOffsetSpin.setValue(round(avg_v, 4))
+            except Exception as e:
+                print(f"Error measuring zero offset: {e}")
+
     def set_ref_power(self):
         self.refpowIndSpin.setValue(self.transpowIndSpin.value())
         
