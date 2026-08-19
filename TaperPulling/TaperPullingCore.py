@@ -150,8 +150,8 @@ class TaperPullingCore:
         
         # Velocity Tracking State
         self.last_pos_poll_time = 0.0
-        self.tracking_kp = 1.5
-        self.tracking_ki = 0.3
+        self.tracking_kp = 1.0
+        self.brush_phase = 0.0
         
         self.start_update()
         
@@ -196,6 +196,8 @@ class TaperPullingCore:
         self.puller_left_pos = None
         self.puller_right_pos = None
         self.last_pos_poll_time = 0.0
+        self.fake_brusher_pos = 0.0
+        self.brush_phase = 0.0
         self.l_golden_pos = 0.0
         self.r_golden_pos = 0.0
         self.pull_started_init = False
@@ -205,8 +207,6 @@ class TaperPullingCore:
         self.r_last_cmd_v = 0.0
         self.l_last_cmd_dir = 0
         self.r_last_cmd_dir = 0
-        self.l_err_integral = 0.0
-        self.r_err_integral = 0.0
     
     def init_brusher_as_default(self, async_init=False, simulate=False):
         if async_init:
@@ -413,12 +413,9 @@ class TaperPullingCore:
                 # In rel_pull, "brusher centered" means the virtual fake_brusher_pos is crossing 0.
                 # Physical motors are oscillating, so checking their exact position against start is flaky.
                 # We check if absolute value of fake_brusher_pos is within reasonable tolerance.
-                brusher_centered = abs(self.fake_brusher_pos) < (self.pos_check_precision * 2.0)
+                center_tol = max(self.pos_check_precision * 2.0, self.motors.brusher.vel * 0.05)
+                brusher_centered = abs(self.fake_brusher_pos) <= center_tol
                 if brusher_centered:
-                    # self.brusher_dir = self.brusher_dir0 # REMOVED: Interms with check_brushing logic
-                    # CONFLICT FIX: Do not manually move motors here. 
-                    # check_brushing() is running in parallel and handles the maintenance/centering.
-                    
                     self.time_brush_check_0 = time.time()
                     self.time_brush_check_1 = time.time()
                     self.pulling = True
@@ -470,193 +467,143 @@ class TaperPullingCore:
             print("Pulling ending...")
     
     def check_brushing(self, mode=0):
-        # Predictive Relative Pulling Logic
-        # Instead of reactive P-control on integrated position, we calculate
-        # exact target positions for t and t+dt to derive feed-forward velocity.
-        
+        # Hotzone calculation
         hz = np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1])
         hz_l = self.brusher_x0 - hz/2
         hz_r = self.brusher_x0 + hz/2
         
         if self.rel_pull:
-            # 1. Time housekeeping for integration (still needed for fake_brusher_pos)
+            # 1. Delta time calculation
             self.time_brush_check_0 = self.time_brush_check_1
             self.time_brush_check_1 = time.time()
             dt = self.time_brush_check_1 - self.time_brush_check_0
-            if dt > 0.15: dt = 0.15 # Clamp to max reasonable step, don't freeze
+            if dt <= 0.0:
+                dt = 0.001
+            elif dt > 0.15:
+                dt = 0.15 # Clamp to max reasonable step
             
-            # 2. Update Virtual Brusher State (The "Conductor")
-            # This remains the source of truth for "where the flame should be relative to the fiber"
+            # 2. Harmonic Brushing State (The Conductor)
+            # Half-amplitude available for brushing:
+            amplitude = (hz - self.flame_size) / 2.0
             
-            # Current boundary check
-            l = -hz/2.0 + self.flame_size/2.0
-            r = hz/2.0 - self.flame_size/2.0
-            
-            if l >= r:
-                 # Hotzone too small to brush. Keep centered.
-                 self.fake_brusher_pos = 0.0
-                 # Do not record edges, as there is no brushing oscillation
+            if amplitude < (self.motors.brusher.min_span / 2.0):
+                # Hotzone too small to brush. Keep centered.
+                self.fake_brusher_pos = 0.0
+                v_brush = 0.0
+                self.brush_phase = 0.0
             else:
-                # Predictive Move
-                step = self.brusher_dir * self.motors.brusher.vel * dt
-                next_pos = self.fake_brusher_pos + step
+                # Angular frequency: omega = v_nominal / amplitude
+                # This ensures the peak brushing speed reaches self.motors.brusher.vel
+                v_b = self.motors.brusher.vel
+                omega = v_b / amplitude
+                # Limit omega so phase does not jump unreasonably fast if amplitude is very small
+                omega = min(omega, 10.0)
                 
-                # Check for boundary crossing BEFORE applying step
-                if (self.brusher_dir == 1 and next_pos > r):
-                    # We would overshoot. Stop at the wall and flip.
-                    self.fake_brusher_pos = r
-                    self.brusher_dir = -1
-                    self.rhz_edges.append(self.fake_brusher_pos + self.flame_size/2.0) # Record exact limit (Right Edge)
-                    # Fresh poll at reversal for tight P-control
-                    self.puller_left_pos = self.motors.left_puller.get_position()
-                    self.puller_right_pos = self.motors.right_puller.get_position()
-                    self.last_pos_poll_time = time.time()
-                elif (self.brusher_dir == -1 and next_pos < l):
-                    # We would undershoot. Stop at the wall and flip.
-                    self.fake_brusher_pos = l
-                    self.brusher_dir = 1
-                    self.rhz_edges.append(self.fake_brusher_pos - self.flame_size/2.0) # Record exact limit (Left Edge)
-                    # Fresh poll at reversal for tight P-control
-                    self.puller_left_pos = self.motors.left_puller.get_position()
-                    self.puller_right_pos = self.motors.right_puller.get_position()
-                    self.last_pos_poll_time = time.time()
-                else:
-                    # Safe to move
-                    self.fake_brusher_pos = next_pos
-
-            # 3. Predict Future State (Look-Ahead)
-            # We want to know where the motors *should* be 100ms from now
-            dt_pred = 0.1 
-            
-            # Predict Pulling Progress
-            if self.pulling:
-                # Assuming constant velocity for prediction window
-                # Note: If adaptive velocity changes, it will be caught in next loop
-                pull_vel_total = self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel
-                fut_total_pulled = self.total_pulled + pull_vel_total * dt_pred
-            else:
-                fut_total_pulled = self.total_pulled
+                phi_old = self.brush_phase
+                phi_new = phi_old + omega * dt
                 
-            # Predict Hotzone at t+dt
-            fut_hz = np.interp(fut_total_pulled, self.hotzone_function[0], self.hotzone_function[1])
-            fut_l = -fut_hz/2.0 + self.flame_size/2.0
-            fut_r = fut_hz/2.0 - self.flame_size/2.0
-            
-            # Predict Virtual Brusher at t+dt
-            # We must handle the reflection if it hits the wall during dt_pred
-            # This is a simplified reflection: it assumes at most one bounce per dt_pred (valid for low speeds)
-            fut_brusher_pos = self.fake_brusher_pos + self.brusher_dir * self.motors.brusher.vel * dt_pred
-            
-            # Check for reflection in prediction
-            # (Note: We don't change actual direction here, just the predicted position)
-            if (self.brusher_dir == 1 and fut_brusher_pos > fut_r):
-                overshoot = fut_brusher_pos - fut_r
-                fut_brusher_pos = fut_r - overshoot
-            elif (self.brusher_dir == -1 and fut_brusher_pos < fut_l):
-                overshoot = fut_l - fut_brusher_pos
-                fut_brusher_pos = fut_l + overshoot
+                # Check for boundary / turnaround crossing:
+                # Peaks occur at phi = pi/2 + k*pi (where cos(phi) flips sign and sin(phi) = +/- 1)
+                k_old = int(np.floor((phi_old - np.pi / 2.0) / np.pi))
+                k_new = int(np.floor((phi_new - np.pi / 2.0) / np.pi))
                 
-            # 4. Calculate Absolute Target Positions (t and t+dt)
-            # Center of the "Taper" in machine coordinates moves to the LEFT (Puller L decreases, Puller R decreases)
-            # We use total_pulled / 2.0 as the translation of the center frame (assuming symmetric pulling)
+                if k_new > k_old:
+                    # A turnaround occurred during this step!
+                    # If crossing an even k (phi = pi/2 + 2m*pi), it reached the Right edge (+A) and starts moving Left (-1)
+                    # If crossing an odd k (phi = 3pi/2 + 2m*pi), it reached the Left edge (-A) and starts moving Right (+1)
+                    if (k_new % 2) == 0:
+                        # Right edge (+amplitude)
+                        self.brusher_dir = -1
+                        self.rhz_edges.append(amplitude + self.flame_size / 2.0)
+                    else:
+                        # Left edge (-amplitude)
+                        self.brusher_dir = 1
+                        self.rhz_edges.append(-amplitude - self.flame_size / 2.0)
+                
+                self.brush_phase = phi_new % (2.0 * np.pi)
+                
+                # Smooth sinusoidal position & velocity
+                self.fake_brusher_pos = amplitude * np.sin(self.brush_phase)
+                v_brush = v_b * np.cos(self.brush_phase)
+                
+            # 3. Pulling Components & Target Positions
+            # Machine coordinates:
+            # - Left puller decreases coordinate to pull (negative direction)
+            # - Right puller decreases coordinate to pull (negative direction)
+            # - Brushing towards +x (flame moves right relative to fiber) means fiber shifts left:
+            #   Left stage position decreases, Right stage position increases.
             
-            curr_target_l = - (self.total_pulled / 2.0) - self.fake_brusher_pos
-            curr_target_r = - (self.total_pulled / 2.0) + self.fake_brusher_pos
+            pull_offset = self.total_pulled / 2.0
+            curr_target_l = - pull_offset - self.fake_brusher_pos
+            curr_target_r = - pull_offset + self.fake_brusher_pos
             
-            fut_target_l = - (fut_total_pulled / 2.0) - fut_brusher_pos
-            fut_target_r = - (fut_total_pulled / 2.0) + fut_brusher_pos
+            # Pull velocities
+            v_pull_l = self.motors.left_puller.pull_vel if self.pulling else 0.0
+            v_pull_r = self.motors.right_puller.pull_vel if self.pulling else 0.0
             
-            # 5. Calculate Feed-Forward Velocity
-            v_l_ideal = (fut_target_l - curr_target_l) / dt_pred
-            v_r_ideal = (fut_target_r - curr_target_r) / dt_pred
+            # 4. Feed-Forward Velocities
+            v_l_ideal = - v_pull_l - v_brush
+            v_r_ideal = - v_pull_r + v_brush
             
-            # 6. Update Golden Position (Hard Sync)
-            # In the previous code, this was an integral that could drift.
-            # Now we define it based on the Theoretical Function.
-            # But we need an offset! The motor is at 80mm, not at "-TotalPulled".
-            # We use the initial motor positions captured at start.
-            
+            # 5. Golden Position Tracking
             if not hasattr(self, 'l_golden_pos') or self.l_golden_pos == 0.0:
                 self.l_golden_pos = self.puller_left_pos
                 self.r_golden_pos = self.puller_right_pos
-                # Define offset based on first run
                 self.l_golden_offset = self.puller_left_pos - curr_target_l
                 self.r_golden_offset = self.puller_right_pos - curr_target_r
 
             if self.pulling and not getattr(self, 'pull_started_init', False):
                 self.pull_started_init = True
-                # Re-sync offsets when pulling starts to prevent "jump"
+                # Re-sync offsets when pulling starts to prevent any jump
                 self.l_golden_offset = self.puller_left_pos - curr_target_l
                 self.r_golden_offset = self.puller_right_pos - curr_target_r
 
-            # Calculate Absolute Golden Positions for P-Control
-            abs_target_l = curr_target_l + getattr(self, 'l_golden_offset', 0)
-            abs_target_r = curr_target_r + getattr(self, 'r_golden_offset', 0)
+            self.l_golden_pos = curr_target_l + getattr(self, 'l_golden_offset', 0.0)
+            self.r_golden_pos = curr_target_r + getattr(self, 'r_golden_offset', 0.0)
             
-            self.l_golden_pos = abs_target_l
-            self.r_golden_pos = abs_target_r
-            
-            # 7. PI-Control Correction
-            # V_cmd = V_ideal + Kp * error + Ki * integral(error)
+            # 6. Proportional Tracking Correction
             err_l = self.l_golden_pos - self.puller_left_pos
             err_r = self.r_golden_pos - self.puller_right_pos
             
-            # Integral accumulation with anti-windup clamp
-            self.l_err_integral = np.clip(self.l_err_integral + err_l * dt, -0.5, 0.5)
-            self.r_err_integral = np.clip(self.r_err_integral + err_r * dt, -0.5, 0.5)
+            v_l_cmd = v_l_ideal + self.tracking_kp * err_l
+            v_r_cmd = v_r_ideal + self.tracking_kp * err_r
             
-            v_l_cmd = v_l_ideal + self.tracking_kp * err_l + self.tracking_ki * self.l_err_integral
-            v_r_cmd = v_r_ideal + self.tracking_kp * err_r + self.tracking_ki * self.r_err_integral
+            # Clamp to safe motor speed limits
+            max_v_l = self.motors.left_puller.max_vel if hasattr(self.motors.left_puller, 'max_vel') and self.motors.left_puller.max_vel > 0 else 12.0
+            max_v_r = self.motors.right_puller.max_vel if hasattr(self.motors.right_puller, 'max_vel') and self.motors.right_puller.max_vel > 0 else 12.0
+            v_l_cmd = np.clip(v_l_cmd, -max_v_l, max_v_l)
+            v_r_cmd = np.clip(v_r_cmd, -max_v_r, max_v_r)
             
-            # Clamp for safety
-            v_l_cmd = np.clip(v_l_cmd, -12, 12)
-            v_r_cmd = np.clip(v_r_cmd, -12, 12)
-            
-            # 8. Active Velocity Update (Throttled)
+            # 7. Motor Dispatch (Direct & Low-Latency)
             l_v_abs = max(0.001, abs(v_l_cmd))
             r_v_abs = max(0.001, abs(v_r_cmd))
             
             l_dir = self.motors.left_puller.MoveDirection.POSITIVE if v_l_cmd > 0 else self.motors.left_puller.MoveDirection.NEGATIVE
             r_dir = self.motors.right_puller.MoveDirection.POSITIVE if v_r_cmd > 0 else self.motors.right_puller.MoveDirection.NEGATIVE
             
-            # Determine which motor needs an update (relative deadband)
+            # Left motor update check
             l_dir_change = (l_dir != self.l_last_cmd_dir)
-            l_v_threshold = max(0.005, 0.05 * self.l_last_cmd_v)
-            l_needs_update = abs(l_v_abs - self.l_last_cmd_v) > l_v_threshold or l_dir_change
+            l_v_thresh = max(0.005, 0.02 * self.l_last_cmd_v)
+            l_needs_update = abs(l_v_abs - self.l_last_cmd_v) > l_v_thresh or l_dir_change
             
-            r_dir_change = (r_dir != self.r_last_cmd_dir)
-            r_v_threshold = max(0.005, 0.05 * self.r_last_cmd_v)
-            r_needs_update = abs(r_v_abs - self.r_last_cmd_v) > r_v_threshold or r_dir_change
-            
-            # Interleaved + Alternating: swap L/R order each cycle
-            if self.count % 2 == 0:
-                motors_order = [
-                    (l_needs_update, self.motors.left_puller, l_v_abs, l_dir),
-                    (r_needs_update, self.motors.right_puller, r_v_abs, r_dir),
-                ]
-            else:
-                motors_order = [
-                    (r_needs_update, self.motors.right_puller, r_v_abs, r_dir),
-                    (l_needs_update, self.motors.left_puller, l_v_abs, l_dir),
-                ]
-            
-            # Phase 1: set_velocity for both
-            for needs, motor, v_abs, _ in motors_order:
-                if needs:
-                    motor.set_velocity(v_abs)
-            
-            # Phase 2: move for both
-            for needs, motor, _, direction in motors_order:
-                if needs:
-                    motor.move(direction, stop=False)
-            
-            # Update tracking state
             if l_needs_update:
+                self.motors.left_puller.set_velocity(l_v_abs)
+                if l_dir_change or not self.motors.left_puller.moving:
+                    self.motors.left_puller.move(l_dir, stop=False)
+                    self.l_last_cmd_dir = l_dir
                 self.l_last_cmd_v = l_v_abs
-                self.l_last_cmd_dir = l_dir
+                
+            # Right motor update check
+            r_dir_change = (r_dir != self.r_last_cmd_dir)
+            r_v_thresh = max(0.005, 0.02 * self.r_last_cmd_v)
+            r_needs_update = abs(r_v_abs - self.r_last_cmd_v) > r_v_thresh or r_dir_change
+            
             if r_needs_update:
+                self.motors.right_puller.set_velocity(r_v_abs)
+                if r_dir_change or not self.motors.right_puller.moving:
+                    self.motors.right_puller.move(r_dir, stop=False)
+                    self.r_last_cmd_dir = r_dir
                 self.r_last_cmd_v = r_v_abs
-                self.r_last_cmd_dir = r_dir
         else:
             # Fallback for Standard Mode (Not Relative)
             if not self.rel_pull and mode == 0:
