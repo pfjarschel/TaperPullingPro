@@ -435,18 +435,9 @@ class TaperPullingCore:
     
     def check_pulling(self):
         if self.rel_pull:
-            # Physical pulling distance from encoder positions:
-            # Since Left and Right oscillate in opposite directions during brushing,
-            # (left_init - left_pos) + (right_init - right_pos) cancels out brushing oscillation.
-            if self.left_puller_xinit is not None and self.right_puller_xinit is not None and \
-               self.puller_left_pos is not None and self.puller_right_pos is not None:
-                real_pulled = (self.left_puller_xinit - self.puller_left_pos) + \
-                              (self.right_puller_xinit - self.puller_right_pos)
-                self.total_pulled = max(0.0, float(real_pulled))
-            else:
-                total_pull_vel = self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel
-                pull_time = time.time() - self.time_init_pull
-                self.total_pulled = total_pull_vel * pull_time
+            total_pull_vel = self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel
+            pull_time = time.time() - self.time_init_pull
+            self.total_pulled = total_pull_vel * pull_time
         else:
             self.total_pulled = np.abs(self.left_puller_xinit - self.puller_left_pos) + \
                                 np.abs(self.right_puller_xinit - self.puller_right_pos)
@@ -501,12 +492,14 @@ class TaperPullingCore:
                 v_brush = 0.0
                 self.brush_phase = 0.0
             else:
-                # Angular frequency: omega = v_nominal / amplitude
-                # This ensures the peak brushing speed reaches self.motors.brusher.vel
+                # In sinusoidal motion, setting v_peak = (pi/2) * v_b ensures that the AVERAGE
+                # speed across the stroke equals the set brushing velocity (self.motors.brusher.vel),
+                # and the cycle period matches nominal triangular brushing (T = 4*A / v_b).
                 v_b = self.motors.brusher.vel
-                omega = v_b / amplitude
+                v_peak = (np.pi / 2.0) * v_b
+                omega = v_peak / amplitude
                 # Limit omega so phase does not jump unreasonably fast if amplitude is very small
-                omega = min(omega, 10.0)
+                omega = min(omega, 15.0)
                 
                 phi_old = self.brush_phase
                 phi_new = phi_old + omega * dt
@@ -533,7 +526,7 @@ class TaperPullingCore:
                 
                 # Smooth sinusoidal position & velocity
                 self.fake_brusher_pos = amplitude * np.sin(self.brush_phase)
-                v_brush = v_b * np.cos(self.brush_phase)
+                v_brush = v_peak * np.cos(self.brush_phase)
                 
             # 3. Pulling Components & Target Positions
             # Machine coordinates:
