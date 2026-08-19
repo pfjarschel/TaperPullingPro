@@ -397,11 +397,11 @@ class GenericTLMotor:
         if self.ok:
             if vel < 0.001: vel = 0.001
             if vel > self.max_vel: vel = self.max_vel
-            if not hasattr(self, 'accel') or self.accel is None or self.accel <= 0:
-                _, curr_a = self.get_vel_params()
-                self.accel = curr_a
-            self.set_vel_params(vel, self.accel)
+            curr_v, curr_a = self.get_vel_params()
+            curr_v = vel
+            self.set_vel_params(curr_v, curr_a)
             self.vel = vel
+            self.accel = curr_a
             
     def set_acceleration(self, accel: float):
         """
@@ -413,11 +413,11 @@ class GenericTLMotor:
         if self.ok:
             if accel < 0.0: accel = 0.0
             if accel > self.max_accel: accel = self.max_accel
-            if not hasattr(self, 'vel') or self.vel is None or self.vel <= 0:
-                curr_v, _ = self.get_vel_params()
-                self.vel = curr_v
-            self.set_vel_params(self.vel, accel)
+            curr_v, curr_a = self.get_vel_params()
+            curr_a = accel
+            self.set_vel_params(curr_v, curr_a)
             self.accel = accel
+            self.vel = curr_v
             
     def get_velocity(self):
         """

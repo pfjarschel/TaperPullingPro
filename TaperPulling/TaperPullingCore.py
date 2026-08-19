@@ -435,9 +435,18 @@ class TaperPullingCore:
     
     def check_pulling(self):
         if self.rel_pull:
-            total_pull_vel = self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel
-            pull_time = time.time() - self.time_init_pull
-            self.total_pulled = total_pull_vel*pull_time
+            # Physical pulling distance from encoder positions:
+            # Since Left and Right oscillate in opposite directions during brushing,
+            # (left_init - left_pos) + (right_init - right_pos) cancels out brushing oscillation.
+            if self.left_puller_xinit is not None and self.right_puller_xinit is not None and \
+               self.puller_left_pos is not None and self.puller_right_pos is not None:
+                real_pulled = (self.left_puller_xinit - self.puller_left_pos) + \
+                              (self.right_puller_xinit - self.puller_right_pos)
+                self.total_pulled = max(0.0, float(real_pulled))
+            else:
+                total_pull_vel = self.motors.left_puller.pull_vel + self.motors.right_puller.pull_vel
+                pull_time = time.time() - self.time_init_pull
+                self.total_pulled = total_pull_vel * pull_time
         else:
             self.total_pulled = np.abs(self.left_puller_xinit - self.puller_left_pos) + \
                                 np.abs(self.right_puller_xinit - self.puller_right_pos)
@@ -588,9 +597,8 @@ class TaperPullingCore:
             
             if l_needs_update:
                 self.motors.left_puller.set_velocity(l_v_abs)
-                if l_dir_change or not self.motors.left_puller.moving:
-                    self.motors.left_puller.move(l_dir, stop=False)
-                    self.l_last_cmd_dir = l_dir
+                self.motors.left_puller.move(l_dir, stop=False)
+                self.l_last_cmd_dir = l_dir
                 self.l_last_cmd_v = l_v_abs
                 
             # Right motor update check
@@ -600,9 +608,8 @@ class TaperPullingCore:
             
             if r_needs_update:
                 self.motors.right_puller.set_velocity(r_v_abs)
-                if r_dir_change or not self.motors.right_puller.moving:
-                    self.motors.right_puller.move(r_dir, stop=False)
-                    self.r_last_cmd_dir = r_dir
+                self.motors.right_puller.move(r_dir, stop=False)
+                self.r_last_cmd_dir = r_dir
                 self.r_last_cmd_v = r_v_abs
         else:
             # Fallback for Standard Mode (Not Relative)
