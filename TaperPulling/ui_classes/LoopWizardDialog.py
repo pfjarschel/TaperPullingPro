@@ -205,27 +205,7 @@ class LoopWizardDialog(QDialog):
 
         # Step Jog Buttons
         jog_btn_layout = QHBoxLayout()
-        self.btn_step_loosen = QPushButton("◀◀ Step FW (+ Loosen)", self)
-        self.btn_step_loosen.setStyleSheet("""
-        QPushButton {
-            background-color: #0284c7;
-            color: #ffffff;
-            font-weight: bold;
-            padding: 9px;
-            border: 1px solid #0369a1;
-            border-radius: 5px;
-            font-size: 13px;
-        }
-        QPushButton:hover {
-            background-color: #0369a1;
-        }
-        QPushButton:pressed {
-            background-color: #075985;
-        }
-        """)
-        self.btn_step_loosen.clicked.connect(self.do_step_loosen)
-
-        self.btn_step_tighten = QPushButton("Step BW (- Tighten) ▶▶", self)
+        self.btn_step_tighten = QPushButton("◀◀ Step BW (- Tighten)", self)
         self.btn_step_tighten.setStyleSheet("""
         QPushButton {
             background-color: #d97706;
@@ -245,8 +225,28 @@ class LoopWizardDialog(QDialog):
         """)
         self.btn_step_tighten.clicked.connect(self.do_step_tighten)
 
-        jog_btn_layout.addWidget(self.btn_step_loosen)
+        self.btn_step_loosen = QPushButton("Step FW (+ Loosen) ▶▶", self)
+        self.btn_step_loosen.setStyleSheet("""
+        QPushButton {
+            background-color: #0284c7;
+            color: #ffffff;
+            font-weight: bold;
+            padding: 9px;
+            border: 1px solid #0369a1;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #0369a1;
+        }
+        QPushButton:pressed {
+            background-color: #075985;
+        }
+        """)
+        self.btn_step_loosen.clicked.connect(self.do_step_loosen)
+
         jog_btn_layout.addWidget(self.btn_step_tighten)
+        jog_btn_layout.addWidget(self.btn_step_loosen)
         step_layout.addLayout(jog_btn_layout)
 
         main_layout.addWidget(step_group)
@@ -277,27 +277,6 @@ class LoopWizardDialog(QDialog):
 
         # Press & Hold buttons
         hold_btn_layout = QHBoxLayout()
-        self.btn_hold_loosen = QPushButton("▼ HOLD to Loosen (FW +)", self)
-        self.btn_hold_loosen.setStyleSheet("""
-        QPushButton {
-            background-color: #2563eb;
-            color: #ffffff;
-            font-weight: bold;
-            padding: 11px;
-            border: 1px solid #1d4ed8;
-            border-radius: 5px;
-            font-size: 13px;
-        }
-        QPushButton:hover {
-            background-color: #1d4ed8;
-        }
-        QPushButton:pressed {
-            background-color: #1e40af;
-        }
-        """)
-        self.btn_hold_loosen.pressed.connect(self.on_hold_loosen_pressed)
-        self.btn_hold_loosen.released.connect(self.on_hold_released)
-
         self.btn_hold_tighten = QPushButton("▲ HOLD to Tighten (BW -)", self)
         self.btn_hold_tighten.setStyleSheet("""
         QPushButton {
@@ -319,8 +298,29 @@ class LoopWizardDialog(QDialog):
         self.btn_hold_tighten.pressed.connect(self.on_hold_tighten_pressed)
         self.btn_hold_tighten.released.connect(self.on_hold_released)
 
-        hold_btn_layout.addWidget(self.btn_hold_loosen)
+        self.btn_hold_loosen = QPushButton("▼ HOLD to Loosen (FW +)", self)
+        self.btn_hold_loosen.setStyleSheet("""
+        QPushButton {
+            background-color: #2563eb;
+            color: #ffffff;
+            font-weight: bold;
+            padding: 11px;
+            border: 1px solid #1d4ed8;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #1d4ed8;
+        }
+        QPushButton:pressed {
+            background-color: #1e40af;
+        }
+        """)
+        self.btn_hold_loosen.pressed.connect(self.on_hold_loosen_pressed)
+        self.btn_hold_loosen.released.connect(self.on_hold_released)
+
         hold_btn_layout.addWidget(self.btn_hold_tighten)
+        hold_btn_layout.addWidget(self.btn_hold_loosen)
         creep_layout.addLayout(hold_btn_layout)
 
         main_layout.addWidget(creep_group)
