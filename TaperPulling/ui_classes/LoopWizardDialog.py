@@ -12,8 +12,8 @@ continuous slow creeping, and step-by-step guidance.
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
-    QLabel, QPushButton, QDoubleSpinBox, QRadioButton, QButtonGroup,
-    QMessageBox, QFrame, QTextEdit
+    QLabel, QPushButton, QDoubleSpinBox, QButtonGroup,
+    QMessageBox, QTextEdit
 )
 from PyQt6.QtGui import QFont
 
@@ -27,8 +27,8 @@ class LoopWizardDialog(QDialog):
         super().__init__(parent)
         self.core = core
         self.setWindowTitle("Fiber Taper Loop Wizard")
-        self.setMinimumSize(580, 680)
-        self.resize(620, 720)
+        self.setMinimumSize(600, 700)
+        self.resize(640, 730)
 
         # Store initial positions for delta tracking and reset functionality
         self.left_motor = self.core.motors.left_puller if self.core else None
@@ -54,8 +54,43 @@ class LoopWizardDialog(QDialog):
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(10)
+        main_layout.setSpacing(12)
         main_layout.setContentsMargins(15, 15, 15, 15)
+
+        step_btn_stylesheet = """
+        QPushButton {
+            background-color: #e2e8f0;
+            color: #1e293b;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 7px;
+            font-weight: 500;
+        }
+        QPushButton:checked {
+            background-color: #2563eb;
+            color: #ffffff;
+            font-weight: bold;
+            border: 1px solid #1d4ed8;
+        }
+        QPushButton:hover:!checked {
+            background-color: #cbd5e1;
+        }
+        """
+
+        preset_btn_stylesheet = """
+        QPushButton {
+            background-color: #f1f5f9;
+            color: #0f172a;
+            border: 1px solid #cbd5e1;
+            border-radius: 3px;
+            padding: 4px 6px;
+            font-weight: 500;
+        }
+        QPushButton:hover {
+            background-color: #e2e8f0;
+            border-color: #94a3b8;
+        }
+        """
 
         # --- 1. Step-by-Step Guide Panel ---
         guide_group = QGroupBox("Fabrication Guide", self)
@@ -67,15 +102,15 @@ class LoopWizardDialog(QDialog):
         self.step_btn2 = QPushButton("2. Twist / Loop", self)
         self.step_btn3 = QPushButton("3. Tension (BW)", self)
 
+        for btn in (self.step_btn1, self.step_btn2, self.step_btn3):
+            btn.setCheckable(True)
+            btn.setStyleSheet(step_btn_stylesheet)
+            step_header_layout.addWidget(btn)
+
         self.step_btn_group = QButtonGroup(self)
         self.step_btn_group.addButton(self.step_btn1, 0)
         self.step_btn_group.addButton(self.step_btn2, 1)
         self.step_btn_group.addButton(self.step_btn3, 2)
-
-        for btn in (self.step_btn1, self.step_btn2, self.step_btn3):
-            btn.setCheckable(True)
-            step_header_layout.addWidget(btn)
-
         self.step_btn_group.idClicked.connect(self.set_step)
         self.step_btn1.setChecked(True)
         guide_layout.addLayout(step_header_layout)
@@ -84,7 +119,9 @@ class LoopWizardDialog(QDialog):
         self.guide_text = QTextEdit(self)
         self.guide_text.setReadOnly(True)
         self.guide_text.setMaximumHeight(85)
-        self.guide_text.setStyleSheet("background-color: #f8f9fa; color: #212529; border: 1px solid #ced4da; border-radius: 4px; padding: 6px;")
+        self.guide_text.setStyleSheet(
+            "background-color: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px; font-size: 13px;"
+        )
         guide_layout.addWidget(self.guide_text)
 
         main_layout.addWidget(guide_group)
@@ -134,7 +171,7 @@ class LoopWizardDialog(QDialog):
         # Net Slack / Separation Change
         pos_layout.addWidget(QLabel("Total Slack Added:"), 3, 0)
         self.lbl_total_slack = QLabel("0.000 mm")
-        self.lbl_total_slack.setStyleSheet("font-family: monospace; font-weight: bold; font-size: 13px; color: #0d6efd;")
+        self.lbl_total_slack.setStyleSheet("font-family: monospace; font-weight: bold; font-size: 13px; color: #0284c7;")
         pos_layout.addWidget(self.lbl_total_slack, 3, 1, 1, 3)
 
         main_layout.addWidget(pos_group)
@@ -152,13 +189,15 @@ class LoopWizardDialog(QDialog):
         self.spin_step_size.setSingleStep(0.01)
         self.spin_step_size.setValue(0.100)
         self.spin_step_size.setSuffix(" mm")
+        self.spin_step_size.setMinimumWidth(130)
         step_config_layout.addWidget(self.spin_step_size)
 
         # Quick preset buttons
         step_config_layout.addWidget(QLabel("Presets:"))
         for preset_val, preset_label in [(0.01, "10µm"), (0.05, "50µm"), (0.1, "0.1mm"), (0.5, "0.5mm"), (1.0, "1mm")]:
             p_btn = QPushButton(preset_label, self)
-            p_btn.setMaximumWidth(52)
+            p_btn.setMinimumWidth(56)
+            p_btn.setStyleSheet(preset_btn_stylesheet)
             p_btn.clicked.connect(lambda _, v=preset_val: self.spin_step_size.setValue(v))
             step_config_layout.addWidget(p_btn)
         step_config_layout.addStretch()
@@ -167,11 +206,43 @@ class LoopWizardDialog(QDialog):
         # Step Jog Buttons
         jog_btn_layout = QHBoxLayout()
         self.btn_step_loosen = QPushButton("◀◀ Step FW (+ Loosen)", self)
-        self.btn_step_loosen.setStyleSheet("padding: 8px; font-weight: bold; background-color: #e7f1ff; border: 1px solid #b6d4fe; border-radius: 4px;")
+        self.btn_step_loosen.setStyleSheet("""
+        QPushButton {
+            background-color: #0284c7;
+            color: #ffffff;
+            font-weight: bold;
+            padding: 9px;
+            border: 1px solid #0369a1;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #0369a1;
+        }
+        QPushButton:pressed {
+            background-color: #075985;
+        }
+        """)
         self.btn_step_loosen.clicked.connect(self.do_step_loosen)
 
         self.btn_step_tighten = QPushButton("Step BW (- Tighten) ▶▶", self)
-        self.btn_step_tighten.setStyleSheet("padding: 8px; font-weight: bold; background-color: #fff3cd; border: 1px solid #ffe69c; border-radius: 4px;")
+        self.btn_step_tighten.setStyleSheet("""
+        QPushButton {
+            background-color: #d97706;
+            color: #ffffff;
+            font-weight: bold;
+            padding: 9px;
+            border: 1px solid #b45309;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #b45309;
+        }
+        QPushButton:pressed {
+            background-color: #92400e;
+        }
+        """)
         self.btn_step_tighten.clicked.connect(self.do_step_tighten)
 
         jog_btn_layout.addWidget(self.btn_step_loosen)
@@ -192,11 +263,13 @@ class LoopWizardDialog(QDialog):
         self.spin_creep_vel.setSingleStep(0.005)
         self.spin_creep_vel.setValue(0.020)
         self.spin_creep_vel.setSuffix(" mm/s")
+        self.spin_creep_vel.setMinimumWidth(130)
         creep_config_layout.addWidget(self.spin_creep_vel)
 
         for c_val, c_lbl in [(0.01, "0.01mm/s"), (0.02, "0.02mm/s"), (0.05, "0.05mm/s"), (0.1, "0.1mm/s")]:
             c_btn = QPushButton(c_lbl, self)
-            c_btn.setMaximumWidth(70)
+            c_btn.setMinimumWidth(75)
+            c_btn.setStyleSheet(preset_btn_stylesheet)
             c_btn.clicked.connect(lambda _, v=c_val: self.spin_creep_vel.setValue(v))
             creep_config_layout.addWidget(c_btn)
         creep_config_layout.addStretch()
@@ -205,12 +278,44 @@ class LoopWizardDialog(QDialog):
         # Press & Hold buttons
         hold_btn_layout = QHBoxLayout()
         self.btn_hold_loosen = QPushButton("▼ HOLD to Loosen (FW +)", self)
-        self.btn_hold_loosen.setStyleSheet("padding: 10px; font-weight: bold; background-color: #cfe2ff; border: 1px solid #9ec5fe; border-radius: 4px;")
+        self.btn_hold_loosen.setStyleSheet("""
+        QPushButton {
+            background-color: #2563eb;
+            color: #ffffff;
+            font-weight: bold;
+            padding: 11px;
+            border: 1px solid #1d4ed8;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #1d4ed8;
+        }
+        QPushButton:pressed {
+            background-color: #1e40af;
+        }
+        """)
         self.btn_hold_loosen.pressed.connect(self.on_hold_loosen_pressed)
         self.btn_hold_loosen.released.connect(self.on_hold_released)
 
         self.btn_hold_tighten = QPushButton("▲ HOLD to Tighten (BW -)", self)
-        self.btn_hold_tighten.setStyleSheet("padding: 10px; font-weight: bold; background-color: #ffe69c; border: 1px solid #ffda6a; border-radius: 4px;")
+        self.btn_hold_tighten.setStyleSheet("""
+        QPushButton {
+            background-color: #ea580c;
+            color: #ffffff;
+            font-weight: bold;
+            padding: 11px;
+            border: 1px solid #c2410c;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #c2410c;
+        }
+        QPushButton:pressed {
+            background-color: #9a3412;
+        }
+        """)
         self.btn_hold_tighten.pressed.connect(self.on_hold_tighten_pressed)
         self.btn_hold_tighten.released.connect(self.on_hold_released)
 
@@ -225,14 +330,56 @@ class LoopWizardDialog(QDialog):
 
         self.btn_reset_pos = QPushButton("Reset to Start Pos", self)
         self.btn_reset_pos.setToolTip("Return both motors to the position when the wizard opened")
+        self.btn_reset_pos.setStyleSheet("""
+        QPushButton {
+            background-color: #475569;
+            color: #ffffff;
+            padding: 7px 12px;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        QPushButton:hover {
+            background-color: #334155;
+        }
+        """)
         self.btn_reset_pos.clicked.connect(self.do_reset_positions)
 
         self.btn_stop = QPushButton("STOP", self)
-        self.btn_stop.setStyleSheet("background-color: #dc3545; color: white; font-weight: bold; padding: 6px 14px; border-radius: 4px;")
+        self.btn_stop.setStyleSheet("""
+        QPushButton {
+            background-color: #dc2626;
+            color: #ffffff;
+            font-weight: bold;
+            padding: 7px 18px;
+            border: 1px solid #b91c1c;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #b91c1c;
+        }
+        QPushButton:pressed {
+            background-color: #991b1b;
+        }
+        """)
         self.btn_stop.clicked.connect(self.do_emergency_stop)
 
         self.btn_done = QPushButton("Done / Close", self)
-        self.btn_done.setStyleSheet("font-weight: bold; padding: 6px 14px;")
+        self.btn_done.setStyleSheet("""
+        QPushButton {
+            background-color: #16a34a;
+            color: #ffffff;
+            font-weight: bold;
+            padding: 7px 18px;
+            border: 1px solid #15803d;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #15803d;
+        }
+        """)
         self.btn_done.clicked.connect(self.accept)
 
         action_layout.addWidget(self.btn_reset_pos)
@@ -290,17 +437,17 @@ class LoopWizardDialog(QDialog):
         # Update motion indicators
         if self.left_motor.motor_moving():
             self.lbl_left_status.setText("MOVING")
-            self.lbl_left_status.setStyleSheet("color: #0d6efd; font-weight: bold;")
+            self.lbl_left_status.setStyleSheet("color: #0284c7; font-weight: bold;")
         else:
             self.lbl_left_status.setText("STOPPED")
-            self.lbl_left_status.setStyleSheet("color: #198754;")
+            self.lbl_left_status.setStyleSheet("color: #16a34a; font-weight: 500;")
 
         if self.right_motor.motor_moving():
             self.lbl_right_status.setText("MOVING")
-            self.lbl_right_status.setStyleSheet("color: #0d6efd; font-weight: bold;")
+            self.lbl_right_status.setStyleSheet("color: #0284c7; font-weight: bold;")
         else:
             self.lbl_right_status.setText("STOPPED")
-            self.lbl_right_status.setStyleSheet("color: #198754;")
+            self.lbl_right_status.setStyleSheet("color: #16a34a; font-weight: 500;")
 
     # --- Step Jog Execution ---
     def do_step_loosen(self):
@@ -323,12 +470,23 @@ class LoopWizardDialog(QDialog):
         target_l = l_pos + d_left
         target_r = r_pos + d_right
 
-        # Safety boundary checks
-        if not (self.left_motor.safe_range[0] <= target_l <= self.left_motor.safe_range[1]):
-            QMessageBox.warning(self, "Safety Limit", f"Left puller target {target_l:.3f} mm is outside safe range [{self.left_motor.safe_range[0]}, {self.left_motor.safe_range[1]}].")
+        # Physical travel range checks [0.0, max_pos]
+        max_pos_l = getattr(self.left_motor, "max_pos", 100.0)
+        min_pos_l = getattr(self.left_motor, "min_pos", 0.0)
+        max_pos_r = getattr(self.right_motor, "max_pos", 100.0)
+        min_pos_r = getattr(self.right_motor, "min_pos", 0.0)
+
+        if not (min_pos_l <= target_l <= max_pos_l):
+            QMessageBox.warning(
+                self, "Travel Limit",
+                f"Left puller target {target_l:.3f} mm is outside physical limits [{min_pos_l:.1f}, {max_pos_l:.1f}] mm."
+            )
             return
-        if not (self.right_motor.safe_range[0] <= target_r <= self.right_motor.safe_range[1]):
-            QMessageBox.warning(self, "Safety Limit", f"Right puller target {target_r:.3f} mm is outside safe range [{self.right_motor.safe_range[0]}, {self.right_motor.safe_range[1]}].")
+        if not (min_pos_r <= target_r <= max_pos_r):
+            QMessageBox.warning(
+                self, "Travel Limit",
+                f"Right puller target {target_r:.3f} mm is outside physical limits [{min_pos_r:.1f}, {max_pos_r:.1f}] mm."
+            )
             return
 
         self.left_motor.go_to(target_l)
