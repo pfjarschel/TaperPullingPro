@@ -25,6 +25,7 @@ from TaperPulling.TaperPullingSim import TaperPullingSim
 from TaperPulling.TaperPullingCore import TaperPullingCore
 from TaperPulling.TaperPullingData import TaperPullingData
 from TaperPulling.TaperPullingMotors import GenericTLMotor
+from TaperPulling.ui_classes.LoopWizardDialog import LoopWizardDialog
 
 # Load UI files
 thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
@@ -1319,46 +1320,10 @@ class MainWindow(FormUI, WindowUI):
                 self.core.cleaving = True
         
     def loop(self):
-        if self.core.standby:
-            loop_mf = self.loopmfSpin.value()
-            loop_mb = self.loopmbSpin.value()
-            text = "The loop wizard will now start.\n" + \
-                    f"The puller motors will move {loop_mf:.2f} mm forward (each), to loosen the fiber.\n\n" + \
-                    "Click 'Ok' to continue."
-            box_resp = QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-            
-            if box_resp == QMessageBox.StandardButton.Ok:
-                self.core.loop_dist_bw = loop_mb
-                self.core.loop_dist_fw = loop_mf
-                self.core.looping = True
-                while not self.core.loop_loosened:
-                    time.sleep(0.1)
-
-                text = "Now twist as needed.\n\n" + \
-                    "Click 'Ok' to continue when done."
-                box_resp = QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
-                
-                text = f"The puller motors will now move {loop_mb:.2f} mm back (each), to tension the loop" + \
-                        " and control its diameter.\n\n" + \
-                        "Click 'Ok' to continue."
-                box_resp = QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-                
-                if box_resp == QMessageBox.StandardButton.Ok:
-                    self.core.loop_looped = True
-                    while self.core.looping:
-                        time.sleep(0.1)
-                    
-                    text = "Thats it! Your loop should be complete!\n\n" + \
-                        "Click 'Ok' to end the wizard."
-                    QMessageBox.information(self, "Loop Wizard", text, QMessageBox.StandardButton.Ok)
-                else:
-                    self.core.looping = False
-                    self.core.loop_started = False
-                    self.core.loop_loosened = False
-                    self.core.loop_looped = False
-                    self.core.loop_tensioning = False
-                    self.core.loop_tensioned = False
-                    
+        # Open interactive Loop Wizard Dialog
+        wizard = LoopWizardDialog(self, core=self.core)
+        wizard.exec()
+        
     
     # Taper params functions
     def recalc_params(self):
