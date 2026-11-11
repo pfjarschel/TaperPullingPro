@@ -17,12 +17,17 @@ motors.
 
 from enum import Enum
 import time
-from threading import Timer
+from threading import Timer, Lock
 from ctypes import *
 import os
 import numpy as np
 
         
+
+# Only one motor at a time looks for devices and opens its controller: the motors
+# are initialized in separate threads, and these calls are not safe to mix.
+_open_lock = Lock()
+
 
 class MotorType(Enum):
     """
@@ -148,6 +153,9 @@ class GenericTLMotor:
         self.serial_c = None
         self.simulate = False
         self.kinesis_poll = 10  # ms
+        self.opened = False     # The controller is open (even if the connection did not complete)
+        self.open_tries = 3     # Attempts to open the controller, at each connection
+        self.connect_time = 0.0 # s. How long the last connection took
         self.lib_prfx = ""
         self.monitor_interval = 10  # ms
         self.lib = None
@@ -217,42 +225,119 @@ class GenericTLMotor:
             self.kinesis_poll = poll_ms
             self.monitor_interval = poll_ms
             if self.libok:
-                if self.lib.TLI_BuildDeviceList() == 0:
-                    err = eval(f"self.lib.{self.lib_prfx}_Open(self.serial_c)")
-                    time.sleep(2.0)
-                    if err == 0:
-                        eval(f"self.lib.{self.lib_prfx}_ClearMessageQueue(self.serial_c)")
-                        eval(f"self.lib.{self.lib_prfx}_LoadSettings(self.serial_c)")
-                        time.sleep(0.5)
-                        eval(f"self.lib.{self.lib_prfx}_EnableChannel(self.serial_c)")
-                        time.sleep(1.0)
-                        eval(f"self.lib.{self.lib_prfx}_RequestSettings(self.serial_c)")      
-                        time.sleep(0.5)
-                        eval(f"self.lib.{self.lib_prfx}_RequestHomingParams(self.serial_c)")
-                        time.sleep(0.5)
-                        eval(f"self.lib.{self.lib_prfx}_GetHomingParamsBlock(self.serial_c, byref(self.homing_params))")
-                        time.sleep(0.5)
-                        # Force homing direction to reverse (towards 0)
-                        if self.homing_params.direction != 2:
-                            self.homing_params.direction = c_short(0x02)
-                        eval(f"self.lib.{self.lib_prfx}_SetHomingParamsBlock(self.serial_c, byref(self.homing_params))")
-                        time.sleep(0.5)
-                        
-                        # Start polling 
-                        if poll_ms >= 1:
-                            if self.simulate:
-                                poll_ms = 150
-                                self.kinesis_poll = poll_ms
-                                self.monitor_interval = poll_ms
-                            eval(f"self.lib.{self.lib_prfx}_StartPolling(self.serial_c, c_int(poll_ms))")
-                        self.ok = True
-                    else:
-                        print("Error connecting to the device:", err)
-                        self.error = True
-                else:
-                    print("Error: No devices found")
+                t_start = time.time()
+                slow = []  # Steps that did not confirm in time
+
+                # A previous attempt may have left the controller open
+                if self.opened:
+                    try:
+                        self.dll_call("StopPolling")
+                        self.dll_call("Close")
+                    except Exception as e:
+                        print(e)
+                    self.opened = False
+
+                # Find and open the controller. If it fails, look for devices again and retry
+                err = None
+                with _open_lock:
+                    for i in range(self.open_tries):
+                        if self.lib.TLI_BuildDeviceList() == 0:
+                            err = self.dll_call("Open")
+                            if err == 0:
+                                break
+                        if i < self.open_tries - 1:
+                            time.sleep(0.5)
+
+                if err == 0:
+                    self.opened = True
+
+                    # Instead of waiting fixed times after each command, check when it took
+                    # effect. The previous fixed times are the limits: if a check never
+                    # confirms, everything happens as before, just as slowly.
+                    self.dll_call("ClearMessageQueue")
+                    self.dll_call("LoadSettings")
+                    if not self.wait_until(self.settings_loaded, 2.5):
+                        slow.append("load settings")
+
+                    # Polling keeps the status of the motor updated from here on
+                    if poll_ms >= 1:
+                        if self.simulate:
+                            poll_ms = 150
+                            self.kinesis_poll = poll_ms
+                            self.monitor_interval = poll_ms
+                        self.dll_call("StartPolling", c_int(poll_ms))
+
+                    self.dll_call("EnableChannel")
+                    if not self.wait_until(self.channel_enabled, 1.0):
+                        slow.append("enable")
+
+                    # The status is not valid for a moment after the settings are requested
+                    self.dll_call("RequestSettings")
+                    time.sleep(0.1)
+                    if not self.wait_until(self.channel_enabled, 0.4):
+                        slow.append("request settings")
+
+                    # Force homing direction to reverse (towards 0)
+                    self.dll_call("RequestHomingParams")
+                    if not self.wait_until(self.read_homing_params, 1.0):
+                        slow.append("homing parameters")
+                    if self.homing_params.direction != 2:
+                        self.homing_params.direction = c_short(0x02)
+                    self.dll_call("SetHomingParamsBlock", byref(self.homing_params))
+                    self.dll_call("RequestHomingParams")
+                    if not self.wait_until(lambda: self.read_homing_params() and self.homing_params.direction == 2, 0.5):
+                        slow.append("set homing direction")
+
+                    self.ok = True
+                    self.connect_time = time.time() - t_start
+                    print(f"{self.name}: connected in {self.connect_time:.1f} s" +
+                          (f" (not confirmed in time: {', '.join(slow)})" if slow else ""))
+                elif err is None:
+                    print(f"Error: No devices found ({self.name})")
                     self.error = True
-        
+                else:
+                    print(f"Error connecting to the device ({self.name}):", err)
+                    self.error = True
+
+    def dll_call(self, function: str, *args):
+        """
+        Calls a function of the Kinesis library for this motor.
+        """
+        return getattr(self.lib, f"{self.lib_prfx}_{function}")(self.serial_c, *args)
+
+    def wait_until(self, condition, timeout: float, interval: float=0.02) -> bool:
+        """
+        Waits until condition() is true, for no longer than timeout (s).
+
+        Returns:
+            bool: Whether it became true.
+        """
+        t0 = time.time()
+        while True:
+            try:
+                if condition():
+                    return True
+            except Exception:
+                pass
+            if time.time() - t0 >= timeout:
+                return False
+            time.sleep(interval)
+
+    def settings_loaded(self) -> bool:
+        # The library can only convert units once it has the settings of the stage
+        dev = c_int(0)
+        self.dll_call("GetDeviceUnitFromRealValue", c_double(1.0), byref(dev), 0)
+        return dev.value != 0
+
+    def channel_enabled(self) -> bool:
+        if self.kinesis_poll < 1:
+            self.dll_call("RequestStatusBits")
+        return bool(self.get_status_bits() & 0x80000000)
+
+    def read_homing_params(self) -> bool:
+        self.dll_call("GetHomingParamsBlock", byref(self.homing_params))
+        return self.homing_params.velocity != 0
+
     def close(self):
         try:
             self.move_loop.cancel()
@@ -270,7 +355,7 @@ class GenericTLMotor:
         Disconnect from the motor
         """
 
-        if self.ok:
+        if self.ok or self.opened:
             try:
                 if disable:
                     eval(f"self.lib.{self.lib_prfx}_DisableChannel(self.serial_c)")
@@ -283,6 +368,7 @@ class GenericTLMotor:
                 print(e)
         
         self.ok = False
+        self.opened = False
         
     def get_status_bits(self):
         status_bits = eval(f"self.lib.{self.lib_prfx}_GetStatusBits(self.serial_c)")
@@ -454,13 +540,13 @@ class GenericTLMotor:
             # self.homed = not bool(eval(f"self.lib.{self.lib_prfx}_NeedsHoming(self.serial_c)"))
             
             # In fact, none of these are appropriate. It is best to use the status bits for this.
-            # Just one reading seems to give false results, try several.
-            for i in range(10):
+            # Just one reading seems to give false results, try several (20 readings in 0.4 s).
+            for i in range(20):
                 status_bits = self.get_status_bits()
                 self.homed = bool(status_bits & 0x00000400)
                 if self.homed:
                     break
-                time.sleep(0.1)
+                time.sleep(0.02)
             
         return self.homed
     
@@ -1026,10 +1112,16 @@ class TaperPullingMotors:
         motor.initing = True
         motor.ok = False
         motor.error = False
-        motor.connect(serial, poll_ms, simulate)
-        motor.initialize()
-        motor.set_velocity(motor.vel)
-        motor.set_acceleration(motor.accel)
+        try:
+            motor.connect(serial, poll_ms, simulate)
+            motor.initialize()
+            motor.set_velocity(motor.vel)
+            motor.set_acceleration(motor.accel)
+        except Exception as e:
+            # Without this, the motor would be left "initializing" forever
+            print(f"Error initializing {motor_type.name}: {e}")
+            motor.ok = False
+            motor.error = True
         motor.initing = False
         print(f"{motor_type.name} initialization OK: {motor.ok}")
             

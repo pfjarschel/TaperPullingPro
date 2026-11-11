@@ -85,6 +85,7 @@ class MainWindow(FormUI, WindowUI):
     temp_settings_file = f"{rootpath}/config/temp_settings.json"
     default_settings_file = f"{confpath}/PyTaper_default_settings.json"
     factory_settings_file = f"{confpath}/PyTaper_factory_settings.json"
+    state_file = f"{confpath}/PyTaper_state.json"  # What is remembered between runs, apart from the settings
     last_dir = QDir.homePath()
     
     # Flow control variables
@@ -504,16 +505,30 @@ class MainWindow(FormUI, WindowUI):
         # The toolbar is empty: it only takes space
         self.mainToolBar.hide()
 
-        # The program always starts in Easy mode
-        self.set_easy_mode(True)
+        # The program starts in the mode it was last used in (Easy mode, the first time)
+        easy = True
+        try:
+            with open(self.state_file, "r") as f:
+                easy = bool(json.load(f).get("easy_mode", True))
+        except Exception:
+            pass
+        self.set_easy_mode(easy, remember=False)
             
     # Easy mode
-    def set_easy_mode(self, easy: bool):
+    def set_easy_mode(self, easy: bool, remember: bool=True):
         """
         Switches between the complete view (Advanced mode) and the simplified one 
         (Easy mode). The transmission and spectrogram graphs move to the view in use.
+        The mode is remembered for the next time the program is started.
         """
         self.easy_mode = bool(easy)
+        if remember:
+            try:
+                Path(confpath).mkdir(parents=True, exist_ok=True)
+                with open(self.state_file, "w") as f:
+                    json.dump({"easy_mode": self.easy_mode}, f)
+            except Exception as e:
+                print(f"Could not save the current mode: {e}")
         if self.easy_mode:
             # The simplified view only deals with the standard profile, set by its diameter
             self.diamPriorRadio.setChecked(True)
