@@ -1,10 +1,11 @@
 # Import PyQt6 stuff
 from PyQt6 import uic
-from PyQt6.QtCore import Qt, QTimer, QCoreApplication, QDir, pyqtSignal, QObject, QEvent
+from PyQt6.QtCore import Qt, QTimer, QCoreApplication, QDir, pyqtSignal, QObject, QEvent, QSize
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
                             QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
                             QMessageBox, QFileDialog, QLabel, QMenu, QInputDialog, \
-                            QFormLayout, QHBoxLayout, QStackedWidget
+                            QFormLayout, QHBoxLayout, QVBoxLayout, QGridLayout, QGroupBox, \
+                            QStackedWidget
 from PyQt6.QtGui import QAction
 from PyQt6.QtGui import QPixmap
 
@@ -39,6 +40,17 @@ rootpath = os.path.dirname(thispath).replace("\\", "/")
 respath = f"{rootpath}/resources"
 confpath = f"{rootpath}/config"
 FormUI, WindowUI = uic.loadUiType(f"{respath}/mainwindow.ui")
+
+
+# Canvas for the main graphs. A matplotlib canvas asks for its current size,
+# whatever it is: after being shown large (Easy mode), it would keep pushing the
+# other widgets away. This one always asks for the same size.
+class GraphCanvas(FigureCanvas):
+    def sizeHint(self):
+        return QSize(640, 480)
+
+    def minimumSizeHint(self):
+        return QSize(10, 10)
 
 
 # Status LEDs event filter (clickable label)
@@ -282,7 +294,7 @@ class MainWindow(FormUI, WindowUI):
         plt.rcParams['figure.constrained_layout.use'] = True
 
         self.figure_pow = plt.figure()
-        self.graph_pow = FigureCanvas(self.figure_pow)
+        self.graph_pow = GraphCanvas(self.figure_pow)
         self.graphToolbar_pow = NavigationToolbar(self.graph_pow, self)
         # self.powGraph.addWidget(self.graphToolbar_pow)
         self.powGraph.addWidget(self.graph_pow)
@@ -294,7 +306,7 @@ class MainWindow(FormUI, WindowUI):
         self.graph_pow.draw()
         
         self.figure_spec = plt.figure()
-        self.graph_spec = FigureCanvas(self.figure_spec)
+        self.graph_spec = GraphCanvas(self.figure_spec)
         self.graphToolbar_spec = NavigationToolbar(self.graph_spec, self)
         # self.spectrumGraph.addWidget(self.graphToolbar_spec)
         self.spectrumGraph.addWidget(self.graph_spec)
@@ -307,7 +319,7 @@ class MainWindow(FormUI, WindowUI):
         self.graph_spec.draw()
         
         self.figure_hz = plt.figure()
-        self.graph_hz = FigureCanvas(self.figure_hz)
+        self.graph_hz = GraphCanvas(self.figure_hz)
         self.graphToolbar_hz = NavigationToolbar(self.graph_hz, self)
         # self.hotzoneGraph.addWidget(self.graphToolbar_hz)
         self.hotzoneGraph.addWidget(self.graph_hz)
@@ -482,6 +494,12 @@ class MainWindow(FormUI, WindowUI):
             self.save_settings(self.factory_settings_file)
         else:
             self.load_default_settings()
+
+        # The toolbar is empty: it only takes space
+        self.mainToolBar.hide()
+
+        # The program always starts in Easy mode
+        self.set_easy_mode(True)
             
     # Easy mode
     def set_easy_mode(self, easy: bool):
@@ -505,35 +523,64 @@ class MainWindow(FormUI, WindowUI):
         self.modeBut.setText("Advanced mode" if self.easy_mode else "Easy mode")
         self.actionEasy_mode.setChecked(self.easy_mode)
         
-    # Data tab (built here, not in the .ui file)
+    # Data and camera settings tab (built here, not in the .ui file)
     def build_data_tab(self):
         tab = QWidget()
-        form = QFormLayout(tab)
-        
-        self.dataDirText = QLineEdit("", tab)
+        vbox = QVBoxLayout(tab)
+
+        group = QGroupBox("Data", tab)
+        form = QFormLayout(group)
+        self.dataDirText = QLineEdit("", group)
         self.dataDirText.setObjectName("dataDirText")
         self.dataDirText.setPlaceholderText(f"{rootpath}/data_bckp")
         self.dataDirText.setToolTip("Folder where all data is saved automatically.\nEmpty: 'data_bckp', inside the program folder.")
-        self.dataDirBut = QPushButton("Choose...", tab)
+        self.dataDirBut = QPushButton("Choose...", group)
         self.dataDirBut.clicked.connect(self.choose_data_dir)
         row = QHBoxLayout()
         row.addWidget(self.dataDirText)
         row.addWidget(self.dataDirBut)
-        form.addRow("Data folder:", row)
-        
-        self.dataPrefixText = QLineEdit("taper", tab)
+        form.addRow("Folder:", row)
+
+        self.dataPrefixText = QLineEdit("taper", group)
         self.dataPrefixText.setObjectName("dataPrefixText")
         self.dataPrefixText.setToolTip("Name given to the data folders. A number and the time are added automatically.")
         form.addRow("Name:", self.dataPrefixText)
-        
-        info = QLabel("Every fabrication is saved in its own folder:\n"
-                      "<data folder>/<date>/<name>_<number>_<time>\n"
-                      "Spectra, snapshots and videos from the Loop Wizard are saved in the folder "
-                      "of the taper they were measured on.", tab)
-        info.setWordWrap(True)
-        form.addRow(info)
-        self.devsTabs.addTab(tab, "Data")
-        
+        group.setToolTip("Every fabrication is saved in its own folder:\n"
+                         "<data folder>/<date>/<name>_<number>_<time>\n"
+                         "Spectra, snapshots and videos from the Loop Wizard are saved in the folder\n"
+                         "of the taper they were measured on.")
+        vbox.addWidget(group)
+
+        # The camera itself is shown in the Loop Wizard
+        group = QGroupBox("Camera", tab)
+        form = QFormLayout(group)
+        self.cameraIndexSpin = QSpinBox(group)
+        self.cameraIndexSpin.setObjectName("cameraIndexSpin")
+        self.cameraIndexSpin.setRange(0, 16)
+        self.cameraIndexSpin.setToolTip("Camera number, as seen by the system (0 is the first camera)")
+        self.cameraSimCheck = QCheckBox("Simulate", group)
+        self.cameraSimCheck.setObjectName("cameraSimCheck")
+        row = QHBoxLayout()
+        row.addWidget(self.cameraIndexSpin)
+        row.addWidget(self.cameraSimCheck)
+        form.addRow("Number:", row)
+        self.cameraAutoCheck = QCheckBox("Turn on when the Loop Wizard opens", group)
+        self.cameraAutoCheck.setObjectName("cameraAutoCheck")
+        form.addRow(self.cameraAutoCheck)
+        group.setToolTip("The camera image is shown in the Loop Wizard, where snapshots and\n"
+                         "videos can be saved. A snapshot is saved with every spectrum.")
+        vbox.addWidget(group)
+        vbox.addStretch()
+        self.devsTabs.addTab(tab, "Other")
+
+        # All tab titles must be readable: make room for them
+        self.devsTabs.setElideMode(Qt.TextElideMode.ElideNone)
+        self.devsTabs.setUsesScrollButtons(False)
+        tabs_width = self.devsTabs.tabBar().sizeHint().width() + 4
+        self.devsTabs.setMinimumWidth(tabs_width)
+        for group in (self.groupBox_2, self.groupBox_3):
+            group.setMaximumWidth(max(group.maximumWidth(), tabs_width + 30))
+
     def choose_data_dir(self):
         folder = QFileDialog.getExistingDirectory(self, "Data folder", self.get_data_dir())
         if folder:
@@ -570,9 +617,16 @@ class MainWindow(FormUI, WindowUI):
     # Laser tab (built here, not in the .ui file)
     def build_laser_tab(self):
         tab = QWidget()
-        form = QFormLayout(tab)
-        
-        def add_spin(name, label, lo, hi, val, decimals, suffix, step=1.0, tip=""):
+        grid = QGridLayout(tab)
+        grid.setVerticalSpacing(4)
+
+        def add_label(text, row, col, tip=""):
+            label = QLabel(text, tab)
+            if tip:
+                label.setToolTip(tip)
+            grid.addWidget(label, row, col)
+
+        def add_spin(name, row, col, lo, hi, val, decimals, suffix, step=1.0, tip=""):
             w = QDoubleSpinBox(tab)
             w.setObjectName(name)
             w.setDecimals(decimals)
@@ -581,90 +635,90 @@ class MainWindow(FormUI, WindowUI):
             w.setValue(val)
             w.setSuffix(suffix)
             w.setKeyboardTracking(False)
+            w.setMinimumWidth(60)
             if tip:
                 w.setToolTip(tip)
             setattr(self, name, w)
-            form.addRow(label, w)
+            grid.addWidget(w, row, col)
             return w
-        
+
+        tip = ("VISA resource name of the mainframe, e.g. TCPIP0::192.168.0.10::inst0::INSTR\n"
+               "(or just IP or IP:port, for a direct socket connection)")
+        add_label("Address:", 0, 0, tip)
         self.laserAddrText = QLineEdit("TCPIP0::192.168.0.10::inst0::INSTR", tab)
         self.laserAddrText.setObjectName("laserAddrText")
-        self.laserAddrText.setToolTip("VISA resource name of the mainframe, e.g. TCPIP0::192.168.0.10::inst0::INSTR\n"
-                                      "(or just IP or IP:port, for a direct socket connection)")
-        form.addRow("Address:", self.laserAddrText)
-        
+        self.laserAddrText.setToolTip(tip)
+        grid.addWidget(self.laserAddrText, 0, 1, 1, 3)
+
+        tip = "Slot of the tunable laser module in the mainframe"
+        add_label("Slot:", 1, 0, tip)
         self.laserSlotSpin = QSpinBox(tab)
         self.laserSlotSpin.setObjectName("laserSlotSpin")
         self.laserSlotSpin.setRange(0, 4)
         self.laserSlotSpin.setValue(1)
-        self.laserSlotSpin.setToolTip("Slot of the tunable laser module in the mainframe")
-        form.addRow("Slot:", self.laserSlotSpin)
-        
+        self.laserSlotSpin.setToolTip(tip)
+        grid.addWidget(self.laserSlotSpin, 1, 1)
         self.laserSimCheck = QCheckBox("Simulate", tab)
         self.laserSimCheck.setObjectName("laserSimCheck")
+        grid.addWidget(self.laserSimCheck, 1, 2, 1, 2)
+
         self.laserConnectBut = QPushButton("Connect", tab)
         self.laserOutBut = QPushButton("Output OFF", tab)
         self.laserOutBut.setCheckable(True)
-        row = QHBoxLayout()
-        row.addWidget(self.laserSimCheck)
-        row.addWidget(self.laserConnectBut)
-        row.addWidget(self.laserOutBut)
-        form.addRow(row)
-        
+        grid.addWidget(self.laserConnectBut, 2, 0, 1, 2)
+        grid.addWidget(self.laserOutBut, 2, 2, 1, 2)
+
         self.laserStatusLabel = QLabel("Not connected", tab)
         self.laserStatusLabel.setWordWrap(True)
-        form.addRow(self.laserStatusLabel)
-        
-        add_spin("laserWlSpin", "Monitor wavelength:", 1000.0, 2000.0, 1550.0, 3, " nm", 
-                 tip="Fixed wavelength used while pulling, and between sweeps")
-        add_spin("laserPowSpin", "Power:", 0.001, 100.0, 1.0, 3, " mW", 0.1)
-        add_spin("laserMinWlSpin", "Allowed range, from:", 1000.0, 2000.0, 1480.0, 1, " nm",
-                 tip="The laser is never sent outside the allowed range.\nKeep it away from the edges of the laser's own range.")
-        add_spin("laserMaxWlSpin", "Allowed range, to:", 1000.0, 2000.0, 1565.0, 1, " nm")
-        
-        add_spin("sweepStartSpin", "Sweep from:", 1000.0, 2000.0, 1480.0, 2, " nm")
-        add_spin("sweepStopSpin", "Sweep to:", 1000.0, 2000.0, 1565.0, 2, " nm")
-        
+        grid.addWidget(self.laserStatusLabel, 3, 0, 1, 4)
+
+        tip = "Fixed wavelength used while pulling, and between sweeps"
+        add_label("Monitor:", 4, 0, tip)
+        add_spin("laserWlSpin", 4, 1, 1000.0, 2000.0, 1550.0, 3, " nm", tip=tip)
+        add_label("Power:", 4, 2)
+        add_spin("laserPowSpin", 4, 3, 0.001, 100.0, 1.0, 3, " mW", 0.1)
+
+        tip = ("Allowed wavelength range: the laser is never sent outside it.\n"
+               "Keep it away from the edges of the laser's own range.")
+        add_label("Limits:", 5, 0, tip)
+        add_spin("laserMinWlSpin", 5, 1, 1000.0, 2000.0, 1480.0, 1, " nm", tip=tip)
+        add_label("to", 5, 2, tip)
+        add_spin("laserMaxWlSpin", 5, 3, 1000.0, 2000.0, 1565.0, 1, " nm", tip=tip)
+
+        tip = "Wavelength range of the sweeps (transmission spectra)"
+        add_label("Sweep:", 6, 0, tip)
+        add_spin("sweepStartSpin", 6, 1, 1000.0, 2000.0, 1480.0, 2, " nm", tip=tip)
+        add_label("to", 6, 2, tip)
+        add_spin("sweepStopSpin", 6, 3, 1000.0, 2000.0, 1565.0, 2, " nm", tip=tip)
+
+        add_label("Speed:", 7, 0, "Sweep speed")
         self.sweepSpeedCombo = QComboBox(tab)
         self.sweepSpeedCombo.setObjectName("sweepSpeedCombo")
         self.sweepSpeedCombo.addItems([f"{v:g} nm/s" for v in self.laser.sweep_speeds])
         self.sweepSpeedCombo.setCurrentIndex(self.laser.sweep_speeds.index(2.0))
-        form.addRow("Sweep speed:", self.sweepSpeedCombo)
-        
-        add_spin("sweepTrigStepSpin", "Trigger every:", 0.0, 100.0, 0.0, 3, " nm", 0.5,
-                 tip="The laser outputs a trigger every time the wavelength advances by this much.\n"
-                     "0: a single trigger, when the sweep starts.\n"
-                     "The triggers are only recorded if a trigger input is selected below.")
-        
+        self.sweepSpeedCombo.setToolTip("Sweep speed")
+        grid.addWidget(self.sweepSpeedCombo, 7, 1)
+
+        tip = ("The laser outputs a trigger every time the wavelength advances by this much.\n"
+               "0: a single trigger, when the sweep starts.\n"
+               "The triggers are only recorded if a trigger input is selected.")
+        add_label("Trig. every:", 7, 2, tip)
+        add_spin("sweepTrigStepSpin", 7, 3, 0.0, 100.0, 0.0, 3, " nm", 0.5, tip=tip)
+
+        tip = ("DAQ input connected to the trigger output of the laser mainframe.\n"
+               "It is recorded and saved with each spectrum, to calibrate the wavelengths.")
+        add_label("Trig. input:", 8, 0, tip)
         self.laserTrigCombo = QComboBox(tab)
         self.laserTrigCombo.setObjectName("laserTrigCombo")
         self.laserTrigCombo.addItems(["None", "Simulation"])
-        self.laserTrigCombo.setToolTip("DAQ input connected to the trigger output of the laser mainframe.\n"
-                                       "It is recorded and saved with each spectrum, to calibrate the wavelengths.")
-        form.addRow("Trigger input:", self.laserTrigCombo)
-        
+        self.laserTrigCombo.setToolTip(tip)
+        grid.addWidget(self.laserTrigCombo, 8, 1, 1, 3)
+
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        grid.setRowStretch(9, 1)
         self.devsTabs.addTab(tab, "Laser")
-        
-        # Camera settings (the camera itself is shown in the Loop Wizard)
-        cam_tab = QWidget()
-        cam_form = QFormLayout(cam_tab)
-        self.cameraIndexSpin = QSpinBox(cam_tab)
-        self.cameraIndexSpin.setObjectName("cameraIndexSpin")
-        self.cameraIndexSpin.setRange(0, 16)
-        self.cameraIndexSpin.setToolTip("Camera number, as seen by the system (0 is the first camera)")
-        cam_form.addRow("Camera number:", self.cameraIndexSpin)
-        self.cameraSimCheck = QCheckBox("Simulate", cam_tab)
-        self.cameraSimCheck.setObjectName("cameraSimCheck")
-        cam_form.addRow(self.cameraSimCheck)
-        self.cameraAutoCheck = QCheckBox("Turn on when the Loop Wizard opens", cam_tab)
-        self.cameraAutoCheck.setObjectName("cameraAutoCheck")
-        cam_form.addRow(self.cameraAutoCheck)
-        cam_info = QLabel("The camera image is shown in the Loop Wizard, where snapshots and "
-                          "videos can be saved. A snapshot is saved with every spectrum.", cam_tab)
-        cam_info.setWordWrap(True)
-        cam_form.addRow(cam_info)
-        self.devsTabs.addTab(cam_tab, "Camera")
-        
+
         self.laserConnectBut.clicked.connect(self.laser_connect)
         self.laserOutBut.clicked.connect(self.laser_toggle_output)
         self.laserWlSpin.valueChanged.connect(self.laser_apply)
@@ -936,7 +990,6 @@ class MainWindow(FormUI, WindowUI):
             
             settings_dict = {}
             settings_dict["__lastdir__"] = self.last_dir
-            settings_dict["__easymode__"] = self.easy_mode
             for w in self.findChildren(QSpinBox):
                 settings_dict[w.objectName()] = w.value()
             for w in self.findChildren(QDoubleSpinBox):
@@ -965,8 +1018,6 @@ class MainWindow(FormUI, WindowUI):
             settings_dict = json.load(open(filename, "r"))
             if "__lastdir__" in settings_dict:
                 self.last_dir = settings_dict["__lastdir__"]
-            if "__easymode__" in settings_dict:
-                self.set_easy_mode(settings_dict["__easymode__"])
             for key in settings_dict:
                 if key[:2] != "__" and key[-2:] != "__":
                     try:
