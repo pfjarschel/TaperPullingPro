@@ -1893,7 +1893,7 @@
              <property name="rightMargin">
               <number>0</number>
              </property>
-             <item row="4" column="0">
+             <item row="1" column="2">
               <layout class="QVBoxLayout" name="verticalLayout_67">
                <property name="spacing">
                 <number>0</number>
@@ -1977,7 +1977,7 @@
                </item>
               </layout>
              </item>
-             <item row="4" column="1">
+             <item row="2" column="2">
               <layout class="QVBoxLayout" name="verticalLayout_66">
                <property name="spacing">
                 <number>0</number>
@@ -2021,7 +2021,7 @@
                <item>
                 <widget class="QLabel" name="label_3">
                  <property name="text">
-                  <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Initial Diameter (μm)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                  <string>Initial diam. (μm)</string>
                  </property>
                 </widget>
                </item>
@@ -2049,7 +2049,7 @@
                </item>
               </layout>
              </item>
-             <item row="2" column="0">
+             <item row="1" column="1">
               <layout class="QVBoxLayout" name="verticalLayout_62">
                <property name="spacing">
                 <number>0</number>
@@ -2063,7 +2063,7 @@
                <item>
                 <widget class="QLabel" name="label_59">
                  <property name="text">
-                  <string>Core diameter (µm)</string>
+                  <string>Core diam. (µm)</string>
                  </property>
                 </widget>
                </item>
@@ -2088,7 +2088,7 @@
                </item>
               </layout>
              </item>
-             <item row="1" column="1">
+             <item row="2" column="0">
               <layout class="QVBoxLayout" name="verticalLayout_61">
                <property name="spacing">
                 <number>0</number>
@@ -2127,7 +2127,7 @@
                </item>
               </layout>
              </item>
-             <item row="5" column="0">
+             <item row="3" column="0">
               <layout class="QVBoxLayout" name="verticalLayout_59">
                <property name="spacing">
                 <number>0</number>
@@ -2160,7 +2160,7 @@
                </item>
               </layout>
              </item>
-             <item row="5" column="1">
+             <item row="3" column="1" colspan="2">
               <widget class="QPushButton" name="calcmodesBut">
                <property name="minimumSize">
                 <size>
@@ -2175,7 +2175,7 @@
              </item>
             </layout>
            </item>
-           <item row="0" column="0">
+           <item row="0" column="0" colspan="3">
             <widget class="QCheckBox" name="fiberdefsCheck">
              <property name="text">
               <string>Default settings (SMF28-like)</string>

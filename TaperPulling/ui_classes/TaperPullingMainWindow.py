@@ -333,7 +333,8 @@ class MainWindow(FormUI, WindowUI):
         self.graph_hz.draw()
         
         self.figure_anglemini = plt.figure()
-        self.graph_anglemini = FigureCanvas(self.figure_anglemini)
+        self.graph_anglemini = GraphCanvas(self.figure_anglemini)
+        self.graph_anglemini.setMinimumHeight(60)
         self.angleMiniGraph.addWidget(self.graph_anglemini)
         self.graph_anglemini_ax = self.figure_anglemini.add_subplot()
         self.graph_anglemini_line, = self.graph_anglemini_ax.plot([0, 0], [0, 0])
@@ -343,7 +344,8 @@ class MainWindow(FormUI, WindowUI):
         self.graph_anglemini.draw()
         
         self.figure_profmini = plt.figure()
-        self.graph_profmini = FigureCanvas(self.figure_profmini)
+        self.graph_profmini = GraphCanvas(self.figure_profmini)
+        self.graph_profmini.setMinimumHeight(60)
         self.profMiniGraph.addWidget(self.graph_profmini)
         self.graph_profmini_ax = self.figure_profmini.add_subplot()
         self.graph_profmini_line, = self.graph_profmini_ax.plot([0, 0], [0, 0])
@@ -351,6 +353,10 @@ class MainWindow(FormUI, WindowUI):
         self.graph_profmini_ax.set_xticks([])
         self.graph_profmini_ax.set_yticks([])
         self.graph_profmini.draw()
+
+        # Design box: the tabs only take what they need, the rest goes to the mini graphs
+        self.designTabs.setMaximumHeight(self.designTabs.minimumSizeHint().height())
+        self.gridLayout_3.setRowStretch(1, 1)
           
         # Recording indicator and event marker (status bar)
         self.recLabel = QLabel("")
