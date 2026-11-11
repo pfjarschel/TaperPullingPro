@@ -5,6 +5,7 @@ from . import TaperPullingDAQ
 from . import TaperPullingMotors
 from . import TaperPullingLaser
 from . import TaperPullingSpectrum
+from . import TaperPullingCamera
 from . import TaperPullingLog
 
 import sys
@@ -24,5 +25,5 @@ def run_ui() -> int:
     return app.exec()
 
 __all__ = ["run_ui", "create_ui", "TaperShape", "TaperPullingUI", "TaperPullingData", "TaperPullingDAQ", "TaperPullingMotors",
-           "TaperPullingLaser", "TaperPullingSpectrum", "TaperPullingLog"]
+           "TaperPullingLaser", "TaperPullingSpectrum", "TaperPullingCamera", "TaperPullingLog"]
 

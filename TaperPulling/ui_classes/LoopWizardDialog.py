@@ -9,6 +9,8 @@ Provides real-time position telemetry, micro-step jogging, press-and-hold
 continuous slow creeping, and step-by-step guidance.
 If a tunable laser is available, transmission spectra can be measured at any
 moment. Each one is saved with the motor positions at the time.
+A camera can be shown, to watch the loop. Snapshots and videos can be saved,
+and a snapshot is saved with every spectrum.
 """
 
 import os
@@ -20,9 +22,11 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QPushButton, QDoubleSpinBox, QButtonGroup,
-    QMessageBox, QTextEdit, QLineEdit, QProgressBar, QComboBox
+    QMessageBox, QTextEdit, QLineEdit, QProgressBar, QComboBox, QSpinBox, QCheckBox,
+    QSizePolicy
 )
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QImage, QPixmap
+from datetime import datetime
 
 
 class LoopWizardDialog(QDialog):
@@ -41,9 +45,11 @@ class LoopWizardDialog(QDialog):
         self.core = core
         self.main = main
         self.spectrum = main.spectrum if main is not None else None
+        self.camera = main.camera if main is not None else None
+        self.camera_frame_count = -1
         self.setWindowTitle("Fiber Taper Loop Wizard")
         self.setMinimumSize(600, 700)
-        self.resize(1240 if self.spectrum is not None else 640, 730)
+        self.resize(1680 if self.spectrum is not None else 640, 730)
         
         # Spectra measured in this session
         self.spectra = []          # (wavelength, power, slack)
@@ -66,6 +72,14 @@ class LoopWizardDialog(QDialog):
 
         self.init_ui()
 
+        # Camera image update timer
+        self.camera_timer = QTimer(self)
+        self.camera_timer.timeout.connect(self.update_camera)
+        self.camera_timer.setInterval(50)
+        if self.camera is not None and self.main.cameraAutoCheck.isChecked():
+            self.btn_camera.setChecked(True)
+            self.toggle_camera()
+
         # Sweep update timer
         self.sweep_timer = QTimer(self)
         self.sweep_timer.timeout.connect(self.update_sweep)
@@ -85,7 +99,8 @@ class LoopWizardDialog(QDialog):
         self.motors_panel.setMaximumWidth(640)
         outer_layout.addWidget(self.motors_panel)
         if self.spectrum is not None:
-            outer_layout.addWidget(self.init_spectrum_panel(), 1)
+            outer_layout.addWidget(self.init_spectrum_panel(), 3)
+            outer_layout.addWidget(self.init_camera_panel(), 2)
         
         main_layout = QVBoxLayout(self.motors_panel)
         main_layout.setSpacing(12)
@@ -512,6 +527,139 @@ class LoopWizardDialog(QDialog):
         
         return group
     
+    # --- Camera panel ---
+    def init_camera_panel(self):
+        group = QGroupBox("Camera", self)
+        layout = QVBoxLayout(group)
+        m = self.main
+        
+        # Camera selection. Same settings as in the 'Camera' tab of the main window
+        select_layout = QHBoxLayout()
+        select_layout.addWidget(QLabel("Camera number:"))
+        self.spin_camera = QSpinBox(self)
+        self.spin_camera.setRange(m.cameraIndexSpin.minimum(), m.cameraIndexSpin.maximum())
+        self.spin_camera.setValue(m.cameraIndexSpin.value())
+        self.spin_camera.setToolTip(m.cameraIndexSpin.toolTip())
+        self.spin_camera.valueChanged.connect(m.cameraIndexSpin.setValue)
+        select_layout.addWidget(self.spin_camera)
+        self.check_camera_sim = QCheckBox("Simulate", self)
+        self.check_camera_sim.setChecked(m.cameraSimCheck.isChecked())
+        self.check_camera_sim.clicked.connect(m.cameraSimCheck.setChecked)
+        select_layout.addWidget(self.check_camera_sim)
+        self.btn_camera = QPushButton("Turn On", self)
+        self.btn_camera.setCheckable(True)
+        self.btn_camera.clicked.connect(self.toggle_camera)
+        select_layout.addWidget(self.btn_camera)
+        select_layout.addStretch()
+        layout.addLayout(select_layout)
+        
+        # Image
+        self.lbl_camera = QLabel("Camera off", self)
+        self.lbl_camera.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_camera.setMinimumSize(240, 180)
+        self.lbl_camera.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.lbl_camera.setStyleSheet("background-color: #0f172a; color: #94a3b8; border-radius: 4px;")
+        layout.addWidget(self.lbl_camera, 1)
+        
+        # Saving
+        save_layout = QHBoxLayout()
+        self.btn_snapshot = QPushButton("Save Snapshot", self)
+        self.btn_snapshot.clicked.connect(self.save_snapshot)
+        self.btn_record = QPushButton("Record Video", self)
+        self.btn_record.setCheckable(True)
+        self.btn_record.clicked.connect(self.toggle_video)
+        self.check_auto_snapshot = QCheckBox("Snapshot with each spectrum", self)
+        self.check_auto_snapshot.setChecked(True)
+        save_layout.addWidget(self.btn_snapshot)
+        save_layout.addWidget(self.btn_record)
+        save_layout.addWidget(self.check_auto_snapshot)
+        save_layout.addStretch()
+        layout.addLayout(save_layout)
+        
+        self.lbl_camera_status = QLabel("", self)
+        self.lbl_camera_status.setWordWrap(True)
+        layout.addWidget(self.lbl_camera_status)
+        
+        self.update_camera_controls()
+        return group
+    
+    def update_camera_controls(self):
+        on = self.camera.ok
+        self.btn_camera.setChecked(on)
+        self.btn_camera.setText("Turn Off" if on else "Turn On")
+        self.spin_camera.setEnabled(not on)
+        self.check_camera_sim.setEnabled(not on)
+        self.btn_snapshot.setEnabled(on)
+        self.btn_record.setEnabled(on)
+        self.btn_record.setChecked(self.camera.recording)
+        self.btn_record.setText("Stop Recording" if self.camera.recording else "Record Video")
+    
+    def toggle_camera(self):
+        if self.btn_camera.isChecked():
+            if self.camera.open(self.spin_camera.value(), self.check_camera_sim.isChecked()):
+                self.camera_frame_count = -1
+                self.camera_timer.start()
+                self.lbl_camera_status.setText("")
+            else:
+                self.lbl_camera_status.setText(f"Could not turn the camera on: {self.camera.last_error}")
+        else:
+            self.camera_timer.stop()
+            self.camera.close()
+            self.lbl_camera.setPixmap(QPixmap())
+            self.lbl_camera.setText("Camera off")
+        self.update_camera_controls()
+        
+    def update_camera(self):
+        # Only redraw when there is a new image
+        if self.camera.frame_count == self.camera_frame_count:
+            return
+        frame = self.camera.get_frame()
+        if frame is None:
+            return
+        self.camera_frame_count = self.camera.frame_count
+        
+        h, w = frame.shape[:2]
+        image = QImage(frame.data, w, h, frame.strides[0], QImage.Format.Format_BGR888)
+        pixmap = QPixmap.fromImage(image).scaled(self.lbl_camera.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                 Qt.TransformationMode.SmoothTransformation)
+        self.lbl_camera.setPixmap(pixmap)
+        
+    def get_spectra_folder(self):
+        """Folder where everything from this session is saved. Created when first needed."""
+        if self.spectra_folder == "":
+            self.spectra_folder = self.main.new_spectra_folder("loop")
+        return self.spectra_folder
+        
+    def save_snapshot(self):
+        try:
+            name = f"snapshot_{datetime.now().strftime('%H_%M_%S')}.png"
+            if self.camera.save_snapshot(os.path.join(self.get_spectra_folder(), name)):
+                self.lbl_camera_status.setText(f"Saved: {os.path.basename(self.spectra_folder)}/{name}")
+            else:
+                self.lbl_camera_status.setText("Snapshot NOT saved: no image from the camera.")
+        except Exception as e:
+            self.lbl_camera_status.setText(f"Snapshot NOT saved: {e}")
+            
+    def toggle_video(self):
+        if self.btn_record.isChecked():
+            try:
+                name = f"video_{datetime.now().strftime('%H_%M_%S')}.avi"
+                if self.camera.start_recording(os.path.join(self.get_spectra_folder(), name)):
+                    self.lbl_camera_status.setText(f"Recording: {os.path.basename(self.spectra_folder)}/{name}")
+                else:
+                    self.lbl_camera_status.setText("Could not start recording the video.")
+            except Exception as e:
+                self.lbl_camera_status.setText(f"Could not start recording the video: {e}")
+        else:
+            self.camera.stop_recording()
+            self.lbl_camera_status.setText("Video saved.")
+        self.update_camera_controls()
+        
+    def close_camera(self):
+        if self.camera is not None:
+            self.camera_timer.stop()
+            self.camera.close()
+
     def get_slack(self):
         """Slack added since the wizard was opened (both motors), in mm."""
         if not self.left_motor or not self.right_motor:
@@ -528,8 +676,21 @@ class LoopWizardDialog(QDialog):
         if error == "":
             l_pos = self.left_motor.get_position() if self.left_motor else 0.0
             r_pos = self.right_motor.get_position() if self.right_motor else 0.0
+            # Image of the loop, as it is right before the sweep
+            index = len(self.spectra) + 1
+            snapshot = ""
+            if self.camera is not None and self.camera.ok and self.check_auto_snapshot.isChecked():
+                try:
+                    snapshot = f"spectrum_{index:03d}.png"
+                    if not self.camera.save_snapshot(os.path.join(self.get_spectra_folder(), snapshot)):
+                        snapshot = ""
+                except Exception as e:
+                    print(f"Error saving snapshot: {e}")
+                    snapshot = ""
+            
             metadata = {
-                "index": len(self.spectra) + 1,
+                "index": index,
+                "snapshot": snapshot,
                 "note": self.edit_sweep_note.text().strip(),
                 "left_pos": l_pos,
                 "right_pos": r_pos,
@@ -580,9 +741,7 @@ class LoopWizardDialog(QDialog):
             n_trig = int(np.count_nonzero(high[1:] & ~high[:-1])) if np.ptp(trig) > 0.5 else 0
             details += f", {n_trig} triggers recorded"
         try:
-            if self.spectra_folder == "":
-                self.spectra_folder = self.main.new_spectra_folder("loop")
-            filename = os.path.join(self.spectra_folder, f"spectrum_{index:03d}.npz")
+            filename = os.path.join(self.get_spectra_folder(), f"spectrum_{index:03d}.npz")
             self.spectrum.save(result, filename)
             self.lbl_sweep_status.setText(f"Spectrum {index} ({details}) saved: "
                                           f"{os.path.basename(self.spectra_folder)}/{os.path.basename(filename)}")
@@ -794,6 +953,7 @@ class LoopWizardDialog(QDialog):
         if self.spectrum is not None and self.spectrum.running:
             self.spectrum.abort()
         self.sweep_timer.stop()
+        self.close_camera()
         super().done(result)
 
     def closeEvent(self, event):
@@ -806,5 +966,6 @@ class LoopWizardDialog(QDialog):
         if self.spectrum is not None and self.spectrum.running:
             self.spectrum.abort()
         self.sweep_timer.stop()
+        self.close_camera()
         self.telemetry_timer.stop()
         event.accept()

@@ -28,6 +28,7 @@ from TaperPulling.TaperPullingData import TaperPullingData
 from TaperPulling.TaperPullingMotors import GenericTLMotor
 from TaperPulling.TaperPullingLaser import TaperPullingLaser
 from TaperPulling.TaperPullingSpectrum import TaperPullingSpectrum
+from TaperPulling.TaperPullingCamera import TaperPullingCamera
 from TaperPulling.ui_classes.LoopWizardDialog import LoopWizardDialog
 
 # Load UI files
@@ -117,6 +118,7 @@ class MainWindow(FormUI, WindowUI):
         self.data = TaperPullingData()
         self.laser = TaperPullingLaser()
         self.spectrum = TaperPullingSpectrum(self.data, self.laser)
+        self.camera = TaperPullingCamera()
         
         self.setupUi(self)
         self.show()
@@ -142,6 +144,7 @@ class MainWindow(FormUI, WindowUI):
             self.data.stop_monitor()
             self.data.close()
             self.laser.close()
+            self.camera.close()
             self.core.stop_pulling()
             self.core.close()
             self.core.motors.close()
@@ -530,6 +533,26 @@ class MainWindow(FormUI, WindowUI):
         form.addRow("Trigger input:", self.laserTrigCombo)
         
         self.devsTabs.addTab(tab, "Laser")
+        
+        # Camera settings (the camera itself is shown in the Loop Wizard)
+        cam_tab = QWidget()
+        cam_form = QFormLayout(cam_tab)
+        self.cameraIndexSpin = QSpinBox(cam_tab)
+        self.cameraIndexSpin.setObjectName("cameraIndexSpin")
+        self.cameraIndexSpin.setRange(0, 16)
+        self.cameraIndexSpin.setToolTip("Camera number, as seen by the system (0 is the first camera)")
+        cam_form.addRow("Camera number:", self.cameraIndexSpin)
+        self.cameraSimCheck = QCheckBox("Simulate", cam_tab)
+        self.cameraSimCheck.setObjectName("cameraSimCheck")
+        cam_form.addRow(self.cameraSimCheck)
+        self.cameraAutoCheck = QCheckBox("Turn on when the Loop Wizard opens", cam_tab)
+        self.cameraAutoCheck.setObjectName("cameraAutoCheck")
+        cam_form.addRow(self.cameraAutoCheck)
+        cam_info = QLabel("The camera image is shown in the Loop Wizard, where snapshots and "
+                          "videos can be saved. A snapshot is saved with every spectrum.", cam_tab)
+        cam_info.setWordWrap(True)
+        cam_form.addRow(cam_info)
+        self.devsTabs.addTab(cam_tab, "Camera")
         
         self.laserConnectBut.clicked.connect(self.laser_connect)
         self.laserOutBut.clicked.connect(self.laser_toggle_output)
