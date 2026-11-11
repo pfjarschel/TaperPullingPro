@@ -7,13 +7,20 @@
 Interactive Loop Wizard Dialog for Fiber Taper Loop Fabrication.
 Provides real-time position telemetry, micro-step jogging, press-and-hold
 continuous slow creeping, and step-by-step guidance.
+If a tunable laser is available, transmission spectra can be measured at any
+moment. Each one is saved with the motor positions at the time.
 """
+
+import os
+import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QPushButton, QDoubleSpinBox, QButtonGroup,
-    QMessageBox, QTextEdit
+    QMessageBox, QTextEdit, QLineEdit, QProgressBar, QComboBox
 )
 from PyQt6.QtGui import QFont
 
@@ -23,12 +30,24 @@ class LoopWizardDialog(QDialog):
     Interactive Dialog for guiding the fabrication and tuning of fiber taper loops.
     """
 
-    def __init__(self, parent=None, core=None):
+    def __init__(self, parent=None, core=None, main=None):
+        """
+        Args:
+            core: TaperPullingCore object (motors).
+            main: Main window. If given, it provides the tunable laser, the data
+                acquisition and the sweep settings, and the spectrum panel is shown.
+        """
         super().__init__(parent)
         self.core = core
+        self.main = main
+        self.spectrum = main.spectrum if main is not None else None
         self.setWindowTitle("Fiber Taper Loop Wizard")
         self.setMinimumSize(600, 700)
-        self.resize(640, 730)
+        self.resize(1240 if self.spectrum is not None else 640, 730)
+        
+        # Spectra measured in this session
+        self.spectra = []          # (wavelength, power, slack)
+        self.spectra_folder = ""   # Created when the first spectrum is saved
 
         # Store initial positions for delta tracking and reset functionality
         self.left_motor = self.core.motors.left_puller if self.core else None
@@ -47,15 +66,30 @@ class LoopWizardDialog(QDialog):
 
         self.init_ui()
 
+        # Sweep update timer
+        self.sweep_timer = QTimer(self)
+        self.sweep_timer.timeout.connect(self.update_sweep)
+        self.sweep_timer.setInterval(20)
+
         # Telemetry update timer (50 ms / 20 Hz)
         self.telemetry_timer = QTimer(self)
         self.telemetry_timer.timeout.connect(self.update_telemetry)
         self.telemetry_timer.start(50)
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
+        # Motor controls on the left, spectrum panel on the right
+        outer_layout = QHBoxLayout(self)
+        outer_layout.setContentsMargins(15, 15, 15, 15)
+        outer_layout.setSpacing(12)
+        self.motors_panel = QWidget(self)
+        self.motors_panel.setMaximumWidth(640)
+        outer_layout.addWidget(self.motors_panel)
+        if self.spectrum is not None:
+            outer_layout.addWidget(self.init_spectrum_panel(), 1)
+        
+        main_layout = QVBoxLayout(self.motors_panel)
         main_layout.setSpacing(12)
-        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         step_btn_stylesheet = """
         QPushButton {
@@ -392,6 +426,209 @@ class LoopWizardDialog(QDialog):
         # Update initial step instructions
         self.update_step_guide()
 
+    # --- Spectrum panel ---
+    def init_spectrum_panel(self):
+        group = QGroupBox("Transmission Spectrum", self)
+        layout = QVBoxLayout(group)
+        
+        # Sweep settings. These are the same as in the 'Laser' tab of the main window
+        m = self.main
+        settings_layout = QGridLayout()
+        self.combo_sweep_mode = QComboBox(self)
+        self.combo_sweep_mode.addItems([m.sweepModeCombo.itemText(i) for i in range(m.sweepModeCombo.count())])
+        self.combo_sweep_mode.setCurrentIndex(m.sweepModeCombo.currentIndex())
+        self.combo_sweep_mode.currentIndexChanged.connect(m.sweepModeCombo.setCurrentIndex)
+        self.combo_sweep_mode.currentIndexChanged.connect(self.update_sweep_settings)
+        settings_layout.addWidget(QLabel("Mode:"), 0, 0)
+        settings_layout.addWidget(self.combo_sweep_mode, 0, 1)
+        
+        def mirror_spin(source, label, row, col):
+            spin = QDoubleSpinBox(self)
+            spin.setDecimals(source.decimals())
+            spin.setRange(source.minimum(), source.maximum())
+            spin.setSingleStep(source.singleStep())
+            spin.setSuffix(source.suffix())
+            spin.setValue(source.value())
+            spin.setKeyboardTracking(False)
+            spin.setToolTip(source.toolTip())
+            spin.valueChanged.connect(source.setValue)
+            lbl = QLabel(label)
+            settings_layout.addWidget(lbl, row, col)
+            settings_layout.addWidget(spin, row, col + 1)
+            return spin, lbl
+        
+        self.spin_sweep_start, _ = mirror_spin(m.sweepStartSpin, "From:", 0, 2)
+        self.spin_sweep_stop, _ = mirror_spin(m.sweepStopSpin, "To:", 0, 4)
+        self.spin_sweep_speed, self.lbl_sweep_speed = mirror_spin(m.sweepSpeedSpin, "Speed:", 1, 0)
+        self.spin_sweep_step, self.lbl_sweep_step = mirror_spin(m.sweepStepSpin, "Step:", 1, 0)
+        self.spin_sweep_offset, self.lbl_sweep_offset = mirror_spin(m.sweepOffsetSpin, "Start delay:", 1, 2)
+        self.spin_sweep_settle, self.lbl_sweep_settle = mirror_spin(m.sweepSettleSpin, "Settling:", 1, 2)
+        layout.addLayout(settings_layout)
+        
+        # Note saved with the spectrum
+        note_layout = QHBoxLayout()
+        note_layout.addWidget(QLabel("Note:"))
+        self.edit_sweep_note = QLineEdit(self)
+        self.edit_sweep_note.setPlaceholderText("Saved with the next spectrum (e.g. polarization controller setting)")
+        note_layout.addWidget(self.edit_sweep_note)
+        layout.addLayout(note_layout)
+        
+        # Sweep control
+        sweep_layout = QHBoxLayout()
+        self.btn_sweep = QPushButton("Sweep", self)
+        self.btn_sweep.setStyleSheet("""
+        QPushButton {
+            background-color: #7c3aed; color: #ffffff; font-weight: bold;
+            padding: 9px 22px; border: 1px solid #6d28d9; border-radius: 5px; font-size: 13px;
+        }
+        QPushButton:hover { background-color: #6d28d9; }
+        QPushButton:disabled { background-color: #c4b5fd; border-color: #c4b5fd; }
+        """)
+        self.btn_sweep.clicked.connect(self.start_sweep)
+        self.btn_sweep_abort = QPushButton("Abort", self)
+        self.btn_sweep_abort.setEnabled(False)
+        self.btn_sweep_abort.clicked.connect(self.abort_sweep)
+        self.sweep_progress = QProgressBar(self)
+        self.sweep_progress.setRange(0, 1000)
+        sweep_layout.addWidget(self.btn_sweep)
+        sweep_layout.addWidget(self.btn_sweep_abort)
+        sweep_layout.addWidget(self.sweep_progress, 1)
+        layout.addLayout(sweep_layout)
+        
+        self.lbl_sweep_status = QLabel("No spectrum measured yet.", self)
+        self.lbl_sweep_status.setWordWrap(True)
+        layout.addWidget(self.lbl_sweep_status)
+        
+        # Graphs: last spectrum, and all spectra of this session
+        self.figure = Figure(constrained_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.ax_spec, self.ax_map = self.figure.subplots(2, 1, sharex=True)
+        self.line_prev, = self.ax_spec.plot([], [], color="#cbd5e1", lw=1.0, label="Previous")
+        self.line_spec, = self.ax_spec.plot([], [], color="#7c3aed", lw=1.2, label="Last")
+        self.ax_spec.set_ylabel("Transm. Power (mW)")
+        self.ax_spec.grid(True)
+        self.ax_spec.legend(loc="lower right")
+        self.img_map = self.ax_map.imshow(np.zeros((1, 2)), aspect="auto", origin="lower", cmap="viridis",
+                                          extent=(0.0, 1.0, 0.5, 1.5), interpolation="nearest")
+        self.ax_map.set_xlabel("Wavelength (nm)")
+        self.ax_map.set_ylabel("Slack added (mm), per spectrum")
+        self.ax_map.set_yticks([])
+        layout.addWidget(self.canvas, 1)
+        
+        self.update_sweep_settings()
+        return group
+    
+    def update_sweep_settings(self):
+        """Show only the settings of the selected sweep mode."""
+        stepped = self.combo_sweep_mode.currentText() == "Stepped"
+        for w in (self.spin_sweep_step, self.lbl_sweep_step, self.spin_sweep_settle, self.lbl_sweep_settle):
+            w.setVisible(stepped)
+        for w in (self.spin_sweep_speed, self.lbl_sweep_speed, self.spin_sweep_offset, self.lbl_sweep_offset):
+            w.setVisible(not stepped)
+    
+    def get_slack(self):
+        """Slack added since the wizard was opened (both motors), in mm."""
+        if not self.left_motor or not self.right_motor:
+            return 0.0
+        return (self.left_motor.get_position() - self.init_left_pos) + \
+               (self.right_motor.get_position() - self.init_right_pos)
+    
+    def start_sweep(self):
+        if self.left_motor and self.right_motor and (self.left_motor.motor_moving() or self.right_motor.motor_moving()):
+            QMessageBox.warning(self, "Sweep", "Wait until the motors stop before measuring a spectrum.")
+            return
+        
+        error = self.main.prepare_sweep()
+        if error == "":
+            l_pos = self.left_motor.get_position() if self.left_motor else 0.0
+            r_pos = self.right_motor.get_position() if self.right_motor else 0.0
+            metadata = {
+                "index": len(self.spectra) + 1,
+                "note": self.edit_sweep_note.text().strip(),
+                "left_pos": l_pos,
+                "right_pos": r_pos,
+                "left_displacement": l_pos - self.init_left_pos,
+                "right_displacement": r_pos - self.init_right_pos,
+                "slack": self.get_slack(),
+            }
+            error = self.spectrum.start(metadata)
+        if error != "":
+            QMessageBox.warning(self, "Sweep", error)
+            return
+        
+        # The loop must not change during the sweep
+        self.motors_panel.setEnabled(False)
+        self.btn_sweep.setEnabled(False)
+        self.btn_sweep_abort.setEnabled(True)
+        self.sweep_progress.setValue(0)
+        self.lbl_sweep_status.setText("Sweeping...")
+        self.sweep_timer.start()
+        
+    def abort_sweep(self):
+        self.spectrum.abort()
+        
+    def update_sweep(self):
+        running = self.spectrum.update()
+        self.sweep_progress.setValue(int(1000*self.spectrum.progress))
+        if running:
+            return
+        
+        self.sweep_timer.stop()
+        self.motors_panel.setEnabled(True)
+        self.btn_sweep.setEnabled(True)
+        self.btn_sweep_abort.setEnabled(False)
+        
+        result = self.spectrum.get_result()
+        if result is None:
+            self.sweep_progress.setValue(0)
+            self.lbl_sweep_status.setText(self.spectrum.error)
+            return
+        
+        # Save
+        index = result["info"]["metadata"]["index"]
+        slack = result["info"]["metadata"]["slack"]
+        try:
+            if self.spectra_folder == "":
+                self.spectra_folder = self.main.new_spectra_folder("loop")
+            filename = os.path.join(self.spectra_folder, f"spectrum_{index:03d}.npz")
+            self.spectrum.save(result, filename)
+            self.lbl_sweep_status.setText(f"Spectrum {index} ({slack:+.3f} mm slack) saved: "
+                                          f"{os.path.basename(self.spectra_folder)}/{os.path.basename(filename)}")
+            self.lbl_sweep_status.setToolTip(filename)
+        except Exception as e:
+            self.lbl_sweep_status.setText(f"Spectrum {index} measured, but NOT saved: {e}")
+        
+        self.spectra.append((result["wavelength"], result["power"], slack))
+        self.edit_sweep_note.clear()
+        self.update_spectrum_graphs()
+        
+    def update_spectrum_graphs(self):
+        if len(self.spectra) == 0:
+            return
+        
+        # Last and previous spectra
+        wl, power, _ = self.spectra[-1]
+        self.line_spec.set_data(wl, power)
+        if len(self.spectra) > 1:
+            self.line_prev.set_data(self.spectra[-2][0], self.spectra[-2][1])
+        self.ax_spec.relim()
+        self.ax_spec.autoscale(True)
+        
+        # All spectra, one row each (in the order they were measured)
+        wl_min = min(s[0][0] for s in self.spectra if len(s[0]) > 0)
+        wl_max = max(s[0][-1] for s in self.spectra if len(s[0]) > 0)
+        wl_grid = np.linspace(wl_min, wl_max, 1000)
+        data = np.array([np.interp(wl_grid, s[0], s[1], left=np.nan, right=np.nan) for s in self.spectra])
+        n = len(self.spectra)
+        self.img_map.set_data(data)
+        self.img_map.set_extent((wl_min, wl_max, 0.5, n + 0.5))
+        self.img_map.set_clim(np.nanmin(data), np.nanmax(data))
+        ticks = np.unique(np.linspace(1, n, min(n, 10)).astype(int))
+        self.ax_map.set_yticks(ticks)
+        self.ax_map.set_yticklabels([f"{self.spectra[i - 1][2]:+.3f}" for i in ticks])
+        self.ax_spec.set_xlim(wl_min, wl_max)
+        self.canvas.draw_idle()
+
     # --- Step Guide Updates ---
     def set_step(self, step_id):
         self.current_step = step_id
@@ -560,6 +797,13 @@ class LoopWizardDialog(QDialog):
             if self.right_motor:
                 self.right_motor.go_to(self.init_right_pos)
 
+    def done(self, result):
+        """Closing with the 'Done' button: make sure nothing is left running."""
+        if self.spectrum is not None and self.spectrum.running:
+            self.spectrum.abort()
+        self.sweep_timer.stop()
+        super().done(result)
+
     def closeEvent(self, event):
         """Ensure all motors are stopped, velocities restored, and timer killed upon closing."""
         self.do_emergency_stop()
@@ -567,5 +811,8 @@ class LoopWizardDialog(QDialog):
             self.left_motor.set_velocity(self.default_left_vel)
         if self.right_motor:
             self.right_motor.set_velocity(self.default_right_vel)
+        if self.spectrum is not None and self.spectrum.running:
+            self.spectrum.abort()
+        self.sweep_timer.stop()
         self.telemetry_timer.stop()
         event.accept()

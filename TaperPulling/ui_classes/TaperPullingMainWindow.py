@@ -3,7 +3,8 @@ from PyQt6 import uic
 from PyQt6.QtCore import Qt, QTimer, QCoreApplication, QDir, pyqtSignal, QObject, QEvent
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
                             QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
-                            QMessageBox, QFileDialog, QLabel, QMenu, QInputDialog
+                            QMessageBox, QFileDialog, QLabel, QMenu, QInputDialog, \
+                            QFormLayout, QHBoxLayout
 from PyQt6.QtGui import QPixmap
 
 # Import other stuff
@@ -25,6 +26,8 @@ from TaperPulling.TaperPullingSim import TaperPullingSim
 from TaperPulling.TaperPullingCore import TaperPullingCore
 from TaperPulling.TaperPullingData import TaperPullingData
 from TaperPulling.TaperPullingMotors import GenericTLMotor
+from TaperPulling.TaperPullingLaser import TaperPullingLaser
+from TaperPulling.TaperPullingSpectrum import TaperPullingSpectrum
 from TaperPulling.ui_classes.LoopWizardDialog import LoopWizardDialog
 
 # Load UI files
@@ -112,6 +115,8 @@ class MainWindow(FormUI, WindowUI):
         self.simultaion = TaperPullingSim()
         self.core = TaperPullingCore()
         self.data = TaperPullingData()
+        self.laser = TaperPullingLaser()
+        self.spectrum = TaperPullingSpectrum(self.data, self.laser)
         
         self.setupUi(self)
         self.show()
@@ -136,6 +141,7 @@ class MainWindow(FormUI, WindowUI):
             self.modecalc_timer.stop()
             self.data.stop_monitor()
             self.data.close()
+            self.laser.close()
             self.core.stop_pulling()
             self.core.close()
             self.core.motors.close()
@@ -334,6 +340,9 @@ class MainWindow(FormUI, WindowUI):
         self.statusBar.addPermanentWidget(self.recLabel)
         self.statusBar.addPermanentWidget(self.markBut)
         
+        # Laser tab
+        self.build_laser_tab()
+        
         # Timers
         self.mainLoop_timer = QTimer()
         self.mainLoop_timer.setInterval(self.main_to)
@@ -443,6 +452,170 @@ class MainWindow(FormUI, WindowUI):
             self.save_settings(self.factory_settings_file)
         else:
             self.load_default_settings()
+            
+    # Laser tab (built here, not in the .ui file)
+    def build_laser_tab(self):
+        tab = QWidget()
+        form = QFormLayout(tab)
+        
+        def add_spin(name, label, lo, hi, val, decimals, suffix, step=1.0, tip=""):
+            w = QDoubleSpinBox(tab)
+            w.setObjectName(name)
+            w.setDecimals(decimals)
+            w.setRange(lo, hi)
+            w.setSingleStep(step)
+            w.setValue(val)
+            w.setSuffix(suffix)
+            w.setKeyboardTracking(False)
+            if tip:
+                w.setToolTip(tip)
+            setattr(self, name, w)
+            form.addRow(label, w)
+            return w
+        
+        self.laserAddrText = QLineEdit("192.168.0.10", tab)
+        self.laserAddrText.setObjectName("laserAddrText")
+        self.laserAddrText.setToolTip("IP or IP:port of the mainframe (port 5025 if not given),\n"
+                                      "or a VISA resource name, e.g. TCPIP0::192.168.0.10::inst0::INSTR")
+        form.addRow("Address:", self.laserAddrText)
+        
+        self.laserSlotSpin = QSpinBox(tab)
+        self.laserSlotSpin.setObjectName("laserSlotSpin")
+        self.laserSlotSpin.setRange(0, 4)
+        self.laserSlotSpin.setValue(1)
+        self.laserSlotSpin.setToolTip("Slot of the tunable laser module in the mainframe")
+        form.addRow("Slot:", self.laserSlotSpin)
+        
+        self.laserSimCheck = QCheckBox("Simulate", tab)
+        self.laserSimCheck.setObjectName("laserSimCheck")
+        self.laserConnectBut = QPushButton("Connect", tab)
+        self.laserOutBut = QPushButton("Output OFF", tab)
+        self.laserOutBut.setCheckable(True)
+        row = QHBoxLayout()
+        row.addWidget(self.laserSimCheck)
+        row.addWidget(self.laserConnectBut)
+        row.addWidget(self.laserOutBut)
+        form.addRow(row)
+        
+        self.laserStatusLabel = QLabel("Not connected", tab)
+        self.laserStatusLabel.setWordWrap(True)
+        form.addRow(self.laserStatusLabel)
+        
+        add_spin("laserWlSpin", "Monitor wavelength:", 1000.0, 2000.0, 1550.0, 3, " nm", 
+                 tip="Fixed wavelength used while pulling, and between sweeps")
+        add_spin("laserPowSpin", "Power:", 0.001, 100.0, 1.0, 3, " mW", 0.1)
+        add_spin("laserMinWlSpin", "Allowed range, from:", 1000.0, 2000.0, 1480.0, 1, " nm",
+                 tip="The laser is never sent outside the allowed range.\nKeep it away from the edges of the laser's own range.")
+        add_spin("laserMaxWlSpin", "Allowed range, to:", 1000.0, 2000.0, 1565.0, 1, " nm")
+        
+        self.sweepModeCombo = QComboBox(tab)
+        self.sweepModeCombo.setObjectName("sweepModeCombo")
+        self.sweepModeCombo.addItems(TaperPullingSpectrum.modes)
+        self.sweepModeCombo.setToolTip("Continuous: fast, wavelengths calculated from the sweep timing.\n"
+                                       "Stepped: slow, wavelengths set one by one.")
+        form.addRow("Sweep mode:", self.sweepModeCombo)
+        
+        add_spin("sweepStartSpin", "Sweep from:", 1000.0, 2000.0, 1480.0, 2, " nm")
+        add_spin("sweepStopSpin", "Sweep to:", 1000.0, 2000.0, 1565.0, 2, " nm")
+        add_spin("sweepSpeedSpin", "Speed (continuous):", 0.1, 200.0, 5.0, 1, " nm/s",
+                 tip="Only some values are accepted by the laser (e.g. 0.5, 5, 40, 80 nm/s)")
+        add_spin("sweepStepSpin", "Step (stepped):", 0.001, 50.0, 0.2, 3, " nm", 0.05)
+        add_spin("sweepSettleSpin", "Settling time:", 0.0, 10.0, 0.2, 2, " s", 0.05,
+                 tip="Stepped: wait after each wavelength step.\nContinuous: wait at the first wavelength before sweeping.")
+        add_spin("sweepOffsetSpin", "Start delay (continuous):", -5.0, 30.0, 0.0, 3, " s", 0.01,
+                 tip="Time between the sweep command and the moment the laser actually starts\n"
+                     "sweeping. Shifts the wavelength axis of continuous sweeps.\n"
+                     "Adjust until a continuous sweep matches a stepped one.")
+        
+        self.devsTabs.addTab(tab, "Laser")
+        
+        self.laserConnectBut.clicked.connect(self.laser_connect)
+        self.laserOutBut.clicked.connect(self.laser_toggle_output)
+        self.laserWlSpin.valueChanged.connect(self.laser_apply)
+        self.laserPowSpin.valueChanged.connect(self.laser_apply)
+        self.laserMinWlSpin.valueChanged.connect(self.laser_apply)
+        self.laserMaxWlSpin.valueChanged.connect(self.laser_apply)
+        
+    def laser_connect(self):
+        simulate = self.laserSimCheck.isChecked()
+        self.laserStatusLabel.setText("Connecting...")
+        QCoreApplication.processEvents()
+        
+        ok = self.laser.connect(self.laserAddrText.text(), self.laserSlotSpin.value(), simulate)
+        if ok:
+            self.laserStatusLabel.setText(f"Connected: {self.laser.idn}")
+            self.laser_apply()
+            self.laserOutBut.setChecked(self.laser.output)
+            self.laser_toggle_output()
+        else:
+            self.laserStatusLabel.setText(f"Connection failed: {self.laser.last_error}")
+        
+        # A simulated laser shines on the simulated detector
+        self.data.daq.sim_function = self.sim_detector if (ok and simulate) else None
+        
+    def laser_apply(self):
+        self.laser.set_limits(self.laserMinWlSpin.value(), self.laserMaxWlSpin.value())
+        self.spectrum.monitor_wl = self.laser.clamp(self.laserWlSpin.value())
+        if self.laser.ok and not self.spectrum.running:
+            try:
+                self.laser.set_power(self.laserPowSpin.value())
+                self.laser.set_wavelength(self.laserWlSpin.value(), wait=False)
+            except Exception as e:
+                self.laserStatusLabel.setText(f"Communication error: {e}")
+                
+    def laser_toggle_output(self):
+        on = self.laserOutBut.isChecked()
+        try:
+            self.laser.set_output(on)
+        except Exception as e:
+            self.laserStatusLabel.setText(f"Communication error: {e}")
+        on = self.laser.output
+        self.laserOutBut.setChecked(on)
+        self.laserOutBut.setText("Output ON" if on else "Output OFF")
+        
+    def sim_detector(self, t):
+        # Simulated detector voltage, for the times t (s, since the simulated DAQ started)
+        power = 0.5*self.laser.sim_transmission(self.data.daq.sim_t0 + t)
+        noise = 1 + 0.003*np.random.randn(len(t))
+        return self.data.offset_v + self.data.gain_v_mw*power*noise
+    
+    def prepare_sweep(self) -> str:
+        """
+        Applies the sweep settings and gets everything ready for a wavelength sweep.
+        Returns an empty string if a sweep can start, or the reason why it can't.
+        """
+        if self.core.pulling or self.pullLoop_timer.isActive():
+            return "Wavelength sweeps are not possible while pulling."
+        if not self.laser.ok:
+            return "The laser is not connected. Connect it in the 'Laser' tab of the main window."
+        if not self.laser.output:
+            return "The laser output is off. Turn it on in the 'Laser' tab of the main window."
+        
+        # The sweep needs the continuous acquisition
+        if self.daqmodeCombo.currentText() != "CONTINUOUS" or not self.data.stream_active():
+            self.daqmodeCombo.blockSignals(True)
+            self.daqmodeCombo.setCurrentText("CONTINUOUS")
+            self.daqmodeCombo.blockSignals(False)
+            self.daq_init()
+        
+        self.laser.set_limits(self.laserMinWlSpin.value(), self.laserMaxWlSpin.value())
+        self.spectrum.mode = self.sweepModeCombo.currentText()
+        self.spectrum.start_wl = self.sweepStartSpin.value()
+        self.spectrum.stop_wl = self.sweepStopSpin.value()
+        self.spectrum.speed = self.sweepSpeedSpin.value()
+        self.spectrum.step = self.sweepStepSpin.value()
+        self.spectrum.settle_time = self.sweepSettleSpin.value()
+        self.spectrum.time_offset = self.sweepOffsetSpin.value()
+        self.spectrum.monitor_wl = self.laser.clamp(self.laserWlSpin.value())
+        return ""
+    
+    def new_spectra_folder(self, name: str="loop") -> str:
+        """
+        Creates and returns a new folder to save a series of spectra.
+        """
+        folder = f"{rootpath}/data_bckp/{datetime.now().strftime('%Y_%m_%d')}/{name}_{datetime.now().strftime('%H_%M_%S')}"
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        return folder
             
     # General functions
     def initialize(self):
@@ -678,6 +851,12 @@ class MainWindow(FormUI, WindowUI):
         parameters_dict["DAQ"]["Responsivity_V_per_mW"] = self.responSpin.value()
         parameters_dict["DAQ"]["Offset_V"] = self.detOffsetSpin.value()
         parameters_dict["DAQ"]["Max_power_mW"] = self.maxPowerSpin.value()
+        
+        parameters_dict["Laser"] = {}
+        parameters_dict["Laser"]["Connected"] = self.laser.ok
+        parameters_dict["Laser"]["Model"] = self.laser.idn
+        parameters_dict["Laser"]["Wavelength_nm"] = self.laser.wavelength if self.laser.ok else self.laserWlSpin.value()
+        parameters_dict["Laser"]["Power_mW"] = self.laserPowSpin.value()
         
         parameters_dict["Profile"] = {}
         parameters_dict["Profile"]["Mode"] = self.profile_mode
@@ -1453,7 +1632,7 @@ class MainWindow(FormUI, WindowUI):
         
     def loop(self):
         # Open interactive Loop Wizard Dialog
-        wizard = LoopWizardDialog(self, core=self.core)
+        wizard = LoopWizardDialog(self, core=self.core, main=self)
         wizard.exec()
         
     

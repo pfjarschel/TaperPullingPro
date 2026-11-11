@@ -28,6 +28,60 @@ from .TaperPullingDAQ import TaperPullingDAQ
 from .TaperPullingDAQ import AcquisitionType as AcqType
 from .TaperPullingDAQ import TerminalConfiguration as TermConf
 
+class StreamRecorder:
+    """
+    Keeps every sample of the acquisition stream between start() and stop().
+    """
+    def __init__(self):
+        self.lock = Lock()
+        self.active = False
+        self.chunks = []
+        self.chunk_end = []   # Index of the sample after the last one of each chunk
+        self.chunk_time = []  # Time (epoch, s) at which each chunk was received
+        self.n = 0
+        self.srate = 1e3
+        
+    def start(self, srate: float):
+        with self.lock:
+            self.chunks = []
+            self.chunk_end = []
+            self.chunk_time = []
+            self.n = 0
+            self.srate = srate
+            self.active = True
+            
+    def stop(self):
+        self.active = False
+        
+    def add(self, chunk: np.ndarray, t_chunk: float):
+        with self.lock:
+            self.n += len(chunk)
+            self.chunks.append(chunk.astype(np.float32))
+            self.chunk_end.append(self.n)
+            self.chunk_time.append(t_chunk)
+            
+    def duration(self) -> float:
+        return self.n/self.srate
+    
+    def get(self) -> dict:
+        with self.lock:
+            chunks = list(self.chunks)
+            chunk_end = np.array(self.chunk_end, dtype=np.int64)
+            chunk_time = np.array(self.chunk_time, dtype=float)
+            
+        if len(chunks) > 0:
+            signal = np.concatenate(chunks)
+            # A chunk can only arrive late, never early. The earliest start time
+            # implied by any chunk is thus the best estimate.
+            t0 = float(np.min(chunk_time - chunk_end/self.srate))
+        else:
+            signal = np.zeros(0, dtype=np.float32)
+            t0 = 0.0
+            
+        return {"signal": signal, "sampling_rate": self.srate, "t0": t0,
+                "chunk_end": chunk_end, "chunk_time": chunk_time}
+
+
 class TaperPullingData:
     """
     This class is responsible for acquiring and processing the 
@@ -52,6 +106,7 @@ class TaperPullingData:
     monitor_loop = None
     monitor_interval = 20  # ms
     monitor_val = 0.0
+    last_chunk_time = 0.0  # Time (epoch, s) the last samples in the buffer were received
     
     continuous_loop = None       # Acquisition thread (continuous mode)
     continuous_stop = None       # Event used to stop the acquisition thread
@@ -93,13 +148,9 @@ class TaperPullingData:
     x_provider = None   # Optional function returning (x, v) at the time it is called
     
     # Full data recording (continuous mode only). Every sample is kept, no gaps.
-    recording = False
-    rec_lock = None
-    rec_chunks = []
-    rec_chunk_end = []   # Index of the sample after the last one of each chunk
-    rec_chunk_time = []  # Time (epoch, s) at which each chunk was received
-    rec_n = 0
-    rec_srate = 1e3
+    # Independent recorders, so that different measurements do not overwrite each other:
+    # "process" (fabrication) and "sweep" (wavelength sweeps).
+    recorders = {}
     cuton_f = 0.0
     cutoff_f = np.inf
        
@@ -123,7 +174,7 @@ class TaperPullingData:
         self.monitor_loop = None
         self.continuous_loop = None
         self.continuous_stop = None
-        self.rec_lock = Lock()
+        self.recorders = {"process": StreamRecorder(), "sweep": StreamRecorder()}
 
     def set_calibration(self, gain_v_mw: float = 10.0, offset_v: float = 0.0, max_power_mw: float = 1.0):
         """
@@ -394,13 +445,11 @@ class TaperPullingData:
             
             self.buffer = np.concatenate((self.buffer, chunk))[-self.buffer_size:]
             self.monitor_val = float(chunk.mean())
+            self.last_chunk_time = t_chunk
             
-            if self.recording:
-                with self.rec_lock:
-                    self.rec_n += n
-                    self.rec_chunks.append(chunk.astype(np.float32))
-                    self.rec_chunk_end.append(self.rec_n)
-                    self.rec_chunk_time.append(t_chunk)
+            for recorder in self.recorders.values():
+                if recorder.active:
+                    recorder.add(chunk, t_chunk)
             
     def stop_cont_loop(self):
         loop = self.continuous_loop
@@ -410,26 +459,24 @@ class TaperPullingData:
                 loop.join(2.0 + 2.0*self.continuous_interval/1000.0)
         self.continuous_loop = None
         
-    def start_recording(self):
+    @property
+    def recording(self) -> bool:
+        return self.recorders["process"].active
+    
+    def start_recording(self, name: str="process"):
         """
         Starts keeping every acquired sample (continuous mode only).
-        Any previous recording is discarded.
+        Any previous recording with the same name is discarded.
         """
-        with self.rec_lock:
-            self.rec_chunks = []
-            self.rec_chunk_end = []
-            self.rec_chunk_time = []
-            self.rec_n = 0
-            self.rec_srate = self.sampling_rate
-            self.recording = True
+        self.recorders[name].start(self.sampling_rate)
             
-    def stop_recording(self):
-        self.recording = False
+    def stop_recording(self, name: str="process"):
+        self.recorders[name].stop()
         
-    def get_recording_duration(self) -> float:
-        return self.rec_n/self.rec_srate
+    def get_recording_duration(self, name: str="process") -> float:
+        return self.recorders[name].duration()
         
-    def get_recording(self) -> dict:
+    def get_recording(self, name: str="process") -> dict:
         """
         Returns the recorded data (can be called during or after a recording):
             signal: all samples, in V (float32).
@@ -439,22 +486,7 @@ class TaperPullingData:
                 index after its last sample and the time it arrived. Can be used 
                 to verify the time axis.
         """
-        with self.rec_lock:
-            chunks = list(self.rec_chunks)
-            chunk_end = np.array(self.rec_chunk_end, dtype=np.int64)
-            chunk_time = np.array(self.rec_chunk_time, dtype=float)
-            
-        if len(chunks) > 0:
-            signal = np.concatenate(chunks)
-            # A chunk can only arrive late, never early. The earliest start time
-            # implied by any chunk is thus the best estimate.
-            t0 = float(np.min(chunk_time - chunk_end/self.rec_srate))
-        else:
-            signal = np.zeros(0, dtype=np.float32)
-            t0 = 0.0
-            
-        return {"signal": signal, "sampling_rate": self.rec_srate, "t0": t0,
-                "chunk_end": chunk_end, "chunk_time": chunk_time}
+        return self.recorders[name].get()
             
     def start_monitor(self):
         self.stop_monitor()

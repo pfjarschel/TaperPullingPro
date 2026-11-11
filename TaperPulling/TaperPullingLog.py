@@ -4,9 +4,10 @@
 # Gleb Wataghin Physics Institute (IFGW), University of Campinas
 # =============================================================================
 """
-This module reads the full process log ("*_full_log.npz") saved by the taper
-pulling program after each fabrication, so that analysis code does not need to
-know how the file is organized.
+This module reads the files saved by the taper pulling program, so that 
+analysis code does not need to know how they are organized:
+    - the full process log ("*_full_log.npz") saved after each fabrication;
+    - the transmission spectra ("spectrum_*.npz") measured with the tunable laser.
 
 It only depends on numpy, and can be copied and used on its own:
 
@@ -16,10 +17,16 @@ It only depends on numpy, and can be copied and used on its own:
     plt.plot(log.total_pulled, log.power)     # Transmission vs. pulled distance
     freqs, x, spec = log.spectrogram(1000)    # Recalculate the spectrogram
 
-All lengths in mm, times in s, velocities in mm/s, power in mW.
+    spectra = load_spectra("loop_15_20_11")   # All spectra in a folder
+    for sp in spectra:
+        plt.plot(sp.wavelength, sp.power, label=f"{sp.metadata['slack']:.3f} mm")
+
+All lengths in mm, times in s, velocities in mm/s, power in mW, wavelengths in nm.
 """
 # =============================================================================
 
+import os
+import glob
 import json
 import numpy as np
 
@@ -156,3 +163,67 @@ def load_pull_log(filename: str) -> PullLog:
     Reads a full process log file ("*_full_log.npz").
     """
     return PullLog(filename)
+
+
+class Spectrum:
+    """
+    A transmission spectrum measured with the tunable laser.
+    
+        wavelength      (nm)
+        signal          Detector voltage (V)
+        power           Optical power (mW), from the detector calibration
+        info            Sweep settings (mode, range, speed or step, laser...)
+        metadata        What was saved with the spectrum by the program (motor
+                        positions, notes...). Same as info["metadata"]
+        raw_time, raw_signal
+                        Continuous sweeps only: everything recorded around the 
+                        sweep, with the time relative to the sweep command.
+    """
+    
+    def __init__(self, filename: str):
+        f = np.load(filename, allow_pickle=False)
+        
+        self.filename = filename
+        self.info = json.loads(str(f["info_json"]))
+        self.metadata = self.info.get("metadata", {})
+        self.wavelength = f["wavelength"]
+        self.signal = f["signal"]
+        self.power = f["power"]
+        self.raw_time = f["raw_time"]
+        self.raw_signal = f["raw_signal"].astype(float)
+        
+    def remap(self, time_offset: float):
+        """
+        Continuous sweeps only: recalculates the spectrum from the raw data,
+        assuming a different delay (s) between the sweep command and the actual 
+        start of the sweep. Replaces wavelength, signal and power.
+        """
+        if len(self.raw_time) == 0:
+            raise ValueError("This spectrum has no raw data (stepped sweep).")
+        
+        wl = self.info["start_wl"] + self.info["speed"]*(self.raw_time - time_offset)
+        inside = (wl >= self.info["start_wl"]) & (wl <= self.info["stop_wl"])
+        self.wavelength = wl[inside]
+        self.signal = self.raw_signal[inside]
+        self.power = (self.signal - self.info["offset_V"])/self.info["gain_V_per_mW"]
+        self.info["time_offset"] = time_offset
+        
+    def __repr__(self):
+        if len(self.wavelength) == 0:
+            return f"Spectrum: empty ({self.info['mode']})"
+        return (f"Spectrum: {self.wavelength[0]:.2f} to {self.wavelength[-1]:.2f} nm, "
+                f"{len(self.wavelength)} points ({self.info['mode']})")
+
+
+def load_spectrum(filename: str) -> Spectrum:
+    """
+    Reads a transmission spectrum file ("spectrum_*.npz").
+    """
+    return Spectrum(filename)
+
+
+def load_spectra(folder: str) -> list[Spectrum]:
+    """
+    Reads all transmission spectra in a folder, in the order they were measured.
+    """
+    return [Spectrum(f) for f in sorted(glob.glob(os.path.join(folder, "spectrum_*.npz")))]

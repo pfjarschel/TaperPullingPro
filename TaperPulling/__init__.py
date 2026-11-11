@@ -3,6 +3,9 @@ from . import TaperPullingUI
 from . import TaperPullingData
 from . import TaperPullingDAQ
 from . import TaperPullingMotors
+from . import TaperPullingLaser
+from . import TaperPullingSpectrum
+from . import TaperPullingLog
 
 import sys
 from PyQt6.QtWidgets import QApplication
@@ -20,5 +23,6 @@ def run_ui() -> int:
     # Run application and return status when finished.
     return app.exec()
 
-__all__ = ["run_ui", "create_ui", "TaperShape", "TaperPullingUI", "TaperPullingData", "TaperPullingDAQ", "TaperPullingMotors"]
+__all__ = ["run_ui", "create_ui", "TaperShape", "TaperPullingUI", "TaperPullingData", "TaperPullingDAQ", "TaperPullingMotors",
+           "TaperPullingLaser", "TaperPullingSpectrum", "TaperPullingLog"]
 
