@@ -450,9 +450,29 @@ class GenericTLMotor:
     def initialize(self):
         self.calibrate_units()
         self.get_homed()
-        self.max_pos = self.get_max_pos()
-        self.max_vel, self.max_accel = self.get_max_vel_params()
-        self.vel, self.accel = self.get_vel_params()
+        if not self.ok:
+            return
+
+        # The travel and velocity limits of the stage come from the controller, and may
+        # only be available some time after connecting. Until then they read as 0, which
+        # must never be used: with a maximum position of 0, the motor cannot go anywhere.
+        # If they do not arrive, the default values of this motor are kept.
+        not_read = []
+        if self.wait_until(lambda: self.get_max_pos() > 0, 3.0):
+            self.max_pos = self.get_max_pos()
+        else:
+            not_read.append(f"maximum position (using {self.max_pos:g})")
+        if self.wait_until(lambda: min(self.get_max_vel_params()) > 0, 1.0):
+            self.max_vel, self.max_accel = self.get_max_vel_params()
+        else:
+            not_read.append(f"velocity limits (using {self.max_vel:g}, {self.max_accel:g})")
+        if self.wait_until(lambda: min(self.get_vel_params()) > 0, 1.0):
+            self.vel, self.accel = self.get_vel_params()
+        else:
+            not_read.append(f"velocity settings (using {self.vel:g}, {self.accel:g})")
+        if not_read:
+            print(f"{self.name}: could not read from the controller: {'; '.join(not_read)}")
+        print(f"{self.name}: maximum position {self.max_pos:g}, velocity limits {self.max_vel:g}, {self.max_accel:g}")
         self.pos = self.get_position()
     
     def get_vel_params(self):
