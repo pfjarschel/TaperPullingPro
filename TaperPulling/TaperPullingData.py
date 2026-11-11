@@ -38,12 +38,14 @@ class StreamRecorder:
         self.chunks = []
         self.chunk_end = []   # Index of the sample after the last one of each chunk
         self.chunk_time = []  # Time (epoch, s) at which each chunk was received
+        self.aux_chunks = []  # Auxiliary channel, if used
         self.n = 0
         self.srate = 1e3
         
     def start(self, srate: float):
         with self.lock:
             self.chunks = []
+            self.aux_chunks = []
             self.chunk_end = []
             self.chunk_time = []
             self.n = 0
@@ -53,10 +55,12 @@ class StreamRecorder:
     def stop(self):
         self.active = False
         
-    def add(self, chunk: np.ndarray, t_chunk: float):
+    def add(self, chunk: np.ndarray, t_chunk: float, aux: np.ndarray|None=None):
         with self.lock:
             self.n += len(chunk)
             self.chunks.append(chunk.astype(np.float32))
+            if aux is not None and len(aux) == len(chunk):
+                self.aux_chunks.append(aux.astype(np.float32))
             self.chunk_end.append(self.n)
             self.chunk_time.append(t_chunk)
             
@@ -66,6 +70,7 @@ class StreamRecorder:
     def get(self) -> dict:
         with self.lock:
             chunks = list(self.chunks)
+            aux_chunks = list(self.aux_chunks)
             chunk_end = np.array(self.chunk_end, dtype=np.int64)
             chunk_time = np.array(self.chunk_time, dtype=float)
             
@@ -78,7 +83,13 @@ class StreamRecorder:
             signal = np.zeros(0, dtype=np.float32)
             t0 = 0.0
             
-        return {"signal": signal, "sampling_rate": self.srate, "t0": t0,
+        # The auxiliary channel is only valid if it was present all the time
+        if len(aux_chunks) > 0 and len(aux_chunks) == len(chunks):
+            aux = np.concatenate(aux_chunks)
+        else:
+            aux = np.zeros(0, dtype=np.float32)
+            
+        return {"signal": signal, "aux": aux, "sampling_rate": self.srate, "t0": t0,
                 "chunk_end": chunk_end, "chunk_time": chunk_time}
 
 
@@ -442,6 +453,7 @@ class TaperPullingData:
             if n == 0:
                 continue
             t_chunk = time.time()
+            aux = self.daq.last_aux
             
             self.buffer = np.concatenate((self.buffer, chunk))[-self.buffer_size:]
             self.monitor_val = float(chunk.mean())
@@ -449,7 +461,7 @@ class TaperPullingData:
             
             for recorder in self.recorders.values():
                 if recorder.active:
-                    recorder.add(chunk, t_chunk)
+                    recorder.add(chunk, t_chunk, aux)
             
     def stop_cont_loop(self):
         loop = self.continuous_loop
@@ -480,6 +492,7 @@ class TaperPullingData:
         """
         Returns the recorded data (can be called during or after a recording):
             signal: all samples, in V (float32).
+            aux: samples of the auxiliary channel (empty if not used).
             sampling_rate: in Hz. Sample i was taken at t0 + i/sampling_rate.
             t0: time (epoch, s) of the first sample.
             chunk_end, chunk_time: for each chunk received from the DAQ, the

@@ -28,7 +28,7 @@ class TaperPullingLaser:
     module in an Agilent/Keysight 816x mainframe.
     """
     # Connection
-    address = ""      # "IP", "IP:port" (raw socket, default port 5025) or a VISA resource name
+    address = ""      # VISA resource name, or "IP" / "IP:port" (raw socket, default port 5025)
     slot = 1          # Slot of the laser module in the mainframe
     timeout = 3.0
     conn = None       # Socket or VISA resource
@@ -53,7 +53,9 @@ class TaperPullingLaser:
     # Sweep
     sweep_start = 1480.0
     sweep_stop = 1565.0
-    sweep_speed = 5.0   # nm/s
+    sweep_speeds = [0.5, 1.0, 2.0, 5.0, 10.0]  # nm/s, values accepted by the laser
+    sweep_speed = 2.0   # nm/s
+    sweep_trigger_step = 0.0  # nm. Trigger output at every step. 0: only when the sweep starts
     sweep_t0 = 0.0      # Time (epoch) the sweep was started
 
     # Simulated loop resonator (transmission seen by the simulated DAQ)
@@ -61,7 +63,8 @@ class TaperPullingLaser:
     sim_ng = 1.5             # Group index
     sim_a = 0.85             # Round-trip amplitude
     sim_r = 0.80             # Self-coupling amplitude
-    sim_lead_time = 0.0      # Delay between the sweep command and the sweep start
+    sim_lead_time = 0.3      # Delay between the sweep command and the sweep start (random at each sweep)
+    sim_trigger_width = 0.005  # s
 
     def __init__(self):
         """
@@ -200,6 +203,17 @@ class TaperPullingLaser:
             self.wavelength = wl
         return wl
 
+    def get_wavelength(self) -> float:
+        """
+        Asks the laser for its current wavelength, in nm. During a sweep, it
+        follows the sweep.
+        """
+        if self.ok and not self.simulate:
+            return 1e9*float(self.query(f"SOUR{self.slot}:WAV?"))
+        elif self.simulate:
+            return float(self.sim_wavelength(time.time()))
+        return self.wavelength
+
     def set_power(self, power: float):
         """
         Sets the output power, in mW.
@@ -217,14 +231,17 @@ class TaperPullingLaser:
             self.output = on
 
     # Continuous sweep
-    def setup_sweep(self, start: float, stop: float, speed: float) -> str:
+    def setup_sweep(self, start: float, stop: float, speed: float, trigger_step: float=0.0) -> str:
         """
         Configures a single continuous sweep.
 
         Args:
             start, stop (float): Wavelengths in nm, limited to the allowed range.
             speed (float): Sweep speed in nm/s. Only some values are accepted by
-                the instrument (e.g. 0.5, 5, 40, 80...). Check its manual.
+                the instrument (see sweep_speeds).
+            trigger_step (float): If > 0, the laser outputs a trigger every time
+                the wavelength advances by this much (nm). Otherwise, a single
+                trigger is output when the sweep starts.
 
         Returns:
             str: Empty if everything is ok, or a description of the problem.
@@ -232,6 +249,7 @@ class TaperPullingLaser:
         self.sweep_start = self.clamp(min(start, stop))
         self.sweep_stop = self.clamp(max(start, stop))
         self.sweep_speed = speed
+        self.sweep_trigger_step = max(trigger_step, 0.0)
         if self.sweep_stop <= self.sweep_start:
             return "The sweep range is empty or outside the allowed wavelength range."
 
@@ -245,9 +263,12 @@ class TaperPullingLaser:
             self.write(f"{s}:CYCL 1")
             self.write(f"{s}:REP ONEW")
             self.write(f"{s}:LLOG 0")
-            # A trigger is output when the sweep starts. Not used at the moment, but
-            # it can be wired to the DAQ for precise timing.
-            self.write(f"TRIG{self.slot}:OUTP SWST")
+            # Trigger output, that can be recorded by the DAQ to calibrate the wavelengths
+            if self.sweep_trigger_step > 0:
+                self.write(f"{s}:STEP {self.sweep_trigger_step:.4f}NM")
+                self.write(f"TRIG{self.slot}:OUTP STF")
+            else:
+                self.write(f"TRIG{self.slot}:OUTP SWST")
 
             check = self.query(f"{s}:CHEC?")
             if not check.startswith("0"):
@@ -266,6 +287,8 @@ class TaperPullingLaser:
     def start_sweep(self):
         if self.ok:
             self.write(f"SOUR{self.slot}:WAV:SWE STAR")
+            if self.simulate:
+                self.sim_lead_time = np.random.uniform(0.2, 0.6)
             self.sweep_t0 = time.time()
 
     def stop_sweep(self):
@@ -289,6 +312,20 @@ class TaperPullingLaser:
         ts = t - self.sweep_t0 - self.sim_lead_time
         sweeping = (ts >= 0.0) & (ts < self.sweep_duration())
         return np.where(sweeping, self.sweep_start + self.sweep_speed*ts, self.wavelength)
+
+    def sim_trigger(self, t) -> np.ndarray:
+        """
+        Trigger output (V) of the simulated laser at the times t (epoch, s).
+        """
+        t = np.asarray(t, dtype=float)
+        ts = t - self.sweep_t0 - self.sim_lead_time
+        sweeping = (ts >= 0.0) & (ts < self.sweep_duration())
+        if self.sweep_trigger_step > 0:
+            # Time since the last step
+            since = np.mod(ts, self.sweep_trigger_step/self.sweep_speed)
+        else:
+            since = ts
+        return np.where(sweeping & (since < self.sim_trigger_width), 5.0, 0.0)
 
     def sim_transmission(self, t) -> np.ndarray:
         """

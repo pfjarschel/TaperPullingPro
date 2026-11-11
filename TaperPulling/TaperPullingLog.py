@@ -167,17 +167,29 @@ def load_pull_log(filename: str) -> PullLog:
 
 class Spectrum:
     """
-    A transmission spectrum measured with the tunable laser.
+    A transmission spectrum measured by sweeping the tunable laser.
     
         wavelength      (nm)
         signal          Detector voltage (V)
         power           Optical power (mW), from the detector calibration
-        info            Sweep settings (mode, range, speed or step, laser...)
+        info            Sweep settings (range, speed, start delay, laser...)
         metadata        What was saved with the spectrum by the program (motor
                         positions, notes...). Same as info["metadata"]
-        raw_time, raw_signal
-                        Continuous sweeps only: everything recorded around the 
-                        sweep, with the time relative to the sweep command.
+                        
+    Raw data, to recalculate the wavelengths if needed:
+        raw_time        Time of every recorded sample, relative to the moment 
+                        the laser was told to sweep (s)
+        raw_signal      Detector voltage of every recorded sample (V)
+        raw_trigger     Trigger output of the laser, for the same samples (V).
+                        Empty if it was not connected
+        poll_time, poll_wavelength
+                        Wavelengths reported by the laser during the sweep, and 
+                        when (s, relative to the sweep command)
+                        
+    The wavelengths are calculated from the time since the sweep started:
+        wavelength = start_wl + speed*(raw_time - start_delay)
+    where start_delay (in info) was found from the first change in the 
+    wavelength reported by the laser. See remap() and remap_from_triggers().
     """
     
     def __init__(self, filename: str):
@@ -191,28 +203,84 @@ class Spectrum:
         self.power = f["power"]
         self.raw_time = f["raw_time"]
         self.raw_signal = f["raw_signal"].astype(float)
+        self.raw_trigger = f["raw_trigger"].astype(float)
+        self.poll_time = f["poll_time"]
+        self.poll_wavelength = f["poll_wavelength"]
         
-    def remap(self, time_offset: float):
+    def set_wavelengths(self, raw_wavelength: np.ndarray):
         """
-        Continuous sweeps only: recalculates the spectrum from the raw data,
-        assuming a different delay (s) between the sweep command and the actual 
-        start of the sweep. Replaces wavelength, signal and power.
+        Replaces the spectrum (wavelength, signal and power) by the raw samples 
+        that are inside the sweep range, given the wavelength of every raw sample.
         """
-        if len(self.raw_time) == 0:
-            raise ValueError("This spectrum has no raw data (stepped sweep).")
-        
-        wl = self.info["start_wl"] + self.info["speed"]*(self.raw_time - time_offset)
-        inside = (wl >= self.info["start_wl"]) & (wl <= self.info["stop_wl"])
-        self.wavelength = wl[inside]
+        inside = (raw_wavelength >= self.info["start_wl"]) & (raw_wavelength <= self.info["stop_wl"])
+        self.wavelength = raw_wavelength[inside]
         self.signal = self.raw_signal[inside]
         self.power = (self.signal - self.info["offset_V"])/self.info["gain_V_per_mW"]
-        self.info["time_offset"] = time_offset
+        
+    def remap(self, start_delay: float):
+        """
+        Recalculates the spectrum from the raw data, assuming a different delay
+        (s) between the sweep command and the actual start of the sweep.
+        """
+        self.set_wavelengths(self.info["start_wl"] + self.info["speed"]*(self.raw_time - start_delay))
+        self.info["start_delay"] = start_delay
+        
+    def trigger_times(self, threshold: float|None=None) -> np.ndarray:
+        """
+        Returns the times (s, relative to the sweep command) of the triggers 
+        sent by the laser (rising edges of raw_trigger).
+        
+        Args:
+            threshold (float): Voltage above which the trigger is considered 
+                high. Defaults to half way between its lowest and highest values.
+        """
+        if len(self.raw_trigger) == 0:
+            return np.zeros(0)
+        if threshold is None:
+            threshold = (self.raw_trigger.min() + self.raw_trigger.max())/2
+        high = self.raw_trigger > threshold
+        rising = np.flatnonzero(high[1:] & ~high[:-1]) + 1
+        return self.raw_time[rising]
+    
+    def remap_from_triggers(self, threshold: float|None=None) -> int:
+        """
+        Recalculates the spectrum from the raw data, using the triggers sent by
+        the laser. Triggers before the sweep command are ignored.
+        If the laser sent a trigger at every wavelength step (trigger_step in 
+        info), the first trigger is taken as the start wavelength and each 
+        following one as one step further, with the wavelengths in between 
+        interpolated. Otherwise, the first trigger is taken as the sweep start.
+        
+        Returns:
+            int: The number of triggers used.
+        """
+        t_trig = self.trigger_times(threshold)
+        t_trig = t_trig[t_trig > 0]
+        if len(t_trig) == 0:
+            raise ValueError("No triggers found in this spectrum.")
+        
+        step = self.info.get("trigger_step", 0.0)
+        speed = self.info["speed"]
+        if step > 0 and len(t_trig) > 1:
+            wl_trig = self.info["start_wl"] + step*np.arange(len(t_trig))
+            wl = np.interp(self.raw_time, t_trig, wl_trig)
+            # Outside the triggers, continue at the nominal speed
+            before = self.raw_time < t_trig[0]
+            after = self.raw_time > t_trig[-1]
+            wl[before] = wl_trig[0] + speed*(self.raw_time[before] - t_trig[0])
+            wl[after] = wl_trig[-1] + speed*(self.raw_time[after] - t_trig[-1])
+            self.set_wavelengths(wl)
+            self.info["start_delay"] = float(t_trig[0])
+            return len(t_trig)
+        else:
+            self.remap(float(t_trig[0]))
+            return 1
         
     def __repr__(self):
         if len(self.wavelength) == 0:
-            return f"Spectrum: empty ({self.info['mode']})"
+            return "Spectrum: empty"
         return (f"Spectrum: {self.wavelength[0]:.2f} to {self.wavelength[-1]:.2f} nm, "
-                f"{len(self.wavelength)} points ({self.info['mode']})")
+                f"{len(self.wavelength)} points, {self.info['speed']:g} nm/s")
 
 
 def load_spectrum(filename: str) -> Spectrum:

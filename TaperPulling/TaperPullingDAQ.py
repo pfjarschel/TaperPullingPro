@@ -47,6 +47,12 @@ class TaperPullingDAQ:
     sys_ok = False
     simulate = False # Simulate DAQ acquisition
     
+    # Optional auxiliary channel, acquired together with the main one in the
+    # continuous stream (e.g. a trigger signal). Empty: not used.
+    aux_channel = ""
+    last_aux = None  # Auxiliary channel samples of the last read_stream() call
+    sim_aux_function = None  # Same as sim_function, for the auxiliary channel
+    
     # Simulated stream. sim_function, if set, receives an array of times (s, since
     # the stream started) and must return the simulated voltages for those times.
     sim_function = None
@@ -185,6 +191,10 @@ class TaperPullingDAQ:
                 self.task = nidaqmx.Task()
                 self.task.ai_channels.add_ai_voltage_chan(dev_ch, min_val=-1*scale, max_val=scale,
                                                           terminal_config=self.term_config)
+                if self.aux_channel != "" and self.aux_channel != dev_ch:
+                    aux_range = max(self.get_volt_ranges(self.get_dev_from_name(self.aux_channel)))
+                    self.task.ai_channels.add_ai_voltage_chan(self.aux_channel, min_val=-aux_range, max_val=aux_range,
+                                                              terminal_config=self.term_config)
                 self.task.timing.cfg_samp_clk_timing(srate, sample_mode=self.mode, 
                                                      samps_per_chan=buffer_size + 1)
                 
@@ -204,7 +214,7 @@ class TaperPullingDAQ:
             float: Value read.
         """
         if self.ok and not self.paused:
-            return self.task.read()
+            return float(np.atleast_1d(self.task.read())[0])
         elif self.simulate and not self.paused:
             avg = 0.0
             offs = 1.0
@@ -223,7 +233,7 @@ class TaperPullingDAQ:
             np.ndarray: Array of values read.
         """
         if self.ok and not self.paused:
-            return np.array(self.task.read(n))
+            return self.main_channel(np.array(self.task.read(n)))
         elif self.simulate and not self.paused:
             avg = 0.0
             offs = 1.0
@@ -232,12 +242,21 @@ class TaperPullingDAQ:
         else:
             return np.zeros(n)
         
+    def main_channel(self, data: np.ndarray) -> np.ndarray:
+        """
+        Returns only the main channel of data read from the task.
+        """
+        if data.ndim == 2:
+            return data[0]
+        return np.atleast_1d(data)
+    
     def read_stream(self, n: int=100) -> np.ndarray:
         """
         Reads the next samples of a continuous acquisition, without ever
         discarding any. Blocks until at least n samples are available, and also
         returns anything else already waiting in the device buffer, so that
         consecutive calls return a contiguous (gapless) stream.
+        If the auxiliary channel is used, its samples are left in last_aux.
         In simulation, samples are generated at the real sampling rate.
         
         Args:
@@ -251,15 +270,22 @@ class TaperPullingDAQ:
             return np.zeros(0)
         
         if self.ok and not self.simulate:
-            data = np.atleast_1d(np.array(self.task.read(n), dtype=float))
+            # With the auxiliary channel, the data has one row per channel
+            data = np.array(self.task.read(n), dtype=float)
             try:
                 extra = self.task.in_stream.avail_samp_per_chan
             except Exception:
                 extra = 0
             if extra > 0:
-                more = np.atleast_1d(np.array(self.task.read(extra), dtype=float))
-                data = np.concatenate((data, more))
-            return data
+                more = np.array(self.task.read(extra), dtype=float)
+                data = np.concatenate((data, more), axis=-1)
+            
+            if data.ndim == 2:
+                self.last_aux = data[1]
+                return data[0]
+            else:
+                self.last_aux = None
+                return np.atleast_1d(data)
         elif self.simulate:
             # Wait until the n-th sample from now "exists"
             t_ready = self.sim_t0 + (self.sim_n + n)/self.sampling_rate
@@ -272,6 +298,11 @@ class TaperPullingDAQ:
             count = int(np.clip(total - self.sim_n, n, max(n, 10*self.buffer_size)))
             t = (self.sim_n + np.arange(count))/self.sampling_rate
             self.sim_n += count
+            
+            if self.aux_channel != "" and self.sim_aux_function is not None:
+                self.last_aux = np.asarray(self.sim_aux_function(t), dtype=float)
+            else:
+                self.last_aux = None
             
             if self.sim_function is not None:
                 return np.asarray(self.sim_function(t), dtype=float)
@@ -289,7 +320,7 @@ class TaperPullingDAQ:
             np.ndarray: Array of values read.
         """
         if self.ok and not self.paused:
-            return np.array(self.task.read(number_of_samples_per_channel=READ_ALL_AVAILABLE))
+            return self.main_channel(np.array(self.task.read(number_of_samples_per_channel=READ_ALL_AVAILABLE)))
         elif self.simulate and not self.paused:
             avg = 0.0
             offs = 1.0

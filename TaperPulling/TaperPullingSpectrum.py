@@ -5,20 +5,20 @@
 # =============================================================================
 """
 This module contains the TaperPullingSpectrum class. It measures transmission
-spectra by sweeping the tunable laser (TaperPullingLaser) while the detector
-signal is acquired (TaperPullingData).
+spectra by sweeping the tunable laser (TaperPullingLaser) at constant speed,
+while the detector signal is recorded without gaps (TaperPullingData).
 
-Two sweep modes are available:
-    "Continuous": the laser sweeps at constant speed while the signal is
-        recorded without gaps. Fast. The wavelength of each sample is
-        calculated from the time since the sweep started, so it relies on the
-        timing between the computer and the laser (see time_offset).
-    "Stepped": the laser is set to each wavelength, one by one. Slow (each
-        step takes at least one acquisition chunk, about 0.1 s), but the
-        wavelength of each point is the one set in the laser.
+The wavelength of each sample is calculated from the time since the sweep
+started. The laser takes some time to start sweeping after it is told to, and
+this time is different at every sweep. To find the real start, the laser is
+asked for its wavelength continuously: the sweep started when it changes.
 
-It does not block: call start(), then update() periodically (at least a few
-times per second) until it returns False.
+If the trigger output of the laser is connected to the auxiliary channel of
+the DAQ, it is recorded and saved with the spectrum. It can then be used to
+refine the wavelengths afterwards (see TaperPullingLog).
+
+It does not block: call start(), then update() periodically (as often as
+possible, at least 10 times per second) until it returns False.
 All wavelengths in nm, power in mW, times in s.
 """
 # =============================================================================
@@ -37,20 +37,16 @@ class TaperPullingSpectrum:
     This class measures transmission spectra using the tunable laser and
     the DAQ.
     """
-    modes = ["Continuous", "Stepped"]
-
     # Settings
-    mode = "Continuous"
     start_wl = 1480.0
     stop_wl = 1565.0
-    speed = 5.0         # nm/s (continuous)
-    step = 0.2          # nm (stepped)
-    settle_time = 0.2   # s. Stepped: wait after each step. Continuous: wait at the start wavelength
-    average_time = 0.05 # s. Stepped: the signal is averaged over this time at each step
-    time_offset = 0.0   # s. Continuous: delay between the sweep command and the actual start of the sweep
+    speed = 2.0         # nm/s
+    trigger_step = 0.0  # nm. The laser outputs a trigger at every step. 0: only at the sweep start
     monitor_wl = 1550.0 # The laser goes back to this wavelength after the sweep
-    pre_time = 0.3      # s. Continuous: signal recorded before the sweep
-    post_time = 0.3     # s. Continuous: signal recorded after the sweep
+    settle_time = 1.0   # s. Wait at the first wavelength before sweeping
+    pre_time = 0.3      # s. Signal recorded before the sweep command
+    post_time = 0.3     # s. Signal recorded after the sweep
+    wl_tolerance = 2e-4 # nm. The wavelength changed if it differs more than this
 
     # State
     state = "idle"
@@ -60,12 +56,11 @@ class TaperPullingSpectrum:
     result = None       # Dictionary with the last spectrum, see get_result()
     metadata = {}
     t_state = 0.0
-    t_command = 0.0
+    t_command = 0.0     # Time (epoch) the sweep command was sent
     t_end = 0.0
-    step_wls = np.zeros(0)
-    step_vals = np.zeros(0)
-    step_i = 0
-    step_set = False
+    start_delay = None  # Time between the sweep command and the detected sweep start
+    wl_before = 0.0     # Wavelength reported by the laser before the sweep
+    polls = []          # (time since command, wavelength) of every wavelength reading
 
     def __init__(self, data: TaperPullingData, laser: TaperPullingLaser):
         self.data = data
@@ -101,25 +96,19 @@ class TaperPullingSpectrum:
         self.error = ""
         self.progress = 0.0
         self.result = None
+        self.start_delay = None
+        self.polls = []
 
         try:
-            if self.mode == "Stepped":
-                n = int(np.floor((self.stop_wl - self.start_wl)/self.step + 1e-9)) + 1
-                self.step_wls = self.start_wl + self.step*np.arange(n)
-                self.step_vals = np.zeros(n)
-                self.step_i = 0
-                self.step_set = False
-                self.state = "stepping"
-            else:
-                err = self.laser.setup_sweep(self.start_wl, self.stop_wl, self.speed)
-                if err != "":
-                    return err
-                # Go to the start, so the laser does not need to travel when the sweep begins
-                self.laser.set_wavelength(self.start_wl, wait=False)
-                self.state = "positioning"
+            err = self.laser.setup_sweep(self.start_wl, self.stop_wl, self.speed, self.trigger_step)
+            if err != "":
+                return err
+            # Go to the start, so the laser does not need to travel when the sweep begins
+            self.laser.set_wavelength(self.start_wl, wait=False)
         except Exception as e:
             return f"Laser communication error: {e}"
 
+        self.state = "positioning"
         self.t_state = time.time()
         self.running = True
         return ""
@@ -135,114 +124,105 @@ class TaperPullingSpectrum:
             return False
 
         try:
-            if self.mode == "Stepped":
-                self.update_stepped()
-            else:
-                self.update_continuous()
+            self.update_sweep()
         except Exception as e:
             self.fail(f"Sweep error: {e}")
 
         return self.running
 
-    def update_continuous(self):
+    def update_sweep(self):
         now = time.time()
         duration = self.laser.sweep_duration()
 
         if self.state == "positioning":
-            if now - self.t_state >= max(self.settle_time, 0.5):
+            if now - self.t_state >= self.settle_time:
+                self.wl_before = self.laser.get_wavelength()
                 self.data.start_recording("sweep")
                 self.state = "pre"
-                self.t_state = now
+                self.t_state = time.time()
+
         elif self.state == "pre":
             if now - self.t_state >= self.pre_time:
                 t_a = time.time()
                 self.laser.start_sweep()
                 t_b = time.time()
                 self.t_command = (t_a + t_b)/2
+                self.polls = [(0.0, self.wl_before)]
                 self.state = "sweeping"
-                self.t_state = t_b
+
         elif self.state == "sweeping":
-            elapsed = now - self.t_command
-            self.progress = float(np.clip((elapsed - self.time_offset)/duration, 0.0, 1.0))
-            if elapsed > 0.5 and not self.laser.sweep_running():
-                self.t_end = now
-                self.state = "post"
-                self.t_state = now
-            elif elapsed > 1.5*duration + 20.0:
+            # Where is the laser now?
+            t_a = time.time()
+            wl = self.laser.get_wavelength()
+            t_b = time.time()
+            t_poll = (t_a + t_b)/2 - self.t_command
+
+            if self.start_delay is None and wl > self.wl_before + self.wl_tolerance:
+                # First change: the sweep started between the previous reading and
+                # this one. Assume the wavelength just read is exact at this time.
+                self.start_delay = max(t_poll - (wl - self.laser.sweep_start)/self.laser.sweep_speed,
+                                       self.polls[-1][0])
+            self.polls.append((t_poll, wl))
+
+            if self.start_delay is not None:
+                elapsed = t_poll - self.start_delay
+                self.progress = float(np.clip(elapsed/duration, 0.0, 1.0))
+                if elapsed >= duration and not self.laser.sweep_running():
+                    self.t_end = time.time()
+                    self.state = "post"
+                    self.t_state = self.t_end
+                elif elapsed > 1.5*duration + 20.0:
+                    self.laser.stop_sweep()
+                    self.fail("The laser did not finish the sweep in the expected time.")
+            elif t_poll > 20.0:
                 self.laser.stop_sweep()
-                self.fail("The laser did not finish the sweep in the expected time.")
+                self.fail("The laser wavelength did not change after the sweep command.")
+
         elif self.state == "post":
             if now - self.t_state >= self.post_time:
                 self.data.stop_recording("sweep")
-                rec = self.data.get_recording("sweep")
-                raw_time = rec["t0"] + np.arange(len(rec["signal"]))/rec["sampling_rate"] - self.t_command
-                self.finish(raw_time=raw_time, raw_signal=rec["signal"], sampling_rate=rec["sampling_rate"])
+                self.finish()
 
-    def update_stepped(self):
-        now = time.time()
-        srate = self.data.sampling_rate
+    def finish(self):
+        rec = self.data.get_recording("sweep")
+        raw_signal = rec["signal"]
+        raw_time = rec["t0"] + np.arange(len(raw_signal))/rec["sampling_rate"] - self.t_command
 
-        if not self.step_set:
-            self.laser.set_wavelength(self.step_wls[self.step_i], wait=True)
-            self.step_set = True
-            self.t_state = time.time()
-        elif self.data.last_chunk_time >= self.t_state + self.settle_time + self.average_time:
-            # The buffer now ends with samples taken after the laser settled
-            n_avg = max(int(self.average_time*srate), 1)
-            self.step_vals[self.step_i] = float(np.mean(self.data.get_points(n_avg)))
-            self.step_i += 1
-            self.step_set = False
-            self.progress = self.step_i/len(self.step_wls)
-            if self.step_i >= len(self.step_wls):
-                self.finish(wavelength=self.step_wls, signal=self.step_vals, sampling_rate=srate)
+        # Keep the samples inside the sweep range. The raw data is also kept,
+        # so the wavelengths can be recalculated afterwards.
+        wl_all = self.laser.sweep_start + self.laser.sweep_speed*(raw_time - self.start_delay)
+        inside = (wl_all >= self.laser.sweep_start) & (wl_all <= self.laser.sweep_stop)
+        signal = np.asarray(raw_signal, dtype=float)[inside]
+        polls = np.array(self.polls, dtype=float).reshape(-1, 2)
 
-    def map_wavelength(self, raw_time: np.ndarray, time_offset: float|None=None) -> np.ndarray:
-        """
-        Continuous sweeps: wavelength at each time (relative to the sweep command).
-        """
-        if time_offset is None:
-            time_offset = self.time_offset
-        return self.laser.sweep_start + self.laser.sweep_speed*(raw_time - time_offset)
-
-    def finish(self, wavelength=None, signal=None, raw_time=None, raw_signal=None, sampling_rate=0.0):
         info = {
-            "format_version": 1,
+            "format_version": 2,
             "saved_at": datetime.now().isoformat(timespec="seconds"),
             "units": {"wavelength": "nm", "signal": "V", "power": "mW", "time": "s"},
-            "mode": self.mode,
-            "start_wl": float(self.start_wl),
-            "stop_wl": float(self.stop_wl),
+            "start_wl": float(self.laser.sweep_start),
+            "stop_wl": float(self.laser.sweep_stop),
+            "speed": float(self.laser.sweep_speed),
+            "trigger_step": float(self.laser.sweep_trigger_step),
+            "start_delay": float(self.start_delay),
+            "command_time": float(self.t_command),
             "monitor_wl": float(self.monitor_wl),
             "laser": self.laser.idn,
             "laser_power": float(self.laser.power),
-            "sampling_rate": float(sampling_rate),
+            "sampling_rate": float(rec["sampling_rate"]),
             "gain_V_per_mW": float(self.data.gain_v_mw),
             "offset_V": float(self.data.offset_v),
             "metadata": self.metadata,
         }
 
-        if raw_time is not None:
-            # Continuous: keep the samples inside the sweep range. The raw data is
-            # also kept, so the wavelengths can be recalculated with another offset.
-            wl_all = self.map_wavelength(raw_time)
-            inside = (wl_all >= self.laser.sweep_start) & (wl_all <= self.laser.sweep_stop)
-            wavelength = wl_all[inside]
-            signal = np.asarray(raw_signal, dtype=float)[inside]
-            info.update({"speed": float(self.laser.sweep_speed), "time_offset": float(self.time_offset),
-                         "command_time": float(self.t_command),
-                         "sweep_end_detected": float(self.t_end - self.t_command)})
-        else:
-            raw_time = np.zeros(0)
-            raw_signal = np.zeros(0, dtype=np.float32)
-            info.update({"step": float(self.step), "settle_time": float(self.settle_time),
-                         "average_time": float(self.average_time)})
-
         self.result = {
-            "wavelength": np.asarray(wavelength, dtype=float),
-            "signal": np.asarray(signal, dtype=float),
-            "power": self.data.get_power_from_voltage(np.asarray(signal, dtype=float)),
-            "raw_time": np.asarray(raw_time, dtype=float),
+            "wavelength": wl_all[inside],
+            "signal": signal,
+            "power": self.data.get_power_from_voltage(signal),
+            "raw_time": raw_time,
             "raw_signal": np.asarray(raw_signal, dtype=np.float32),
+            "raw_trigger": np.asarray(rec["aux"], dtype=np.float32),
+            "poll_time": polls[:, 0],
+            "poll_wavelength": polls[:, 1],
             "info": info,
         }
         self.progress = 1.0
@@ -259,8 +239,7 @@ class TaperPullingSpectrum:
         """
         if self.running:
             try:
-                if self.mode != "Stepped":
-                    self.laser.stop_sweep()
+                self.laser.stop_sweep()
             except Exception:
                 pass
             self.fail("Sweep aborted.")
@@ -279,7 +258,11 @@ class TaperPullingSpectrum:
         Returns the last spectrum, or None if there isn't one:
             wavelength (nm), signal (V), power (mW): the spectrum.
             raw_time (s, relative to the sweep command), raw_signal (V):
-                continuous sweeps only, everything that was recorded.
+                everything that was recorded, before, during and after the sweep.
+            raw_trigger (V): the auxiliary DAQ channel (laser trigger output),
+                for the same times. Empty if not used.
+            poll_time (s, relative to the sweep command), poll_wavelength (nm):
+                the wavelengths reported by the laser during the sweep.
             info: dictionary with the sweep settings and metadata.
         """
         return self.result
@@ -290,7 +273,5 @@ class TaperPullingSpectrum:
         Saves a spectrum in a .npz file.
         Use TaperPulling.TaperPullingLog.load_spectrum() to read it.
         """
-        np.savez_compressed(filename,
-                            info_json=np.array(json.dumps(result["info"])),
-                            wavelength=result["wavelength"], signal=result["signal"], power=result["power"],
-                            raw_time=result["raw_time"], raw_signal=result["raw_signal"])
+        arrays = {key: value for key, value in result.items() if key != "info"}
+        np.savez_compressed(filename, info_json=np.array(json.dumps(result["info"])), **arrays)

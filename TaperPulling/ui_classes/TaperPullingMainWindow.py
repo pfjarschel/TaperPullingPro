@@ -473,10 +473,10 @@ class MainWindow(FormUI, WindowUI):
             form.addRow(label, w)
             return w
         
-        self.laserAddrText = QLineEdit("192.168.0.10", tab)
+        self.laserAddrText = QLineEdit("TCPIP0::192.168.0.10::inst0::INSTR", tab)
         self.laserAddrText.setObjectName("laserAddrText")
-        self.laserAddrText.setToolTip("IP or IP:port of the mainframe (port 5025 if not given),\n"
-                                      "or a VISA resource name, e.g. TCPIP0::192.168.0.10::inst0::INSTR")
+        self.laserAddrText.setToolTip("VISA resource name of the mainframe, e.g. TCPIP0::192.168.0.10::inst0::INSTR\n"
+                                      "(or just IP or IP:port, for a direct socket connection)")
         form.addRow("Address:", self.laserAddrText)
         
         self.laserSlotSpin = QSpinBox(tab)
@@ -508,24 +508,26 @@ class MainWindow(FormUI, WindowUI):
                  tip="The laser is never sent outside the allowed range.\nKeep it away from the edges of the laser's own range.")
         add_spin("laserMaxWlSpin", "Allowed range, to:", 1000.0, 2000.0, 1565.0, 1, " nm")
         
-        self.sweepModeCombo = QComboBox(tab)
-        self.sweepModeCombo.setObjectName("sweepModeCombo")
-        self.sweepModeCombo.addItems(TaperPullingSpectrum.modes)
-        self.sweepModeCombo.setToolTip("Continuous: fast, wavelengths calculated from the sweep timing.\n"
-                                       "Stepped: slow, wavelengths set one by one.")
-        form.addRow("Sweep mode:", self.sweepModeCombo)
-        
         add_spin("sweepStartSpin", "Sweep from:", 1000.0, 2000.0, 1480.0, 2, " nm")
         add_spin("sweepStopSpin", "Sweep to:", 1000.0, 2000.0, 1565.0, 2, " nm")
-        add_spin("sweepSpeedSpin", "Speed (continuous):", 0.1, 200.0, 5.0, 1, " nm/s",
-                 tip="Only some values are accepted by the laser (e.g. 0.5, 5, 40, 80 nm/s)")
-        add_spin("sweepStepSpin", "Step (stepped):", 0.001, 50.0, 0.2, 3, " nm", 0.05)
-        add_spin("sweepSettleSpin", "Settling time:", 0.0, 10.0, 0.2, 2, " s", 0.05,
-                 tip="Stepped: wait after each wavelength step.\nContinuous: wait at the first wavelength before sweeping.")
-        add_spin("sweepOffsetSpin", "Start delay (continuous):", -5.0, 30.0, 0.0, 3, " s", 0.01,
-                 tip="Time between the sweep command and the moment the laser actually starts\n"
-                     "sweeping. Shifts the wavelength axis of continuous sweeps.\n"
-                     "Adjust until a continuous sweep matches a stepped one.")
+        
+        self.sweepSpeedCombo = QComboBox(tab)
+        self.sweepSpeedCombo.setObjectName("sweepSpeedCombo")
+        self.sweepSpeedCombo.addItems([f"{v:g} nm/s" for v in self.laser.sweep_speeds])
+        self.sweepSpeedCombo.setCurrentIndex(self.laser.sweep_speeds.index(2.0))
+        form.addRow("Sweep speed:", self.sweepSpeedCombo)
+        
+        add_spin("sweepTrigStepSpin", "Trigger every:", 0.0, 100.0, 0.0, 3, " nm", 0.5,
+                 tip="The laser outputs a trigger every time the wavelength advances by this much.\n"
+                     "0: a single trigger, when the sweep starts.\n"
+                     "The triggers are only recorded if a trigger input is selected below.")
+        
+        self.laserTrigCombo = QComboBox(tab)
+        self.laserTrigCombo.setObjectName("laserTrigCombo")
+        self.laserTrigCombo.addItems(["None", "Simulation"])
+        self.laserTrigCombo.setToolTip("DAQ input connected to the trigger output of the laser mainframe.\n"
+                                       "It is recorded and saved with each spectrum, to calibrate the wavelengths.")
+        form.addRow("Trigger input:", self.laserTrigCombo)
         
         self.devsTabs.addTab(tab, "Laser")
         
@@ -535,6 +537,17 @@ class MainWindow(FormUI, WindowUI):
         self.laserPowSpin.valueChanged.connect(self.laser_apply)
         self.laserMinWlSpin.valueChanged.connect(self.laser_apply)
         self.laserMaxWlSpin.valueChanged.connect(self.laser_apply)
+        self.laserTrigCombo.currentIndexChanged.connect(self.daq_init)
+        
+    def update_trigger_combo(self):
+        # Trigger input options: none, simulated, or any DAQ channel
+        prev = self.laserTrigCombo.currentText()
+        self.laserTrigCombo.blockSignals(True)
+        self.laserTrigCombo.clear()
+        self.laserTrigCombo.addItems(["None", "Simulation"] + list(dict.fromkeys(self.data.daq.channels_names)))
+        if self.laserTrigCombo.findText(prev) >= 0:
+            self.laserTrigCombo.setCurrentText(prev)
+        self.laserTrigCombo.blockSignals(False)
         
     def laser_connect(self):
         simulate = self.laserSimCheck.isChecked()
@@ -552,6 +565,7 @@ class MainWindow(FormUI, WindowUI):
         
         # A simulated laser shines on the simulated detector
         self.data.daq.sim_function = self.sim_detector if (ok and simulate) else None
+        self.data.daq.sim_aux_function = self.sim_trigger if (ok and simulate) else None
         
     def laser_apply(self):
         self.laser.set_limits(self.laserMinWlSpin.value(), self.laserMaxWlSpin.value())
@@ -579,6 +593,10 @@ class MainWindow(FormUI, WindowUI):
         noise = 1 + 0.003*np.random.randn(len(t))
         return self.data.offset_v + self.data.gain_v_mw*power*noise
     
+    def sim_trigger(self, t):
+        # Simulated laser trigger output, for the times t (s, since the simulated DAQ started)
+        return self.laser.sim_trigger(self.data.daq.sim_t0 + t)
+    
     def prepare_sweep(self) -> str:
         """
         Applies the sweep settings and gets everything ready for a wavelength sweep.
@@ -599,13 +617,10 @@ class MainWindow(FormUI, WindowUI):
             self.daq_init()
         
         self.laser.set_limits(self.laserMinWlSpin.value(), self.laserMaxWlSpin.value())
-        self.spectrum.mode = self.sweepModeCombo.currentText()
         self.spectrum.start_wl = self.sweepStartSpin.value()
         self.spectrum.stop_wl = self.sweepStopSpin.value()
-        self.spectrum.speed = self.sweepSpeedSpin.value()
-        self.spectrum.step = self.sweepStepSpin.value()
-        self.spectrum.settle_time = self.sweepSettleSpin.value()
-        self.spectrum.time_offset = self.sweepOffsetSpin.value()
+        self.spectrum.speed = self.laser.sweep_speeds[self.sweepSpeedCombo.currentIndex()]
+        self.spectrum.trigger_step = self.sweepTrigStepSpin.value()
         self.spectrum.monitor_wl = self.laser.clamp(self.laserWlSpin.value())
         return ""
     
@@ -639,6 +654,13 @@ class MainWindow(FormUI, WindowUI):
         self.data.max_power_mw = self.maxPowerSpin.value()
         self.data.auto_v_range = self.autoVRangeCheck.isChecked()
         self.data.set_buffer(2*self.specsamplesSpin.value())
+        
+        # Auxiliary channel: laser trigger. Must be of the same kind (real or simulated) as the main one
+        trig = self.laserTrigCombo.currentText()
+        if daq_dev_chan == "Simulation":
+            self.data.daq.aux_channel = "Simulation" if trig == "Simulation" else ""
+        else:
+            self.data.daq.aux_channel = trig if trig not in ("None", "Simulation") else ""
         
         dev = None
         if daq_dev_chan != "Simulation":
@@ -1410,6 +1432,8 @@ class MainWindow(FormUI, WindowUI):
             if volt_ranges:
                 self.daqvrangeSpin.setMinimum(volt_ranges[0])
                 self.daqvrangeSpin.setMaximum(volt_ranges[-1])
+            
+            self.update_trigger_combo()
                 
             self.daq_busy = False
             

@@ -434,14 +434,6 @@ class LoopWizardDialog(QDialog):
         # Sweep settings. These are the same as in the 'Laser' tab of the main window
         m = self.main
         settings_layout = QGridLayout()
-        self.combo_sweep_mode = QComboBox(self)
-        self.combo_sweep_mode.addItems([m.sweepModeCombo.itemText(i) for i in range(m.sweepModeCombo.count())])
-        self.combo_sweep_mode.setCurrentIndex(m.sweepModeCombo.currentIndex())
-        self.combo_sweep_mode.currentIndexChanged.connect(m.sweepModeCombo.setCurrentIndex)
-        self.combo_sweep_mode.currentIndexChanged.connect(self.update_sweep_settings)
-        settings_layout.addWidget(QLabel("Mode:"), 0, 0)
-        settings_layout.addWidget(self.combo_sweep_mode, 0, 1)
-        
         def mirror_spin(source, label, row, col):
             spin = QDoubleSpinBox(self)
             spin.setDecimals(source.decimals())
@@ -457,12 +449,15 @@ class LoopWizardDialog(QDialog):
             settings_layout.addWidget(spin, row, col + 1)
             return spin, lbl
         
-        self.spin_sweep_start, _ = mirror_spin(m.sweepStartSpin, "From:", 0, 2)
-        self.spin_sweep_stop, _ = mirror_spin(m.sweepStopSpin, "To:", 0, 4)
-        self.spin_sweep_speed, self.lbl_sweep_speed = mirror_spin(m.sweepSpeedSpin, "Speed:", 1, 0)
-        self.spin_sweep_step, self.lbl_sweep_step = mirror_spin(m.sweepStepSpin, "Step:", 1, 0)
-        self.spin_sweep_offset, self.lbl_sweep_offset = mirror_spin(m.sweepOffsetSpin, "Start delay:", 1, 2)
-        self.spin_sweep_settle, self.lbl_sweep_settle = mirror_spin(m.sweepSettleSpin, "Settling:", 1, 2)
+        self.spin_sweep_start, _ = mirror_spin(m.sweepStartSpin, "From:", 0, 0)
+        self.spin_sweep_stop, _ = mirror_spin(m.sweepStopSpin, "To:", 0, 2)
+        
+        self.combo_sweep_speed = QComboBox(self)
+        self.combo_sweep_speed.addItems([m.sweepSpeedCombo.itemText(i) for i in range(m.sweepSpeedCombo.count())])
+        self.combo_sweep_speed.setCurrentIndex(m.sweepSpeedCombo.currentIndex())
+        self.combo_sweep_speed.currentIndexChanged.connect(m.sweepSpeedCombo.setCurrentIndex)
+        settings_layout.addWidget(QLabel("Speed:"), 0, 4)
+        settings_layout.addWidget(self.combo_sweep_speed, 0, 5)
         layout.addLayout(settings_layout)
         
         # Note saved with the spectrum
@@ -515,16 +510,7 @@ class LoopWizardDialog(QDialog):
         self.ax_map.set_yticks([])
         layout.addWidget(self.canvas, 1)
         
-        self.update_sweep_settings()
         return group
-    
-    def update_sweep_settings(self):
-        """Show only the settings of the selected sweep mode."""
-        stepped = self.combo_sweep_mode.currentText() == "Stepped"
-        for w in (self.spin_sweep_step, self.lbl_sweep_step, self.spin_sweep_settle, self.lbl_sweep_settle):
-            w.setVisible(stepped)
-        for w in (self.spin_sweep_speed, self.lbl_sweep_speed, self.spin_sweep_offset, self.lbl_sweep_offset):
-            w.setVisible(not stepped)
     
     def get_slack(self):
         """Slack added since the wizard was opened (both motors), in mm."""
@@ -587,12 +573,18 @@ class LoopWizardDialog(QDialog):
         # Save
         index = result["info"]["metadata"]["index"]
         slack = result["info"]["metadata"]["slack"]
+        details = f"{slack:+.3f} mm slack, started {result['info']['start_delay']:.2f} s after the command"
+        if len(result["raw_trigger"]) > 0:
+            trig = result["raw_trigger"]
+            high = trig > (trig.min() + trig.max())/2
+            n_trig = int(np.count_nonzero(high[1:] & ~high[:-1])) if np.ptp(trig) > 0.5 else 0
+            details += f", {n_trig} triggers recorded"
         try:
             if self.spectra_folder == "":
                 self.spectra_folder = self.main.new_spectra_folder("loop")
             filename = os.path.join(self.spectra_folder, f"spectrum_{index:03d}.npz")
             self.spectrum.save(result, filename)
-            self.lbl_sweep_status.setText(f"Spectrum {index} ({slack:+.3f} mm slack) saved: "
+            self.lbl_sweep_status.setText(f"Spectrum {index} ({details}) saved: "
                                           f"{os.path.basename(self.spectra_folder)}/{os.path.basename(filename)}")
             self.lbl_sweep_status.setToolTip(filename)
         except Exception as e:
