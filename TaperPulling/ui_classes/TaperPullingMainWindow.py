@@ -1,12 +1,12 @@
 # Import PyQt6 stuff
 from PyQt6 import uic
-from PyQt6.QtCore import Qt, QTimer, QCoreApplication, QDir, pyqtSignal, QObject, QEvent, QSize
+from PyQt6.QtCore import Qt, QTimer, QCoreApplication, QDir, pyqtSignal, QObject, QEvent, QSize, QUrl
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
                             QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
                             QMessageBox, QFileDialog, QLabel, QMenu, QInputDialog, \
                             QFormLayout, QHBoxLayout, QVBoxLayout, QGridLayout, QGroupBox, \
                             QStackedWidget
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QDesktopServices
 from PyQt6.QtGui import QPixmap
 
 # Import other stuff
@@ -435,7 +435,7 @@ class MainWindow(FormUI, WindowUI):
         self.resetmotorsBut.clicked.connect(self.init_motors)
         self.gotozeroBut.clicked.connect(self.go2start)
         self.startBut.clicked.connect(self.start_pulling)
-        self.stopBut.clicked.connect(self.stop_pulling)
+        self.stopBut.clicked.connect(lambda: self.stop_pulling())  # (clicked sends an argument, that would be taken as save_data)
         self.tensionButton.clicked.connect(self.tension)
         self.cleaveBut.clicked.connect(self.cleave)
         self.loopBut.clicked.connect(self.loop)
@@ -543,8 +543,12 @@ class MainWindow(FormUI, WindowUI):
         self.dataDirBut = QPushButton("Choose...", group)
         self.dataDirBut.clicked.connect(self.choose_data_dir)
         row = QHBoxLayout()
+        self.dataOpenBut = QPushButton("Open", group)
+        self.dataOpenBut.setToolTip("Shows the data folder in the file explorer")
+        self.dataOpenBut.clicked.connect(lambda: self.open_data_folder(False))
         row.addWidget(self.dataDirText)
         row.addWidget(self.dataDirBut)
+        row.addWidget(self.dataOpenBut)
         form.addRow("Folder:", row)
 
         self.dataPrefixText = QLineEdit("taper", group)
@@ -592,6 +596,19 @@ class MainWindow(FormUI, WindowUI):
         if folder:
             self.dataDirText.setText(folder.replace("\\", "/"))
             
+    def open_data_folder(self, last_run: bool=True):
+        """
+        Shows, in the file explorer, the folder of the last saved process (if
+        last_run, and there is one), or the data folder.
+        """
+        folder = self.run_folder if (last_run and self.run_folder and os.path.isdir(self.run_folder)) else self.get_data_dir()
+        try:
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):
+                raise Exception("no file explorer available")
+        except Exception as e:
+            self.statusBar.showMessage(f"Could not open {folder}: {e}")
+
     def get_data_dir(self) -> str:
         folder = self.dataDirText.text().strip()
         return folder if folder else f"{rootpath}/data_bckp"
@@ -1704,6 +1721,7 @@ class MainWindow(FormUI, WindowUI):
             self.core.motors.right_puller.go_to(self.rightPosSpin.value())
         
     def stop_all_motors(self):
+        was_recording = self.data.recording
         self.stop_pulling(save_data=False)
         self.core.motors.brusher.stop()
         self.core.motors.flame_io.stop()
@@ -1718,6 +1736,10 @@ class MainWindow(FormUI, WindowUI):
         self.initLoop_active = False
         self.init_motors_i = 0
         self.resetmotorsBut.setEnabled(True)
+
+        # If a process was interrupted, keep its data (only after everything was told to stop)
+        if was_recording:
+            self.autosave_data()
         
     def init_motors(self):
         if not self.initLoop_active:
@@ -1825,12 +1847,18 @@ class MainWindow(FormUI, WindowUI):
         
         # Save data just to be safe
         if save_data:
-            try:
-                self.save_data(f"{self.new_run_folder()}/pull")
-                self.statusBar.showMessage(f"Data saved in {self.run_folder}")
-            except Exception as e:
-                self.statusBar.showMessage(f"ERROR: data NOT saved automatically ({e}). Use File > Save Data!")
-                print(f"Error saving data: {e}")
+            self.autosave_data()
+
+    def autosave_data(self):
+        """
+        Saves everything from the process that just ended, in a new folder.
+        """
+        try:
+            self.save_data(f"{self.new_run_folder()}/pull")
+            self.statusBar.showMessage(f"Data saved in {self.run_folder}")
+        except Exception as e:
+            self.statusBar.showMessage(f"ERROR: data NOT saved automatically ({e}). Use File > Save Data!")
+            print(f"Error saving data: {e}")
     
     def tension(self):
         if self.core.standby:

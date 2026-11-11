@@ -242,14 +242,18 @@ class EasyModePanel(QWidget):
         grid = QGridLayout(group)
         grid.addWidget(QLabel("Name:"), 0, 0)
         grid.addWidget(self.mirror_line(m.dataPrefixText), 0, 1)
+        btn_open = QPushButton("Open folder", self)
+        btn_open.setToolTip("Shows the saved files in the file explorer")
+        btn_open.clicked.connect(lambda: m.open_data_folder())
+        grid.addWidget(btn_open, 0, 2)
         self.lbl_data = QLabel("", self)
         self.lbl_data.setStyleSheet("color: #475569;")
-        grid.addWidget(self.lbl_data, 1, 0, 1, 2)
+        grid.addWidget(self.lbl_data, 1, 0, 1, 3)
         left_layout.addWidget(group)
 
         left_layout.addStretch()
 
-        # --- Bottom: emergency stop and mode switch ---
+        # --- Bottom: emergency stop ---
         row = QHBoxLayout()
         btn_emergency = QPushButton("STOP EVERYTHING", self)
         btn_emergency.setToolTip("Stops all motors immediately and moves the flame away")
@@ -263,7 +267,6 @@ class EasyModePanel(QWidget):
         btn_emergency.clicked.connect(lambda: m.emerBut.click())
         self.mirrors.append((btn_emergency, m.emerBut))
         row.addWidget(btn_emergency, 1)
-        row.addWidget(self.mirror_button(m.modeBut))
         left_layout.addLayout(row)
 
         # --- Right: graphs (moved here from the Advanced view when this mode is on) ---
@@ -286,7 +289,7 @@ class EasyModePanel(QWidget):
             if isinstance(widget, QPushButton):
                 if widget.isCheckable() and widget.isChecked() != source.isChecked():
                     widget.setChecked(source.isChecked())
-                if source in (m.laserOutBut, m.modeBut) and widget.text() != source.text():
+                if source is m.laserOutBut and widget.text() != source.text():
                     widget.setText(source.text())
 
         # Motors
@@ -349,8 +352,13 @@ class EasyModePanel(QWidget):
 
         # Data
         if m.run_folder:
-            self.lbl_data.setText(f"Last saved in: {os.path.basename(m.run_folder)}")
-            self.lbl_data.setToolTip(m.run_folder)
+            self.set_data_label("Last saved in: ", m.run_folder)
         else:
-            self.lbl_data.setText("Everything is saved automatically.")
-            self.lbl_data.setToolTip(f"Data folder: {m.get_data_dir()}")
+            self.set_data_label("Saved automatically in: ", m.get_data_dir())
+
+    def set_data_label(self, text: str, folder: str):
+        # Long paths are shortened at the beginning. The complete one is in the tooltip
+        shown = folder if len(folder) <= 46 else "..." + folder[-43:]
+        if self.lbl_data.text() != text + shown:
+            self.lbl_data.setText(text + shown)
+            self.lbl_data.setToolTip(folder)
