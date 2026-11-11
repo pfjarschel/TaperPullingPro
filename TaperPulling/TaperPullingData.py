@@ -22,8 +22,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import windows
 from scipy.fft import fft, fftfreq
 from scipy.signal import savgol_filter
-from threading import Timer
-import cv2
+from threading import Timer, Thread, Event, Lock
 
 from .TaperPullingDAQ import TaperPullingDAQ
 from .TaperPullingDAQ import AcquisitionType as AcqType
@@ -54,8 +53,9 @@ class TaperPullingData:
     monitor_interval = 20  # ms
     monitor_val = 0.0
     
-    continuous_loop = None
-    continuous_interval = 100  # ms, buffer will be constructed in parts to allow for fast updating
+    continuous_loop = None       # Acquisition thread (continuous mode)
+    continuous_stop = None       # Event used to stop the acquisition thread
+    continuous_interval = 100  # ms, the stream is read in chunks of this duration
     continuous_interval0 = continuous_interval
     
     buffer_size = 1000
@@ -87,6 +87,19 @@ class TaperPullingData:
     last_spectrum_data = np.zeros((2, 2*spectrum_points))
     spectra = []
     spectra_freqs = []
+    spectra_t = []      # Time (epoch, s) of each spectrum
+    spectra_x = []      # Value given by x_provider for each spectrum (e.g. total pulled)
+    spectra_v = []      # Second value given by x_provider (e.g. pulling velocity)
+    x_provider = None   # Optional function returning (x, v) at the time it is called
+    
+    # Full data recording (continuous mode only). Every sample is kept, no gaps.
+    recording = False
+    rec_lock = None
+    rec_chunks = []
+    rec_chunk_end = []   # Index of the sample after the last one of each chunk
+    rec_chunk_time = []  # Time (epoch, s) at which each chunk was received
+    rec_n = 0
+    rec_srate = 1e3
     cuton_f = 0.0
     cutoff_f = np.inf
        
@@ -109,6 +122,8 @@ class TaperPullingData:
         self.spectrogram_loop = None
         self.monitor_loop = None
         self.continuous_loop = None
+        self.continuous_stop = None
+        self.rec_lock = Lock()
 
     def set_calibration(self, gain_v_mw: float = 10.0, offset_v: float = 0.0, max_power_mw: float = 1.0):
         """
@@ -164,6 +179,7 @@ class TaperPullingData:
     def init_daq_as_default(self, simulate=False):
         self.daq_busy = True
         self.daq_initing = True
+        self.stop_cont_loop()
         
         if isinstance(self.daq.term_config, str):
             self.daq.term_config = eval(f"TermConf.{self.daq.term_config}")
@@ -203,6 +219,7 @@ class TaperPullingData:
         
         self.daq_busy = True
         self.daq_initing = True
+        self.stop_cont_loop()
         self.set_sampling_rate(srate)
         self.set_buffer(buffer_size)
         self.daq.get_devices()
@@ -245,8 +262,18 @@ class TaperPullingData:
         if self.daq.ok and not self.daq_initing:
             self.init_daq_as_default(self.daq.simulate)
             
+    def stream_active(self) -> bool:
+        """
+        True if the continuous acquisition thread is running. In that case, all
+        values must be taken from the buffer, never read directly from the DAQ
+        (that would steal samples from the stream).
+        """
+        return self.continuous_loop is not None and self.continuous_loop.is_alive()
+    
     def get_single_value(self):
-        if not self.daq_busy:
+        if self.stream_active():
+            return float(self.buffer[-1])
+        elif not self.daq_busy:
             self.daq_busy = True
             data = self.daq.read_data()[0]
             self.daq_busy = False
@@ -281,7 +308,9 @@ class TaperPullingData:
         return self.get_power_from_voltage(self.monitor_val, db=db)
     
     def get_points(self, n:int):
-        if not self.daq_busy:
+        if self.stream_active():
+            return np.array(self.buffer[-n:])
+        elif not self.daq_busy:
             self.daq_busy = True
             data = self.daq.read_data(n)
             self.daq_busy = False
@@ -331,34 +360,100 @@ class TaperPullingData:
     
     def clear_spectrogram(self):
         self.spectra = []
+        self.spectra_t = []
+        self.spectra_x = []
+        self.spectra_v = []
         
     def start_cont_loop(self):
         self.stop_cont_loop()
-        self.continuous_loop = self.Loop(self.continuous_interval/1000.0, self.continuous_update)
         self.set_buffer(self.buffer_size)
+        self.continuous_stop = Event()
+        self.continuous_loop = Thread(target=self.continuous_update, args=(self.continuous_stop,), daemon=True)
         self.continuous_loop.start()
         
-    def continuous_update(self):
-        if not self.daq_busy:
-            self.daq_busy = True
-
-            self.soft_buffer = np.roll(self.soft_buffer, -1, 0)
-            self.soft_buffer[-1, :] = self.daq.read_data(self.buffer_slice)
-            m = self.soft_buffer.shape[0]
-            n = self.soft_buffer.shape[1]
-            self.buffer = self.soft_buffer.reshape(m*n)[-self.buffer_size:]            
-
-            # Clear remaining DAQ buffer
-            self.daq.read_all()
+    def continuous_update(self, stop_event):
+        """
+        Acquisition thread. Reads the DAQ stream chunk by chunk, without gaps,
+        keeping the last buffer_size samples available in self.buffer (for
+        display and live analysis), and storing everything if recording.
+        """
+        while not stop_event.is_set():
+            try:
+                chunk = self.daq.read_stream(self.buffer_slice)
+            except Exception as e:
+                if not stop_event.is_set():
+                    print(f"DAQ stream read error: {e}")
+                    stop_event.wait(0.2)
+                continue
             
-            self.daq_busy = False
+            n = len(chunk)
+            if n == 0:
+                continue
+            t_chunk = time.time()
+            
+            self.buffer = np.concatenate((self.buffer, chunk))[-self.buffer_size:]
+            self.monitor_val = float(chunk.mean())
+            
+            if self.recording:
+                with self.rec_lock:
+                    self.rec_n += n
+                    self.rec_chunks.append(chunk.astype(np.float32))
+                    self.rec_chunk_end.append(self.rec_n)
+                    self.rec_chunk_time.append(t_chunk)
             
     def stop_cont_loop(self):
-        try:
-            self.continuous_loop.cancel()
-            self.continuous_loop = None
-        except:
-            pass
+        loop = self.continuous_loop
+        if loop is not None:
+            self.continuous_stop.set()
+            if loop.is_alive():
+                loop.join(2.0 + 2.0*self.continuous_interval/1000.0)
+        self.continuous_loop = None
+        
+    def start_recording(self):
+        """
+        Starts keeping every acquired sample (continuous mode only).
+        Any previous recording is discarded.
+        """
+        with self.rec_lock:
+            self.rec_chunks = []
+            self.rec_chunk_end = []
+            self.rec_chunk_time = []
+            self.rec_n = 0
+            self.rec_srate = self.sampling_rate
+            self.recording = True
+            
+    def stop_recording(self):
+        self.recording = False
+        
+    def get_recording_duration(self) -> float:
+        return self.rec_n/self.rec_srate
+        
+    def get_recording(self) -> dict:
+        """
+        Returns the recorded data (can be called during or after a recording):
+            signal: all samples, in V (float32).
+            sampling_rate: in Hz. Sample i was taken at t0 + i/sampling_rate.
+            t0: time (epoch, s) of the first sample.
+            chunk_end, chunk_time: for each chunk received from the DAQ, the
+                index after its last sample and the time it arrived. Can be used 
+                to verify the time axis.
+        """
+        with self.rec_lock:
+            chunks = list(self.rec_chunks)
+            chunk_end = np.array(self.rec_chunk_end, dtype=np.int64)
+            chunk_time = np.array(self.rec_chunk_time, dtype=float)
+            
+        if len(chunks) > 0:
+            signal = np.concatenate(chunks)
+            # A chunk can only arrive late, never early. The earliest start time
+            # implied by any chunk is thus the best estimate.
+            t0 = float(np.min(chunk_time - chunk_end/self.rec_srate))
+        else:
+            signal = np.zeros(0, dtype=np.float32)
+            t0 = 0.0
+            
+        return {"signal": signal, "sampling_rate": self.rec_srate, "t0": t0,
+                "chunk_end": chunk_end, "chunk_time": chunk_time}
             
     def start_monitor(self):
         self.stop_monitor()
@@ -366,7 +461,8 @@ class TaperPullingData:
         self.monitor_loop.start()
     
     def monitor(self):
-        if not self.daq_busy:
+        # In continuous mode, the acquisition thread updates monitor_val (chunk average)
+        if not self.stream_active() and not self.daq_busy:
             self.monitor_val = self.get_single_value()
             
     def stop_monitor(self):
@@ -392,14 +488,18 @@ class TaperPullingData:
             spec_x, spec_y = self.get_spectrum(smooth, window, sigma)
             cuton_i = np.abs(spec_x - self.cuton_f).argmin()
             cutoff_i = np.abs(spec_x - self.cutoff_f).argmin()
-            self.spectra.append(spec_y[cuton_i:cutoff_i])
+            x, v = 0.0, 0.0
+            if self.x_provider is not None:
+                try:
+                    x, v = self.x_provider()
+                except Exception:
+                    pass
             self.spectra_freqs = spec_x[cuton_i:cutoff_i]
+            self.spectra.append(spec_y[cuton_i:cutoff_i].astype(np.float32))
+            self.spectra_t.append(time.time())
+            self.spectra_x.append(x)
+            self.spectra_v.append(v)
             
-            # Downsample data, creates issues with the x axis (newer data occupies more space).
-            # It is better to downsample the entire dataset before plotting, not here
-            if len(self.spectra) >= self.max_spectra_points:
-                self.spectra = cv2.resize(np.array(self.spectra), (len(self.spectra_freqs), self.spectra_points)).tolist()
-                
             self.spectrogram_busy = False
     
     def stop_spectrogram(self):

@@ -142,6 +142,15 @@ class TaperPullingCore:
     loop_tensioned = False
     emergency_stopped = False
     
+    # Process log: one row per update loop, from process start until it stops.
+    # Columns are given by process_log_columns.
+    process_log = []
+    process_log_columns = ["time", "stage", "total_pulled", "brusher_pos", "flame_io_pos",
+                           "puller_left_pos", "puller_right_pos", "hotzone_target",
+                           "pull_vel_left", "pull_vel_right"]
+    process_log_stages = {0: "going_to_start", 1: "flame_approaching", 2: "flame_holding",
+                          3: "pulling", 4: "stopping"}
+    
     def __init__(self):
         """
         "This class centralizes all devices controls."
@@ -327,6 +336,9 @@ class TaperPullingCore:
                                    self.standby, self.looping, self.cleaving]
                     stage = sum(map(lambda x: x[1] << x[0], enumerate(stage_array)))
                     
+                    if stage < 16:
+                        self.log_process(stage)
+                    
                     if stage == 0:
                         # Stage 0, Sending brusher to start position
                         self.going_to_start()
@@ -364,6 +376,30 @@ class TaperPullingCore:
             
             self.busy = False
                 
+    def log_process(self, stage: int):
+        """
+        Adds a row with the current process state to the process log.
+        stage is the internal stage number, converted here to 0 (going to start),
+        1 (flame approaching), 2 (flame holding), 3 (pulling) or 4 (stopping).
+        """
+        stage_i = int(stage).bit_length()
+        hz = 0.0
+        if stage_i >= 3:
+            hz = float(np.interp(self.total_pulled, self.hotzone_function[0], self.hotzone_function[1]))
+        self.process_log.append((self.time_now, stage_i, self.total_pulled,
+                                 self.brusher_pos, self.flame_io_pos,
+                                 self.puller_left_pos, self.puller_right_pos, hz,
+                                 self.motors.left_puller.pull_vel, self.motors.right_puller.pull_vel))
+        
+    def get_process_log(self) -> np.ndarray:
+        """
+        Returns the process log as an array (rows x columns). See process_log_columns.
+        """
+        log = list(self.process_log)
+        if len(log) == 0:
+            return np.zeros((0, len(self.process_log_columns)))
+        return np.array(log, dtype=float)
+        
     def going_to_start(self):
         brusher = (self.brusher_pos >= self.brusher_x0 - self.pos_check_precision) and \
                (self.brusher_pos <= self.brusher_x0 + self.pos_check_precision)
@@ -808,6 +844,7 @@ class TaperPullingCore:
         
         # Reset
         self.reset_pull_stats()
+        self.process_log = []
         
         if self.check_all_motors_ok:
             # Send brusher to starting position

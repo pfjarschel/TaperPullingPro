@@ -3,7 +3,7 @@ from PyQt6 import uic
 from PyQt6.QtCore import Qt, QTimer, QCoreApplication, QDir, pyqtSignal, QObject, QEvent
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
                             QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
-                            QMessageBox, QFileDialog, QLabel, QMenu
+                            QMessageBox, QFileDialog, QLabel, QMenu, QInputDialog
 from PyQt6.QtGui import QPixmap
 
 # Import other stuff
@@ -97,6 +97,8 @@ class MainWindow(FormUI, WindowUI):
     transm_array = np.zeros((max_tpts, 2))
     spectrogram_data = np.zeros((2,2))
     transm_i = 0
+    events = []  # Events marked by the user during the process: (time, total pulled, label)
+    spec_max_k = 2.0  # Spectrogram display limit (beats per µm pulled)
     profile_mode = "Standard"  # Can be Standard, Optimized or Loaded
     
     def __del__(self):
@@ -285,7 +287,7 @@ class MainWindow(FormUI, WindowUI):
         self.graph_spec_img = self.graph_spec_ax.imshow(np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]).T, aspect="auto",
                                                         extent=(0.0, 1.0, 0.0, 1.0), origin="lower", cmap='PRGn', interpolation='none')
         self.graph_spec_ax.set_xlabel("Pulled Dist. (mm)")
-        self.graph_spec_ax.set_ylabel("Frequency (per µm pulled)")
+        self.graph_spec_ax.set_ylabel("Beat frequency (per µm pulled)")
         self.graph_spec_ax.grid(False)
         self.graph_spec.draw()
         
@@ -323,6 +325,15 @@ class MainWindow(FormUI, WindowUI):
         self.graph_profmini_ax.set_yticks([])
         self.graph_profmini.draw()
           
+        # Recording indicator and event marker (status bar)
+        self.recLabel = QLabel("")
+        self.markBut = QPushButton("Mark event")
+        self.markBut.setToolTip("Adds a time-stamped note to the recorded data (e.g. 'last beat line gone')")
+        self.markBut.setEnabled(False)
+        self.markBut.clicked.connect(self.mark_event)
+        self.statusBar.addPermanentWidget(self.recLabel)
+        self.statusBar.addPermanentWidget(self.markBut)
+        
         # Timers
         self.mainLoop_timer = QTimer()
         self.mainLoop_timer.setInterval(self.main_to)
@@ -723,12 +734,89 @@ class MainWindow(FormUI, WindowUI):
         
         spec_file = file_prefix + "_spectrogram.txt"
         np.savetxt(spec_file, np.array(self.spectrogram_data).T)
+        
+        # Full process log: everything above (and more) at full resolution, in a single file
+        try:
+            self.save_full_log(file_prefix + "_full_log.npz", parameters_dict)
+        except Exception as e:
+            print(f"Error saving full log: {e}")
+            
+    def save_full_log(self, filename: str, parameters_dict: dict):
+        """
+        Saves the complete record of the last process in a single .npz file.
+        Use TaperPulling.TaperPullingLog.load_pull_log() to read it.
+        """
+        rec = self.data.get_recording()
+        log = self.core.get_process_log()
+        cols = self.core.process_log_columns
+        
+        n_spec = min(len(self.data.spectra), len(self.data.spectra_t), 
+                     len(self.data.spectra_x), len(self.data.spectra_v))
+        if n_spec > 0:
+            stft = np.array(self.data.spectra[:n_spec], dtype=np.float32)
+        else:
+            stft = np.zeros((0, 0), dtype=np.float32)
+        
+        info = {
+            "format_version": 1,
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "units": {"time": "s (epoch)", "positions": "mm", "total_pulled": "mm", 
+                      "velocities": "mm/s", "signal": "V", "stft_freqs": "Hz"},
+            "relative_pull": bool(self.core.rel_pull),
+            "stages": {str(k): v for k, v in self.core.process_log_stages.items()},
+            "parameters": parameters_dict,
+        }
+        
+        arrays = {
+            "info_json": np.array(json.dumps(info)),
+            
+            # Detector signal, every sample. Sample i was taken at signal_t0 + i/signal_rate
+            "signal": rec["signal"],
+            "signal_rate": np.array(rec["sampling_rate"]),
+            "signal_t0": np.array(rec["t0"]),
+            "signal_chunk_end": rec["chunk_end"],
+            "signal_chunk_time": rec["chunk_time"],
+            "signal_gain_V_per_mW": np.array(self.data.gain_v_mw),
+            "signal_offset_V": np.array(self.data.offset_v),
+            
+            # Live spectrogram, one row per spectrum
+            "stft": stft,
+            "stft_freqs": np.array(self.data.spectra_freqs, dtype=float),
+            "stft_time": np.array(self.data.spectra_t[:n_spec], dtype=float),
+            "stft_total_pulled": np.array(self.data.spectra_x[:n_spec], dtype=float),
+            "stft_pull_vel": np.array(self.data.spectra_v[:n_spec], dtype=float),
+            
+            # Hotzone: designed, and measured at each brusher sweep
+            "hotzone_design": np.array(self.hz_function, dtype=float),
+            "hotzone_measured": np.array([self.rhz_x_array, self.rhz_array], dtype=float),
+            
+            # User events
+            "event_time": np.array([e[0] for e in self.events], dtype=float),
+            "event_total_pulled": np.array([e[1] for e in self.events], dtype=float),
+            "event_label": np.array([e[2] for e in self.events], dtype=str),
+        }
+        
+        # Motors and process state, one entry per core update
+        for i, col in enumerate(cols):
+            arrays[f"log_{col}"] = log[:, i]
+        
+        np.savez_compressed(filename, **arrays)
+        
+    def mark_event(self):
+        # Time and position are taken at the click, not when the label is confirmed
+        t = time.time()
+        tp = self.core.total_pulled
+        label, ok = QInputDialog.getText(self, "Mark event", f"Note for the event at {tp:.3f} mm pulled:")
+        if ok:
+            self.events.append((t, tp, label.strip()))
+            self.statusBar.showMessage(f"Event marked at {tp:.3f} mm: {label.strip()}", 5000)
     
     def enable_controls(self):
         widgets = self.findChildren(QWidget)
         for i in range(len(widgets)):
             widgets[i].setEnabled(True)
         self.stopBut.setEnabled(False)
+        self.markBut.setEnabled(False)
         self.toggle_manual_control()
         self.toggle_fiber_defaults()
         
@@ -775,6 +863,7 @@ class MainWindow(FormUI, WindowUI):
             combos[i].setEnabled(False)
         
         self.emerBut.setEnabled(True)
+        self.markBut.setEnabled(True)
         self.cmapCombo.setEnabled(True)
         self.cmapRevCheck.setEnabled(True)
         self.stopBut.setEnabled(True)
@@ -1031,23 +1120,11 @@ class MainWindow(FormUI, WindowUI):
                     self.data.cutoff_f = 2*self.pullerPullVelSpin.value()*1000
                     self.data.start_spectrogram(0.1, True, 0.15)
                 
-                if len(self.data.spectra) > 0:
-                    tp_arr = np.linspace(0.0, tp, len(self.data.spectra))
-                    if len(self.data.spectra) > self.max_spectra:
-                        data = np.array(self.data.spectra[-self.max_spectra:]).T
-                        tp0 = tp_arr[-self.max_spectra]
-                    else:
-                        data = np.array(self.data.spectra).T
-                        tp0 = 0.0
-                    freqs = self.data.spectra_freqs
-                    if data.shape[1] > self.graph_spec.width():
-                        data = cv2.resize(data, (self.graph_spec.width(), len(freqs)))
-                    self.graph_spec_img.set_data(data)
-                    self.graph_spec_img.set_extent((tp0, tp, 1e-3*freqs[0]/self.pullerPullVelSpin.value(), 1e-3*freqs[-1]/self.pullerPullVelSpin.value()))
-                    self.graph_spec_img.set_clim(data.min(), data.max())
-                    self.graph_spec.draw()
-                    self.graph_spec.flush_events()
-                    self.spectrogram_data = data
+                self.update_spectrogram_graph()
+            
+            # Update recording indicator
+            if self.data.recording:
+                self.recLabel.setText(f"● REC  {self.data.get_recording_duration():.0f} s")
             
             # Check if ended
             if self.core.standby:
@@ -1055,6 +1132,45 @@ class MainWindow(FormUI, WindowUI):
                 self.stop_pulling(save_data=True)
                 
             self.pull_busy = False
+        
+    def update_spectrogram_graph(self):
+        """
+        Draws the whole spectrogram acquired so far, against the pulled distance
+        recorded with each spectrum. The frequency axis is given in beats per µm 
+        pulled (by each motor), using the pulling velocity at the time of each 
+        spectrum, so that it remains valid if the velocity changes during the process.
+        """
+        n = min(len(self.data.spectra), len(self.data.spectra_x), len(self.data.spectra_v))
+        freqs = np.array(self.data.spectra_freqs)
+        if n < 2 or len(freqs) < 2:
+            return
+        
+        x = np.array(self.data.spectra_x[:n])
+        v = np.array(self.data.spectra_v[:n])
+        if x[-1] <= x[0]:
+            return
+        
+        # Columns: uniform grid in pulled distance, each taking the latest spectrum up to it
+        n_cols = int(min(n, max(self.graph_spec.width(), 100)))
+        x_grid = np.linspace(x[0], x[-1], n_cols)
+        idxs = np.clip(np.searchsorted(x, x_grid, side="right") - 1, 0, n - 1)
+        
+        # Rows: uniform grid in beats per µm
+        v0 = self.pullerPullVelSpin.value()
+        v[v <= 0] = v0
+        k_max = min(self.spec_max_k, 1e-3*freqs[-1]/v.min())
+        k_grid = np.linspace(1e-3*freqs[0]/v.max(), k_max, len(freqs))
+        
+        data = np.zeros((len(k_grid), n_cols), dtype=np.float32)
+        for j, i in enumerate(idxs):
+            data[:, j] = np.interp(1e3*k_grid*v[i], freqs, self.data.spectra[i], right=0.0)
+        
+        self.graph_spec_img.set_data(data)
+        self.graph_spec_img.set_extent((x_grid[0], x_grid[-1], k_grid[0], k_grid[-1]))
+        self.graph_spec_img.set_clim(data.min(), data.max())
+        self.graph_spec.draw()
+        self.graph_spec.flush_events()
+        self.spectrogram_data = data
         
     # DAQ functions
     def daq_init(self):
@@ -1244,6 +1360,17 @@ class MainWindow(FormUI, WindowUI):
         
         self.reset_pull_stats()
         
+        # Record everything from now on
+        self.events = []
+        self.data.clear_spectrogram()
+        self.data.x_provider = lambda: (self.core.total_pulled, self.core.motors.left_puller.pull_vel)
+        self.data.start_recording()
+        if self.data.stream_active():
+            self.recLabel.setText("● REC")
+        else:
+            self.recLabel.setText("NOT RECORDING")
+            self.statusBar.showMessage("DAQ is not in CONTINUOUS mode: the detector signal and the spectrogram will not be recorded!")
+        
         hz_function = self.hz_function
         if self.manualStopCheck.isChecked():
             hz_function[0][-1] = 200.0
@@ -1253,6 +1380,9 @@ class MainWindow(FormUI, WindowUI):
     def stop_pulling(self, save_data=True):
         self.pullLoop_timer.stop()
         self.data.stop_spectrogram()
+        if self.data.recording:
+            self.data.stop_recording()
+            self.recLabel.setText(f"Recorded {self.data.get_recording_duration():.0f} s")
         self.enable_controls()
         self.core.stop_pulling()
         self.core.motors.left_puller.set_velocity(self.pullerVelSpin.value())

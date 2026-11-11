@@ -15,6 +15,7 @@ board.
 """
 # =============================================================================
 
+import time
 import numpy as np
 
 import nidaqmx
@@ -45,6 +46,12 @@ class TaperPullingDAQ:
     ok = False
     sys_ok = False
     simulate = False # Simulate DAQ acquisition
+    
+    # Simulated stream. sim_function, if set, receives an array of times (s, since
+    # the stream started) and must return the simulated voltages for those times.
+    sim_function = None
+    sim_t0 = 0.0
+    sim_n = 0
     
     def __init__(self):
         """
@@ -164,6 +171,8 @@ class TaperPullingDAQ:
             mode = eval(f"AcquisitionType.{mode}")
         self.term_config = term
         self.mode = mode
+        self.sim_t0 = time.time()
+        self.sim_n = 0
 
         
         if not self.simulate and self.sys_ok:
@@ -222,6 +231,55 @@ class TaperPullingDAQ:
             return offs + avg + np.random.randint(-int(np.abs(span)*1000), int(np.abs(span)*1000), n)/2000000.0
         else:
             return np.zeros(n)
+        
+    def read_stream(self, n: int=100) -> np.ndarray:
+        """
+        Reads the next samples of a continuous acquisition, without ever
+        discarding any. Blocks until at least n samples are available, and also
+        returns anything else already waiting in the device buffer, so that
+        consecutive calls return a contiguous (gapless) stream.
+        In simulation, samples are generated at the real sampling rate.
+        
+        Args:
+            n (int): Minimum number of samples to read.
+            
+        Returns:
+            np.ndarray: Array of values read. Empty if nothing could be read.
+        """
+        if self.paused:
+            time.sleep(0.05)
+            return np.zeros(0)
+        
+        if self.ok and not self.simulate:
+            data = np.atleast_1d(np.array(self.task.read(n), dtype=float))
+            try:
+                extra = self.task.in_stream.avail_samp_per_chan
+            except Exception:
+                extra = 0
+            if extra > 0:
+                more = np.atleast_1d(np.array(self.task.read(extra), dtype=float))
+                data = np.concatenate((data, more))
+            return data
+        elif self.simulate:
+            # Wait until the n-th sample from now "exists"
+            t_ready = self.sim_t0 + (self.sim_n + n)/self.sampling_rate
+            wait = t_ready - time.time()
+            if wait > 0:
+                time.sleep(wait)
+            
+            # Return everything "acquired" so far (bounded, in case of long stalls)
+            total = int((time.time() - self.sim_t0)*self.sampling_rate)
+            count = int(np.clip(total - self.sim_n, n, max(n, 10*self.buffer_size)))
+            t = (self.sim_n + np.arange(count))/self.sampling_rate
+            self.sim_n += count
+            
+            if self.sim_function is not None:
+                return np.asarray(self.sim_function(t), dtype=float)
+            else:
+                return 1.0 + 1e-3*self.scale*np.random.uniform(-1.0, 1.0, count)
+        else:
+            time.sleep(0.05)
+            return np.zeros(0)
         
     def read_all(self) -> np.ndarray:
         """
