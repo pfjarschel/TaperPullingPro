@@ -4,7 +4,8 @@ from PyQt6.QtCore import Qt, QTimer, QCoreApplication, QDir, pyqtSignal, QObject
 from PyQt6.QtWidgets import QWidget, QPushButton, QCheckBox, QRadioButton, QComboBox, \
                             QLineEdit, QToolButton, QSpinBox, QDoubleSpinBox, QMenuBar, \
                             QMessageBox, QFileDialog, QLabel, QMenu, QInputDialog, \
-                            QFormLayout, QHBoxLayout
+                            QFormLayout, QHBoxLayout, QStackedWidget
+from PyQt6.QtGui import QAction
 from PyQt6.QtGui import QPixmap
 
 # Import other stuff
@@ -30,6 +31,7 @@ from TaperPulling.TaperPullingLaser import TaperPullingLaser
 from TaperPulling.TaperPullingSpectrum import TaperPullingSpectrum
 from TaperPulling.TaperPullingCamera import TaperPullingCamera
 from TaperPulling.ui_classes.LoopWizardDialog import LoopWizardDialog
+from TaperPulling.ui_classes.EasyModePanel import EasyModePanel
 
 # Load UI files
 thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
@@ -102,6 +104,10 @@ class MainWindow(FormUI, WindowUI):
     spectrogram_data = np.zeros((2,2))
     transm_i = 0
     events = []  # Events marked by the user during the process: (time, total pulled, label)
+    run_folder = ""  # Folder where the data of the last process was saved
+    easy_mode = False
+    sim_beat_phase = np.zeros(2)  # Simulated detector: phase of the beats between modes
+    sim_diameter = 125.0          # Simulated detector: current waist diameter (µm)
     spec_max_k = 2.0  # Spectrogram display limit (beats per µm pulled)
     profile_mode = "Standard"  # Can be Standard, Optimized or Loaded
     
@@ -346,6 +352,9 @@ class MainWindow(FormUI, WindowUI):
         # Laser tab
         self.build_laser_tab()
         
+        # Data tab
+        self.build_data_tab()
+        
         # Timers
         self.mainLoop_timer = QTimer()
         self.mainLoop_timer.setInterval(self.main_to)
@@ -371,6 +380,24 @@ class MainWindow(FormUI, WindowUI):
         self.modecalc_timer = QTimer()
         self.modecalc_timer.setInterval(self.main_to)
         self.modecalc_timer.timeout.connect(self.modecalcLoop)
+        
+        # Easy mode: simplified view, that can replace the complete one
+        self.modeBut = QPushButton("Easy mode")
+        self.modeBut.setToolTip("Switches between the complete view (Advanced) and a simplified one (Easy)")
+        self.modeBut.clicked.connect(lambda: self.set_easy_mode(not self.easy_mode))
+        self.statusBar.addPermanentWidget(self.modeBut)
+        self.actionEasy_mode = QAction("Easy mode", self)
+        self.actionEasy_mode.setCheckable(True)
+        self.actionEasy_mode.triggered.connect(self.set_easy_mode)
+        self.menuView = self.menuBar.addMenu("View")
+        self.menuView.addAction(self.actionEasy_mode)
+        
+        self.advancedPanel = self.takeCentralWidget()
+        self.easyPanel = EasyModePanel(self)
+        self.modeStack = QStackedWidget(self)
+        self.modeStack.addWidget(self.advancedPanel)
+        self.modeStack.addWidget(self.easyPanel)
+        self.setCentralWidget(self.modeStack)
         
         # DAQ connections
         self.update_daq_combos()
@@ -456,6 +483,90 @@ class MainWindow(FormUI, WindowUI):
         else:
             self.load_default_settings()
             
+    # Easy mode
+    def set_easy_mode(self, easy: bool):
+        """
+        Switches between the complete view (Advanced mode) and the simplified one 
+        (Easy mode). The transmission and spectrogram graphs move to the view in use.
+        """
+        self.easy_mode = bool(easy)
+        if self.easy_mode:
+            # The simplified view only deals with the standard profile, set by its diameter
+            self.diamPriorRadio.setChecked(True)
+            if self.profile_mode == "Standard":
+                self.recalc_params()
+            self.easyPanel.graphs_layout.addWidget(self.graph_pow, 1)
+            self.easyPanel.graphs_layout.addWidget(self.graph_spec, 2)
+            self.modeStack.setCurrentWidget(self.easyPanel)
+        else:
+            self.powGraph.addWidget(self.graph_pow)
+            self.spectrumGraph.addWidget(self.graph_spec)
+            self.modeStack.setCurrentWidget(self.advancedPanel)
+        self.modeBut.setText("Advanced mode" if self.easy_mode else "Easy mode")
+        self.actionEasy_mode.setChecked(self.easy_mode)
+        
+    # Data tab (built here, not in the .ui file)
+    def build_data_tab(self):
+        tab = QWidget()
+        form = QFormLayout(tab)
+        
+        self.dataDirText = QLineEdit("", tab)
+        self.dataDirText.setObjectName("dataDirText")
+        self.dataDirText.setPlaceholderText(f"{rootpath}/data_bckp")
+        self.dataDirText.setToolTip("Folder where all data is saved automatically.\nEmpty: 'data_bckp', inside the program folder.")
+        self.dataDirBut = QPushButton("Choose...", tab)
+        self.dataDirBut.clicked.connect(self.choose_data_dir)
+        row = QHBoxLayout()
+        row.addWidget(self.dataDirText)
+        row.addWidget(self.dataDirBut)
+        form.addRow("Data folder:", row)
+        
+        self.dataPrefixText = QLineEdit("taper", tab)
+        self.dataPrefixText.setObjectName("dataPrefixText")
+        self.dataPrefixText.setToolTip("Name given to the data folders. A number and the time are added automatically.")
+        form.addRow("Name:", self.dataPrefixText)
+        
+        info = QLabel("Every fabrication is saved in its own folder:\n"
+                      "<data folder>/<date>/<name>_<number>_<time>\n"
+                      "Spectra, snapshots and videos from the Loop Wizard are saved in the folder "
+                      "of the taper they were measured on.", tab)
+        info.setWordWrap(True)
+        form.addRow(info)
+        self.devsTabs.addTab(tab, "Data")
+        
+    def choose_data_dir(self):
+        folder = QFileDialog.getExistingDirectory(self, "Data folder", self.get_data_dir())
+        if folder:
+            self.dataDirText.setText(folder.replace("\\", "/"))
+            
+    def get_data_dir(self) -> str:
+        folder = self.dataDirText.text().strip()
+        return folder if folder else f"{rootpath}/data_bckp"
+    
+    def new_run_folder(self) -> str:
+        """
+        Creates and returns a new folder for the data of a fabrication:
+        <data folder>/<date>/<name>_<number>_<time>
+        """
+        name = "".join(c if (c.isalnum() or c in "-_") else "_" for c in self.dataPrefixText.text().strip())
+        if name == "":
+            name = "taper"
+        day_folder = Path(self.get_data_dir())/datetime.now().strftime('%Y_%m_%d')
+        day_folder.mkdir(parents=True, exist_ok=True)
+        
+        # Next number for this name, today
+        number = 1
+        for existing in day_folder.glob(f"{name}_*"):
+            try:
+                number = max(number, int(existing.name[len(name) + 1:].split("_")[0]) + 1)
+            except ValueError:
+                pass
+        
+        folder = day_folder/f"{name}_{number:03d}_{datetime.now().strftime('%H_%M_%S')}"
+        folder.mkdir(parents=True, exist_ok=True)
+        self.run_folder = str(folder).replace("\\", "/")
+        return self.run_folder
+        
     # Laser tab (built here, not in the .ui file)
     def build_laser_tab(self):
         tab = QWidget()
@@ -613,6 +724,24 @@ class MainWindow(FormUI, WindowUI):
     def sim_detector(self, t):
         # Simulated detector voltage, for the times t (s, since the simulated DAQ started)
         power = 0.5*self.laser.sim_transmission(self.data.daq.sim_t0 + t)
+        
+        # While pulling, the modes excited in the taper beat with each other. The beat 
+        # frequencies (per length pulled) grow as the waist gets thinner (roughly with 
+        # 1/d^2), and each beat disappears when its higher order mode is no longer guided.
+        if self.core.pulling and len(t) > 0:
+            d = max(self.sim_diameter, 0.3)
+            v = 0.0
+            if self.core.motors.left_puller.moving and self.core.motors.right_puller.moving:
+                v = 1e3*self.core.motors.left_puller.pull_vel  # µm/s
+            dt = t - t[0] + (t[1] - t[0] if len(t) > 1 else 0.0)
+            beat = np.zeros(len(t))
+            for i, (k_2um, cutoff, amplitude) in enumerate(((0.39, 1.8, 0.05), (0.95, 3.2, 0.03))):
+                k = k_2um*(2.0/d)**2  # Beats per µm pulled
+                phase = self.sim_beat_phase[i] + 2*np.pi*k*v*dt
+                self.sim_beat_phase[i] = phase[-1] % (2*np.pi)
+                if cutoff < d < 60.0:
+                    beat += amplitude*np.cos(phase)
+            power = power*(1 + beat)
         noise = 1 + 0.003*np.random.randn(len(t))
         return self.data.offset_v + self.data.gain_v_mw*power*noise
     
@@ -649,9 +778,11 @@ class MainWindow(FormUI, WindowUI):
     
     def new_spectra_folder(self, name: str="loop") -> str:
         """
-        Creates and returns a new folder to save a series of spectra.
+        Creates and returns a new folder to save a series of spectra, inside the
+        folder of the last fabrication (or a new one, if nothing was fabricated yet).
         """
-        folder = f"{rootpath}/data_bckp/{datetime.now().strftime('%Y_%m_%d')}/{name}_{datetime.now().strftime('%H_%M_%S')}"
+        run_folder = self.run_folder if (self.run_folder and os.path.isdir(self.run_folder)) else self.new_run_folder()
+        folder = f"{run_folder}/{name}_{datetime.now().strftime('%H_%M_%S')}"
         Path(folder).mkdir(parents=True, exist_ok=True)
         return folder
             
@@ -805,6 +936,7 @@ class MainWindow(FormUI, WindowUI):
             
             settings_dict = {}
             settings_dict["__lastdir__"] = self.last_dir
+            settings_dict["__easymode__"] = self.easy_mode
             for w in self.findChildren(QSpinBox):
                 settings_dict[w.objectName()] = w.value()
             for w in self.findChildren(QDoubleSpinBox):
@@ -833,6 +965,8 @@ class MainWindow(FormUI, WindowUI):
             settings_dict = json.load(open(filename, "r"))
             if "__lastdir__" in settings_dict:
                 self.last_dir = settings_dict["__lastdir__"]
+            if "__easymode__" in settings_dict:
+                self.set_easy_mode(settings_dict["__easymode__"])
             for key in settings_dict:
                 if key[:2] != "__" and key[-2:] != "__":
                     try:
@@ -1303,6 +1437,7 @@ class MainWindow(FormUI, WindowUI):
                         
                         curr_d = 2000*self.realish_profile[1][-1]
                         self.waistDiamIndSpin.setValue(curr_d)
+                        self.sim_diameter = curr_d
                 else:
                     # Wait for at least 2 edges to calculate width
                     pass
@@ -1593,6 +1728,7 @@ class MainWindow(FormUI, WindowUI):
         self.reset_pull_stats()
         
         # Record everything from now on
+        self.sim_diameter = self.d0Spin.value()
         self.events = []
         self.data.clear_spectrogram()
         self.data.x_provider = lambda: (self.core.total_pulled, self.core.motors.left_puller.pull_vel)
@@ -1632,9 +1768,12 @@ class MainWindow(FormUI, WindowUI):
         
         # Save data just to be safe
         if save_data:
-            data_bckp_dir = f"{rootpath}/data_bckp/{datetime.now().strftime('%Y_%m_%d')}"
-            Path(data_bckp_dir).mkdir(parents=True, exist_ok=True)
-            self.save_data(f"{data_bckp_dir}/auto_{datetime.now().strftime('%H_%M_%S')}")
+            try:
+                self.save_data(f"{self.new_run_folder()}/pull")
+                self.statusBar.showMessage(f"Data saved in {self.run_folder}")
+            except Exception as e:
+                self.statusBar.showMessage(f"ERROR: data NOT saved automatically ({e}). Use File > Save Data!")
+                print(f"Error saving data: {e}")
     
     def tension(self):
         if self.core.standby:
