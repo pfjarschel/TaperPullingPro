@@ -156,6 +156,7 @@ class GenericTLMotor:
         self.opened = False     # The controller is open (even if the connection did not complete)
         self.open_tries = 3     # Attempts to open the controller, at each connection
         self.connect_time = 0.0 # s. How long the last connection took
+        self.connect_log = []   # What was seen while waiting, at the last connection
         self.lib_prfx = ""
         self.monitor_interval = 10  # ms
         self.lib = None
@@ -226,7 +227,7 @@ class GenericTLMotor:
             self.monitor_interval = poll_ms
             if self.libok:
                 t_start = time.time()
-                slow = []  # Steps that did not confirm in time
+                self.connect_log = []
 
                 # A previous attempt may have left the controller open
                 if self.opened:
@@ -251,15 +252,31 @@ class GenericTLMotor:
                 if err == 0:
                     self.opened = True
 
-                    # Instead of waiting fixed times after each command, check when it took
-                    # effect. The previous fixed times are the limits: if a check never
-                    # confirms, everything happens as before, just as slowly.
+                    # The sequence and the waiting times below are the ones that are known
+                    # to work with these controllers. Waiting less (checking when each
+                    # command took effect) left the pullers connected, but not moving.
+                    # While waiting, only what the library already knows is looked at
+                    # (nothing is sent to the controller), to learn how long each step
+                    # really takes: this is printed at the end.
+                    self.observe(2.0, "after open")
                     self.dll_call("ClearMessageQueue")
                     self.dll_call("LoadSettings")
-                    if not self.wait_until(self.settings_loaded, 2.5):
-                        slow.append("load settings")
+                    self.observe(0.5, "after load settings")
+                    self.dll_call("EnableChannel")
+                    self.observe(1.0, "after enable")
+                    self.dll_call("RequestSettings")
+                    self.observe(0.5, "after request settings")
+                    self.dll_call("RequestHomingParams")
+                    self.observe(0.5, "after request homing")
+                    self.dll_call("GetHomingParamsBlock", byref(self.homing_params))
+                    time.sleep(0.5)
+                    # Force homing direction to reverse (towards 0)
+                    if self.homing_params.direction != 2:
+                        self.homing_params.direction = c_short(0x02)
+                    self.dll_call("SetHomingParamsBlock", byref(self.homing_params))
+                    time.sleep(0.5)
 
-                    # Polling keeps the status of the motor updated from here on
+                    # Start polling
                     if poll_ms >= 1:
                         if self.simulate:
                             poll_ms = 150
@@ -267,37 +284,48 @@ class GenericTLMotor:
                             self.monitor_interval = poll_ms
                         self.dll_call("StartPolling", c_int(poll_ms))
 
-                    self.dll_call("EnableChannel")
-                    if not self.wait_until(self.channel_enabled, 1.0):
-                        slow.append("enable")
-
-                    # The status is not valid for a moment after the settings are requested
-                    self.dll_call("RequestSettings")
-                    time.sleep(0.1)
-                    if not self.wait_until(self.channel_enabled, 0.4):
-                        slow.append("request settings")
-
-                    # Force homing direction to reverse (towards 0)
-                    self.dll_call("RequestHomingParams")
-                    if not self.wait_until(self.read_homing_params, 1.0):
-                        slow.append("homing parameters")
-                    if self.homing_params.direction != 2:
-                        self.homing_params.direction = c_short(0x02)
-                    self.dll_call("SetHomingParamsBlock", byref(self.homing_params))
-                    self.dll_call("RequestHomingParams")
-                    if not self.wait_until(lambda: self.read_homing_params() and self.homing_params.direction == 2, 0.5):
-                        slow.append("set homing direction")
-
                     self.ok = True
                     self.connect_time = time.time() - t_start
-                    print(f"{self.name}: connected in {self.connect_time:.1f} s" +
-                          (f" (not confirmed in time: {', '.join(slow)})" if slow else ""))
+                    print(f"{self.name}: connected in {self.connect_time:.1f} s. Seen while waiting: " + "; ".join(self.connect_log))
                 elif err is None:
                     print(f"Error: No devices found ({self.name})")
                     self.error = True
                 else:
                     print(f"Error connecting to the device ({self.name}):", err)
                     self.error = True
+
+    def observe(self, seconds: float, label: str):
+        """
+        Waits for a fixed time. Meanwhile, notes when the library first reports the
+        settings of the stage (unit conversion, travel, homing velocity), and the
+        status bits at the end. Only reads what the library has: sends nothing.
+        """
+        t0 = time.time()
+        first = {}
+        while True:
+            elapsed = time.time() - t0
+            try:
+                dev = c_int(0)
+                self.dll_call("GetDeviceUnitFromRealValue", c_double(1.0), byref(dev), 0)
+                params = MOT_HomingParameters()
+                self.dll_call("GetHomingParamsBlock", byref(params))
+                seen = {"units": dev.value != 0,
+                        "travel": self.dll_call("GetNumberPositions") > 0,
+                        "homing": params.velocity != 0}
+                for key, value in seen.items():
+                    if value and key not in first:
+                        first[key] = elapsed
+            except Exception as e:
+                first["error"] = str(e)
+            if elapsed >= seconds:
+                break
+            time.sleep(0.02)
+        try:
+            status = self.get_status_bits() & 0xFFFFFFFF
+        except Exception:
+            status = 0
+        seen = ", ".join(f"{key} {value:.2f} s" if key != "error" else f"error {value}" for key, value in first.items())
+        self.connect_log.append(f"{label}: {seen if seen else 'nothing'}, status {status:08X}")
 
     def dll_call(self, function: str, *args):
         """
@@ -322,21 +350,6 @@ class GenericTLMotor:
             if time.time() - t0 >= timeout:
                 return False
             time.sleep(interval)
-
-    def settings_loaded(self) -> bool:
-        # The library can only convert units once it has the settings of the stage
-        dev = c_int(0)
-        self.dll_call("GetDeviceUnitFromRealValue", c_double(1.0), byref(dev), 0)
-        return dev.value != 0
-
-    def channel_enabled(self) -> bool:
-        if self.kinesis_poll < 1:
-            self.dll_call("RequestStatusBits")
-        return bool(self.get_status_bits() & 0x80000000)
-
-    def read_homing_params(self) -> bool:
-        self.dll_call("GetHomingParamsBlock", byref(self.homing_params))
-        return self.homing_params.velocity != 0
 
     def close(self):
         try:
@@ -472,7 +485,8 @@ class GenericTLMotor:
             not_read.append(f"velocity settings (using {self.vel:g}, {self.accel:g})")
         if not_read:
             print(f"{self.name}: could not read from the controller: {'; '.join(not_read)}")
-        print(f"{self.name}: maximum position {self.max_pos:g}, velocity limits {self.max_vel:g}, {self.max_accel:g}")
+        print(f"{self.name}: maximum position {self.max_pos:g}, velocity limits {self.max_vel:g}, {self.max_accel:g}, "
+              f"velocity settings {self.vel:g}, {self.accel:g}, homed {self.homed}, status {self.get_status_bits() & 0xFFFFFFFF:08X}")
         self.pos = self.get_position()
     
     def get_vel_params(self):
@@ -560,13 +574,13 @@ class GenericTLMotor:
             # self.homed = not bool(eval(f"self.lib.{self.lib_prfx}_NeedsHoming(self.serial_c)"))
             
             # In fact, none of these are appropriate. It is best to use the status bits for this.
-            # Just one reading seems to give false results, try several (20 readings in 0.4 s).
-            for i in range(20):
+            # Just one reading seems to give false results, try several.
+            for i in range(10):
                 status_bits = self.get_status_bits()
                 self.homed = bool(status_bits & 0x00000400)
                 if self.homed:
                     break
-                time.sleep(0.02)
+                time.sleep(0.1)
             
         return self.homed
     
