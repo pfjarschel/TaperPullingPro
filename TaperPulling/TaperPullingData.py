@@ -336,10 +336,11 @@ class TaperPullingData:
         xf = fftfreq(n, delta)
         
         yf_real = (2.0/n)*np.abs(yf[:n//2])
-        smooth_f = int(len(yf_real)*smooth)
-        if smooth_f < 3: smooth_f = 3
-        
-        yf_real = savgol_filter(yf_real, smooth_f, 1)
+        # Optional smoothing (fraction of the spectrum length). 0 disables it.
+        if smooth > 0:
+            smooth_f = int(len(yf_real)*smooth)
+            if smooth_f < 3: smooth_f = 3
+            yf_real = savgol_filter(yf_real, smooth_f, 1)
 
         return xf[:n//2], yf_real
     

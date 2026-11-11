@@ -1118,7 +1118,7 @@ class MainWindow(FormUI, WindowUI):
             if self.core.pulling and not self.data.spectrogram_pause:
                 if not self.data.spectrogram_running:
                     self.data.cutoff_f = 2*self.pullerPullVelSpin.value()*1000
-                    self.data.start_spectrogram(0.1, True, 0.15)
+                    self.data.start_spectrogram(0.0, True, 0.15)
                 
                 self.update_spectrogram_graph()
             
@@ -1356,6 +1356,12 @@ class MainWindow(FormUI, WindowUI):
         self.core.flame_size = self.fSizeSpin.value()
         
         self.set_motors_params()
+        
+        # The full signal can only be recorded in continuous mode
+        if self.daqmodeCombo.currentText() != "CONTINUOUS":
+            self.daqmodeCombo.blockSignals(True)
+            self.daqmodeCombo.setCurrentText("CONTINUOUS")
+            self.daqmodeCombo.blockSignals(False)
         self.daq_init() 
         
         self.reset_pull_stats()
@@ -1365,11 +1371,7 @@ class MainWindow(FormUI, WindowUI):
         self.data.clear_spectrogram()
         self.data.x_provider = lambda: (self.core.total_pulled, self.core.motors.left_puller.pull_vel)
         self.data.start_recording()
-        if self.data.stream_active():
-            self.recLabel.setText("● REC")
-        else:
-            self.recLabel.setText("NOT RECORDING")
-            self.statusBar.showMessage("DAQ is not in CONTINUOUS mode: the detector signal and the spectrogram will not be recorded!")
+        self.recLabel.setText("● REC")
         
         hz_function = self.hz_function
         if self.manualStopCheck.isChecked():
