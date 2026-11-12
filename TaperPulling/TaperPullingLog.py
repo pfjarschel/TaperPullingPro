@@ -4,7 +4,7 @@
 # Gleb Wataghin Physics Institute (IFGW), University of Campinas
 # =============================================================================
 """
-This module reads the files saved by the taper pulling program, so that 
+This module reads the files saved by the taper pulling program, so that
 analysis code does not need to know how they are organized:
     - the full process log ("*_full_log.npz") saved after each fabrication;
     - the transmission spectra ("spectrum_*.npz") measured with the tunable laser.
@@ -165,36 +165,98 @@ def load_pull_log(filename: str) -> PullLog:
     return PullLog(filename)
 
 
+def find_trigger_times(raw_time: np.ndarray, raw_trigger: np.ndarray, threshold: float|None=None,
+                       min_amplitude: float=1.0) -> np.ndarray:
+    """
+    Returns the times of the triggers sent by the laser (rising edges of the
+    recorded trigger signal) that came after the sweep command (time > 0).
+
+    Args:
+        raw_time: Time of every sample (s, relative to the sweep command).
+        raw_trigger: Trigger signal, for the same samples (V).
+        threshold (float): Voltage above which the trigger is considered high.
+            Defaults to half way between its lowest and highest values.
+        min_amplitude (float): If the signal changes less than this (V), there
+            are no triggers in it (nothing connected), only noise.
+    """
+    if len(raw_trigger) == 0 or len(raw_trigger) != len(raw_time):
+        return np.zeros(0)
+    if threshold is None:
+        if np.ptp(raw_trigger) < min_amplitude:
+            return np.zeros(0)
+        threshold = (raw_trigger.min() + raw_trigger.max())/2
+    high = raw_trigger > threshold
+    rising = np.flatnonzero(high[1:] & ~high[:-1]) + 1
+    times = raw_time[rising]
+    return times[times > 0]
+
+
+def wavelengths_from_triggers(raw_time: np.ndarray, trigger_times: np.ndarray, start_wl: float,
+                              stop_wl: float, speed: float, trigger_step: float) -> tuple[np.ndarray, int]:
+    """
+    Calculates the wavelength of every sample from the triggers sent by the laser.
+    If the laser sent a trigger at every wavelength step (trigger_step > 0), the
+    first trigger is the start wavelength and each following one is one step
+    further, with the wavelengths in between interpolated. Otherwise, the first
+    trigger is the sweep start, and the wavelength follows the nominal speed.
+
+    Returns:
+        tuple: wavelength of every sample (nm), number of triggers used.
+    """
+    if len(trigger_times) == 0:
+        raise ValueError("No triggers found.")
+
+    if trigger_step > 0 and len(trigger_times) > 1:
+        # No more triggers than fit in the sweep range
+        expected = int(round((stop_wl - start_wl)/trigger_step)) + 1
+        t_trig = trigger_times[:max(expected, 2)]
+        wl_trig = start_wl + trigger_step*np.arange(len(t_trig))
+        wl = np.interp(raw_time, t_trig, wl_trig)
+        # Outside the triggers, continue at the nominal speed
+        before = raw_time < t_trig[0]
+        after = raw_time > t_trig[-1]
+        wl[before] = wl_trig[0] + speed*(raw_time[before] - t_trig[0])
+        wl[after] = wl_trig[-1] + speed*(raw_time[after] - t_trig[-1])
+        return wl, len(t_trig)
+
+    return start_wl + speed*(raw_time - trigger_times[0]), 1
+
+
 class Spectrum:
     """
     A transmission spectrum measured by sweeping the tunable laser.
-    
+
         wavelength      (nm)
         signal          Detector voltage (V)
         power           Optical power (mW), from the detector calibration
         info            Sweep settings (range, speed, start delay, laser...)
         metadata        What was saved with the spectrum by the program (motor
                         positions, notes...). Same as info["metadata"]
-                        
+
     Raw data, to recalculate the wavelengths if needed:
-        raw_time        Time of every recorded sample, relative to the moment 
+        raw_time        Time of every recorded sample, relative to the moment
                         the laser was told to sweep (s)
         raw_signal      Detector voltage of every recorded sample (V)
         raw_trigger     Trigger output of the laser, for the same samples (V).
                         Empty if it was not connected
         poll_time, poll_wavelength
-                        Wavelengths reported by the laser during the sweep, and 
+                        Wavelengths reported by the laser during the sweep, and
                         when (s, relative to the sweep command)
-                        
-    The wavelengths are calculated from the time since the sweep started:
-        wavelength = start_wl + speed*(raw_time - start_delay)
-    where start_delay (in info) was found from the first change in the 
-    wavelength reported by the laser. See remap() and remap_from_triggers().
+
+    How the wavelengths were calculated is in info["wavelength_source"]:
+        "triggers"       from the triggers sent by the laser at every wavelength
+                         step (info["trigger_step"]), interpolating in between
+        "trigger_start"  from the time since the single trigger sent by the
+                         laser when the sweep started
+        "polling"        from the time since the sweep started, found from the
+                         first change in the wavelength reported by the laser:
+                         wavelength = start_wl + speed*(raw_time - start_delay)
+    They can be recalculated with remap() and remap_from_triggers().
     """
-    
+
     def __init__(self, filename: str):
         f = np.load(filename, allow_pickle=False)
-        
+
         self.filename = filename
         self.info = json.loads(str(f["info_json"]))
         self.metadata = self.info.get("metadata", {})
@@ -206,17 +268,17 @@ class Spectrum:
         self.raw_trigger = f["raw_trigger"].astype(float)
         self.poll_time = f["poll_time"]
         self.poll_wavelength = f["poll_wavelength"]
-        
+
     def set_wavelengths(self, raw_wavelength: np.ndarray):
         """
-        Replaces the spectrum (wavelength, signal and power) by the raw samples 
+        Replaces the spectrum (wavelength, signal and power) by the raw samples
         that are inside the sweep range, given the wavelength of every raw sample.
         """
         inside = (raw_wavelength >= self.info["start_wl"]) & (raw_wavelength <= self.info["stop_wl"])
         self.wavelength = raw_wavelength[inside]
         self.signal = self.raw_signal[inside]
         self.power = (self.signal - self.info["offset_V"])/self.info["gain_V_per_mW"]
-        
+
     def remap(self, start_delay: float):
         """
         Recalculates the spectrum from the raw data, assuming a different delay
@@ -224,58 +286,37 @@ class Spectrum:
         """
         self.set_wavelengths(self.info["start_wl"] + self.info["speed"]*(self.raw_time - start_delay))
         self.info["start_delay"] = start_delay
-        
+        self.info["wavelength_source"] = "manual"
+
     def trigger_times(self, threshold: float|None=None) -> np.ndarray:
         """
-        Returns the times (s, relative to the sweep command) of the triggers 
-        sent by the laser (rising edges of raw_trigger).
-        
+        Returns the times (s, relative to the sweep command) of the triggers
+        sent by the laser (rising edges of raw_trigger) after the sweep command.
+
         Args:
-            threshold (float): Voltage above which the trigger is considered 
+            threshold (float): Voltage above which the trigger is considered
                 high. Defaults to half way between its lowest and highest values.
         """
-        if len(self.raw_trigger) == 0:
-            return np.zeros(0)
-        if threshold is None:
-            threshold = (self.raw_trigger.min() + self.raw_trigger.max())/2
-        high = self.raw_trigger > threshold
-        rising = np.flatnonzero(high[1:] & ~high[:-1]) + 1
-        return self.raw_time[rising]
-    
+        return find_trigger_times(self.raw_time, self.raw_trigger, threshold)
+
     def remap_from_triggers(self, threshold: float|None=None) -> int:
         """
         Recalculates the spectrum from the raw data, using the triggers sent by
-        the laser. Triggers before the sweep command are ignored.
-        If the laser sent a trigger at every wavelength step (trigger_step in 
-        info), the first trigger is taken as the start wavelength and each 
-        following one as one step further, with the wavelengths in between 
-        interpolated. Otherwise, the first trigger is taken as the sweep start.
-        
+        the laser (see wavelengths_from_triggers).
+
         Returns:
             int: The number of triggers used.
         """
         t_trig = self.trigger_times(threshold)
-        t_trig = t_trig[t_trig > 0]
         if len(t_trig) == 0:
             raise ValueError("No triggers found in this spectrum.")
-        
-        step = self.info.get("trigger_step", 0.0)
-        speed = self.info["speed"]
-        if step > 0 and len(t_trig) > 1:
-            wl_trig = self.info["start_wl"] + step*np.arange(len(t_trig))
-            wl = np.interp(self.raw_time, t_trig, wl_trig)
-            # Outside the triggers, continue at the nominal speed
-            before = self.raw_time < t_trig[0]
-            after = self.raw_time > t_trig[-1]
-            wl[before] = wl_trig[0] + speed*(self.raw_time[before] - t_trig[0])
-            wl[after] = wl_trig[-1] + speed*(self.raw_time[after] - t_trig[-1])
-            self.set_wavelengths(wl)
-            self.info["start_delay"] = float(t_trig[0])
-            return len(t_trig)
-        else:
-            self.remap(float(t_trig[0]))
-            return 1
-        
+        wl, n = wavelengths_from_triggers(self.raw_time, t_trig, self.info["start_wl"], self.info["stop_wl"],
+                                          self.info["speed"], self.info.get("trigger_step", 0.0))
+        self.set_wavelengths(wl)
+        self.info["start_delay"] = float(t_trig[0])
+        self.info["wavelength_source"] = "triggers" if n > 1 else "trigger_start"
+        return n
+
     def __repr__(self):
         if len(self.wavelength) == 0:
             return "Spectrum: empty"

@@ -8,18 +8,17 @@ This module contains the TaperPullingSpectrum class. It measures transmission
 spectra by sweeping the tunable laser (TaperPullingLaser) at constant speed,
 while the detector signal is recorded without gaps (TaperPullingData).
 
-The wavelength of each sample is calculated from the time since the sweep
-started. The laser takes some time to start sweeping after it is told to, and
-this time is different at every sweep. To find the real start, the laser is
-asked for its wavelength continuously: the sweep started when it changes.
+The laser takes some time to start sweeping after it is told to, and this time
+is different at every sweep. There are two ways of knowing the wavelength of
+each sample:
 
-If the trigger output of the laser is connected to the auxiliary channel of
-the DAQ, it is recorded and saved with the spectrum. It can then be used to
-refine the wavelengths afterwards (see TaperPullingLog).
-
-The laser is asked as little as possible while it sweeps: a few times per
-second until the sweep is seen to start, then only now and then. Asking
-continuously can stall the mainframe.
+- If the trigger output of the laser is connected to the auxiliary channel of
+  the DAQ, the triggers are recorded with the signal and give the wavelengths:
+  one trigger at every wavelength step, or a single one when the sweep starts.
+  The laser is not asked anything while it sweeps.
+- Otherwise, the laser is asked for its wavelength a few times per second: the
+  sweep started when it changes. The wavelengths are then calculated from the
+  time since the start, at the nominal sweep speed.
 
 It does not block for long: call start(), then update() periodically (at least
 10 times per second) until it returns False.
@@ -34,6 +33,7 @@ import numpy as np
 
 from .TaperPullingData import TaperPullingData
 from .TaperPullingLaser import TaperPullingLaser
+from .TaperPullingLog import find_trigger_times, wavelengths_from_triggers
 
 
 class TaperPullingSpectrum:
@@ -54,7 +54,8 @@ class TaperPullingSpectrum:
     poll_interval = 0.1       # s. Time between wavelength readings, until the sweep starts
     poll_interval_sweep = 2.0 # s. Time between wavelength readings, after it started
     state_interval = 0.5      # s. Time between "is it still sweeping?" questions, at the end
-    start_timeout = 20.0      # s. Give up if the wavelength did not change in this time
+    start_timeout = 20.0      # s. Give up if the sweep was not seen to start in this time
+    trigger_interval = 0.25   # s. Time between looks at the recorded trigger signal
 
     # State
     state = "idle"
@@ -70,6 +71,7 @@ class TaperPullingSpectrum:
     wl_before = 0.0     # Wavelength reported by the laser before the sweep
     polls = []          # (time since command, wavelength) of every wavelength reading
     t_poll_next = 0.0   # Time (epoch) of the next question to the laser
+    use_triggers = False  # The trigger output of the laser is being recorded
 
     def __init__(self, data: TaperPullingData, laser: TaperPullingLaser):
         self.data = data
@@ -107,6 +109,7 @@ class TaperPullingSpectrum:
         self.result = None
         self.start_delay = None
         self.polls = []
+        self.use_triggers = self.data.daq.aux_channel != ""
 
         try:
             err = self.laser.setup_sweep(self.start_wl, self.stop_wl, self.speed, self.trigger_step)
@@ -167,7 +170,19 @@ class TaperPullingSpectrum:
         elif self.state == "sweeping":
             elapsed_cmd = now - self.t_command
 
-            if self.start_delay is None:
+            if self.start_delay is None and self.use_triggers:
+                # Has it started? Look for the first trigger in what was recorded so far
+                if now >= self.t_poll_next:
+                    self.t_poll_next = now + self.trigger_interval
+                    t_trig = self.recorded_triggers()[2]
+                    if len(t_trig) > 0:
+                        self.start_delay = float(t_trig[0])
+                        self.t_poll_next = now + self.state_interval
+                    elif elapsed_cmd > self.start_timeout:
+                        self.laser.stop_sweep()
+                        self.fail("No trigger from the laser was recorded. Check the trigger connection, or set "
+                                  "the trigger input to 'None' (Laser tab) to measure without triggers.")
+            elif self.start_delay is None:
                 # Has it started? Ask where the laser is, a few times per second
                 if now >= self.t_poll_next:
                     t_poll, wl = self.poll_wavelength()
@@ -186,7 +201,7 @@ class TaperPullingSpectrum:
                 elapsed = elapsed_cmd - self.start_delay
                 self.progress = float(np.clip(elapsed/duration, 0.0, 1.0))
                 if elapsed < duration:
-                    if now >= self.t_poll_next:
+                    if now >= self.t_poll_next and not self.use_triggers:
                         self.poll_wavelength()
                         self.t_poll_next = time.time() + self.poll_interval_sweep
                 elif now >= self.t_poll_next:
@@ -219,20 +234,43 @@ class TaperPullingSpectrum:
         self.polls.append((t_poll, wl))
         return t_poll, wl
 
-    def finish(self):
+    def recorded_triggers(self) -> tuple[dict, np.ndarray, np.ndarray]:
+        """
+        Returns what was recorded so far, the time of every sample and the times
+        of the triggers (both in s, relative to the sweep command).
+        """
         rec = self.data.get_recording("sweep")
+        raw_time = rec["t0"] + np.arange(len(rec["signal"]))/rec["sampling_rate"] - self.t_command
+        return rec, raw_time, find_trigger_times(raw_time, np.asarray(rec["aux"], dtype=float))
+
+    def finish(self):
+        rec, raw_time, t_trig = self.recorded_triggers()
         raw_signal = rec["signal"]
-        raw_time = rec["t0"] + np.arange(len(raw_signal))/rec["sampling_rate"] - self.t_command
+        start, stop, speed = self.laser.sweep_start, self.laser.sweep_stop, self.laser.sweep_speed
+
+        # Wavelength of every sample: from the triggers, if there are any. If not,
+        # from the time since the sweep started.
+        speed_measured = None
+        if len(t_trig) > 0:
+            wl_all, n_triggers = wavelengths_from_triggers(raw_time, t_trig, start, stop, speed,
+                                                           self.laser.sweep_trigger_step)
+            self.start_delay = float(t_trig[0])
+            source = "triggers" if n_triggers > 1 else "trigger_start"
+            if n_triggers > 1:
+                speed_measured = float(self.laser.sweep_trigger_step*(n_triggers - 1)/(t_trig[n_triggers - 1] - t_trig[0]))
+        else:
+            wl_all = start + speed*(raw_time - self.start_delay)
+            n_triggers = 0
+            source = "polling"
 
         # Keep the samples inside the sweep range. The raw data is also kept,
         # so the wavelengths can be recalculated afterwards.
-        wl_all = self.laser.sweep_start + self.laser.sweep_speed*(raw_time - self.start_delay)
-        inside = (wl_all >= self.laser.sweep_start) & (wl_all <= self.laser.sweep_stop)
+        inside = (wl_all >= start) & (wl_all <= stop)
         signal = np.asarray(raw_signal, dtype=float)[inside]
         polls = np.array(self.polls, dtype=float).reshape(-1, 2)
 
         info = {
-            "format_version": 2,
+            "format_version": 3,
             "saved_at": datetime.now().isoformat(timespec="seconds"),
             "units": {"wavelength": "nm", "signal": "V", "power": "mW", "time": "s"},
             "start_wl": float(self.laser.sweep_start),
@@ -240,6 +278,9 @@ class TaperPullingSpectrum:
             "speed": float(self.laser.sweep_speed),
             "trigger_step": float(self.laser.sweep_trigger_step),
             "start_delay": float(self.start_delay),
+            "wavelength_source": source,
+            "trigger_count": int(n_triggers),
+            "speed_measured": speed_measured,
             "command_time": float(self.t_command),
             "monitor_wl": float(self.monitor_wl),
             "laser": self.laser.idn,

@@ -736,12 +736,14 @@ class LoopWizardDialog(QDialog):
         # Save
         index = result["info"]["metadata"]["index"]
         slack = result["info"]["metadata"]["slack"]
-        details = f"{slack:+.3f} mm slack, started {result['info']['start_delay']:.2f} s after the command"
-        if len(result["raw_trigger"]) > 0:
-            trig = result["raw_trigger"]
-            high = trig > (trig.min() + trig.max())/2
-            n_trig = int(np.count_nonzero(high[1:] & ~high[:-1])) if np.ptp(trig) > 0.5 else 0
-            details += f", {n_trig} triggers recorded"
+        info = result["info"]
+        details = f"{slack:+.3f} mm slack, started {info['start_delay']:.2f} s after the command, wavelengths from "
+        if info["wavelength_source"] == "triggers":
+            details += f"{info['trigger_count']} triggers ({info['speed_measured']:.3f} nm/s)"
+        elif info["wavelength_source"] == "trigger_start":
+            details += "the start trigger"
+        else:
+            details += "the time since the start (no triggers)"
         try:
             filename = os.path.join(self.get_spectra_folder(), f"spectrum_{index:03d}.npz")
             self.spectrum.save(result, filename)
