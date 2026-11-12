@@ -27,6 +27,8 @@ class TaperPullingCamera:
     cap = None
     ok = False
     simulate = False
+    flip_h = False
+    flip_v = False
     last_error = ""
 
     thread = None
@@ -124,6 +126,12 @@ class TaperPullingCamera:
             t_last = now
 
             with self.lock:
+                if self.flip_h and self.flip_v:
+                    frame = cv2.flip(frame, -1)
+                elif self.flip_h:
+                    frame = cv2.flip(frame, 1)
+                elif self.flip_v:
+                    frame = cv2.flip(frame, 0)
                 self.frame = frame
                 self.frame_count += 1
                 if self.recording and self.writer is not None:
@@ -132,6 +140,26 @@ class TaperPullingCamera:
                     except Exception as e:
                         print(f"Error recording video: {e}")
                         self.recording = False
+
+    def set_flip_h(self, flip: bool):
+        """Flips the camera image horizontally."""
+        flip = bool(flip)
+        with self.lock:
+            if self.flip_h != flip:
+                self.flip_h = flip
+                if self.frame is not None:
+                    self.frame = cv2.flip(self.frame, 1)
+                    self.frame_count += 1
+
+    def set_flip_v(self, flip: bool):
+        """Flips the camera image vertically."""
+        flip = bool(flip)
+        with self.lock:
+            if self.flip_v != flip:
+                self.flip_v = flip
+                if self.frame is not None:
+                    self.frame = cv2.flip(self.frame, 0)
+                    self.frame_count += 1
 
     def get_frame(self) -> np.ndarray|None:
         """

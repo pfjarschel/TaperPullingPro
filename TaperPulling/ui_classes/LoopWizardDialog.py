@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QTextEdit, QLineEdit, QProgressBar, QComboBox, QSpinBox, QCheckBox,
     QSizePolicy
 )
-from PyQt6.QtGui import QFont, QImage, QPixmap
+from PyQt6.QtGui import QFont, QFontMetrics, QImage, QPixmap
 from datetime import datetime
 
 
@@ -176,12 +176,19 @@ class LoopWizardDialog(QDialog):
         main_layout.addWidget(guide_group)
 
         # --- 2. Live Position & Telemetry Panel ---
-        pos_group = QGroupBox("Live Motor Telemetry", self)
+        pos_group = QGroupBox("Live Telemetry", self)
         pos_layout = QGridLayout(pos_group)
         pos_layout.setSpacing(8)
 
         bold_font = QFont()
         bold_font.setBold(True)
+
+        mono_font = QFont("Monospace")
+        mono_font.setStyleHint(QFont.StyleHint.TypeWriter)
+        mono_font.setPixelSize(13)
+        mono_bold = QFont(mono_font)
+        mono_bold.setBold(True)
+        fm = QFontMetrics(mono_bold)
 
         header_motor = QLabel("Motor")
         header_pos = QLabel("Current Position")
@@ -198,9 +205,9 @@ class LoopWizardDialog(QDialog):
         # Left Puller row
         pos_layout.addWidget(QLabel("Left Puller:"), 1, 0)
         self.lbl_left_pos = QLabel("0.000 mm")
-        self.lbl_left_pos.setStyleSheet("font-family: monospace; font-size: 13px;")
+        self.lbl_left_pos.setFont(mono_font)
         self.lbl_left_delta = QLabel("+0.000 mm")
-        self.lbl_left_delta.setStyleSheet("font-family: monospace; font-size: 13px;")
+        self.lbl_left_delta.setFont(mono_font)
         self.lbl_left_status = QLabel("STOPPED")
         pos_layout.addWidget(self.lbl_left_pos, 1, 1)
         pos_layout.addWidget(self.lbl_left_delta, 1, 2)
@@ -209,9 +216,9 @@ class LoopWizardDialog(QDialog):
         # Right Puller row
         pos_layout.addWidget(QLabel("Right Puller:"), 2, 0)
         self.lbl_right_pos = QLabel("0.000 mm")
-        self.lbl_right_pos.setStyleSheet("font-family: monospace; font-size: 13px;")
+        self.lbl_right_pos.setFont(mono_font)
         self.lbl_right_delta = QLabel("+0.000 mm")
-        self.lbl_right_delta.setStyleSheet("font-family: monospace; font-size: 13px;")
+        self.lbl_right_delta.setFont(mono_font)
         self.lbl_right_status = QLabel("STOPPED")
         pos_layout.addWidget(self.lbl_right_pos, 2, 1)
         pos_layout.addWidget(self.lbl_right_delta, 2, 2)
@@ -219,9 +226,28 @@ class LoopWizardDialog(QDialog):
 
         # Net Slack / Separation Change
         pos_layout.addWidget(QLabel("Total Slack Added:"), 3, 0)
-        self.lbl_total_slack = QLabel("0.000 mm")
-        self.lbl_total_slack.setStyleSheet("font-family: monospace; font-weight: bold; font-size: 13px; color: #0284c7;")
+        self.lbl_total_slack = QLabel("+0.000 mm")
+        self.lbl_total_slack.setFont(mono_bold)
+        self.lbl_total_slack.setStyleSheet("color: #0284c7;")
         pos_layout.addWidget(self.lbl_total_slack, 3, 1, 1, 3)
+
+        # Live Detector / Optical Power Reading
+        pos_layout.addWidget(QLabel("Detector / Power:"), 4, 0)
+        self.lbl_power_mw = QLabel("--- mW")
+        self.lbl_power_mw.setFont(mono_bold)
+        self.lbl_power_mw.setStyleSheet("color: #16a34a;")
+        self.lbl_power_db = QLabel("--- dBm (Loss: --- dB)")
+        self.lbl_power_db.setFont(mono_font)
+        self.lbl_detector_v = QLabel("--- V")
+        self.lbl_detector_v.setFont(mono_font)
+        pos_layout.addWidget(self.lbl_power_mw, 4, 1)
+        pos_layout.addWidget(self.lbl_power_db, 4, 2)
+        pos_layout.addWidget(self.lbl_detector_v, 4, 3)
+
+        # Lock column minimum widths with extra margin so fluctuating values never shift the layout
+        pos_layout.setColumnMinimumWidth(1, fm.horizontalAdvance("-999.9999 mW") + 16)
+        pos_layout.setColumnMinimumWidth(2, fm.horizontalAdvance("-100.00 dBm (Loss: -100.00 dB)") + 16)
+        pos_layout.setColumnMinimumWidth(3, fm.horizontalAdvance("-10.000 V") + 16)
 
         main_layout.addWidget(pos_group)
 
@@ -552,6 +578,18 @@ class LoopWizardDialog(QDialog):
         self.btn_camera.setCheckable(True)
         self.btn_camera.clicked.connect(self.toggle_camera)
         select_layout.addWidget(self.btn_camera)
+        self.btn_flip_h = QPushButton("Flip H", self)
+        self.btn_flip_h.setCheckable(True)
+        self.btn_flip_h.setToolTip("Flip the camera image horizontally")
+        self.btn_flip_h.setChecked(self.camera.flip_h)
+        self.btn_flip_h.toggled.connect(self.toggle_flip_h)
+        select_layout.addWidget(self.btn_flip_h)
+        self.btn_flip_v = QPushButton("Flip V", self)
+        self.btn_flip_v.setCheckable(True)
+        self.btn_flip_v.setToolTip("Flip the camera image vertically")
+        self.btn_flip_v.setChecked(self.camera.flip_v)
+        self.btn_flip_v.toggled.connect(self.toggle_flip_v)
+        select_layout.addWidget(self.btn_flip_v)
         select_layout.addStretch()
         layout.addLayout(select_layout)
         
@@ -595,6 +633,18 @@ class LoopWizardDialog(QDialog):
         self.btn_record.setEnabled(on)
         self.btn_record.setChecked(self.camera.recording)
         self.btn_record.setText("Stop Recording" if self.camera.recording else "Record Video")
+
+    def toggle_flip_h(self, checked: bool):
+        self.camera.set_flip_h(checked)
+        if hasattr(self.main, "cameraFlipHCheck"):
+            self.main.cameraFlipHCheck.setChecked(checked)
+        self.update_camera()
+
+    def toggle_flip_v(self, checked: bool):
+        self.camera.set_flip_v(checked)
+        if hasattr(self.main, "cameraFlipVCheck"):
+            self.main.cameraFlipVCheck.setChecked(checked)
+        self.update_camera()
     
     def toggle_camera(self):
         if self.btn_camera.isChecked():
@@ -808,23 +858,47 @@ class LoopWizardDialog(QDialog):
 
     # --- Real-time Telemetry Updates ---
     def update_telemetry(self):
+        if self.main is not None and getattr(self.main, "data", None) is not None:
+            data = self.main.data
+            volt = float(data.monitor_val)
+            power_mw = max(0.0, float(data.get_monitor_power(db=False)))
+            power_dbm = max(float(data.get_monitor_power(db=True)), -100.0)
+            ref_dbm = self.main.refpowIndSpin.value() if hasattr(self.main, "refpowIndSpin") else 0.0
+            loss_db = ref_dbm - power_dbm
+
+            # Deadband around zero to prevent sign flickering from ADC noise
+            if volt > -0.005:
+                volt = max(0.0, volt)
+            power_dbm = 0.0 if abs(power_dbm) < 0.01 else power_dbm
+            loss_db = 0.0 if abs(loss_db) < 0.01 else loss_db
+
+            dbm_str = f"{power_dbm:+.2f} dBm"
+            self.lbl_power_mw.setText(f"{power_mw:.4f} mW" if power_mw < 1.0 else f"{power_mw:.3f} mW")
+            self.lbl_power_db.setText(f"{dbm_str:<11s} (Loss: {loss_db:+.2f} dB)")
+            self.lbl_power_db.setToolTip(f"Reference power: {ref_dbm:.2f} dBm")
+            self.lbl_detector_v.setText(f"{volt:.3f} V")
+
         if not self.left_motor or not self.right_motor:
             return
 
-        l_pos = self.left_motor.get_position()
-        r_pos = self.right_motor.get_position()
+        l_pos = max(0.0, self.left_motor.get_position())
+        r_pos = max(0.0, self.right_motor.get_position())
 
         dl = l_pos - self.init_left_pos
         dr = r_pos - self.init_right_pos
         total_slack = dl + dr
 
+        dl = 0.0 if abs(dl) < 5e-4 else dl
+        dr = 0.0 if abs(dr) < 5e-4 else dr
+        total_slack = 0.0 if abs(total_slack) < 5e-4 else total_slack
+
         self.lbl_left_pos.setText(f"{l_pos:.3f} mm")
         self.lbl_right_pos.setText(f"{r_pos:.3f} mm")
 
-        self.lbl_left_delta.setText(f"{'+' if dl >= 0 else ''}{dl:.3f} mm")
-        self.lbl_right_delta.setText(f"{'+' if dr >= 0 else ''}{dr:.3f} mm")
+        self.lbl_left_delta.setText(f"{dl:+.3f} mm")
+        self.lbl_right_delta.setText(f"{dr:+.3f} mm")
 
-        self.lbl_total_slack.setText(f"{'+' if total_slack >= 0 else ''}{total_slack:.3f} mm")
+        self.lbl_total_slack.setText(f"{total_slack:+.3f} mm")
 
         # Update motion indicators
         if self.left_motor.motor_moving():
