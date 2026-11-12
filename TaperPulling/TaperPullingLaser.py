@@ -19,6 +19,7 @@ All wavelengths in nm, power in mW, times in s.
 
 import time
 import socket
+from collections import deque
 import numpy as np
 
 
@@ -70,7 +71,8 @@ class TaperPullingLaser:
         """
         Nothing is done at instantiation. Use connect().
         """
-        pass
+        # Last commands sent: (time, command, answer or None, how long it took)
+        self.log = deque(maxlen=300)
 
     def __del__(self):
         self.close()
@@ -140,25 +142,76 @@ class TaperPullingLaser:
 
     def write(self, cmd: str):
         if self.ok and not self.simulate:
-            if self.is_visa:
-                self.conn.write(cmd)
-            else:
-                self.conn.sendall((cmd + "\n").encode())
+            t0 = time.time()
+            try:
+                if self.is_visa:
+                    self.conn.write(cmd)
+                else:
+                    self.conn.sendall((cmd + "\n").encode())
+            finally:
+                self.log.append((t0, cmd, None, time.time() - t0))
 
     def query(self, cmd: str) -> str:
         if self.ok and not self.simulate:
-            if self.is_visa:
-                return self.conn.query(cmd).strip()
-            else:
-                self.conn.sendall((cmd + "\n").encode())
-                resp = b""
-                while not resp.endswith(b"\n"):
-                    part = self.conn.recv(4096)
-                    if not part:
-                        break
-                    resp += part
-                return resp.decode().strip()
+            t0 = time.time()
+            resp = "(no answer)"
+            try:
+                if self.is_visa:
+                    resp = self.conn.query(cmd).strip()
+                else:
+                    self.conn.sendall((cmd + "\n").encode())
+                    data = b""
+                    while not data.endswith(b"\n"):
+                        part = self.conn.recv(4096)
+                        if not part:
+                            break
+                        data += part
+                    resp = data.decode().strip()
+            finally:
+                self.log.append((t0, cmd, resp, time.time() - t0))
+            return resp
         return ""
+
+    def print_log(self, last: int=60):
+        """
+        Prints the last commands sent to the laser, with the answers and how long
+        each one took. Useful to find out what happened when something goes wrong.
+        """
+        entries = list(self.log)[-last:]
+        if len(entries) == 0:
+            return
+        t_ref = entries[-1][0]
+        print("Last commands sent to the laser (time in s, relative to the last one):")
+        for t, cmd, resp, duration in entries:
+            print(f"  {t - t_ref:9.3f}  {cmd}" + (f"  ->  {resp}" if resp is not None else "") + f"  ({1e3*duration:.0f} ms)")
+
+    def wait_ready(self, timeout: float=15.0) -> bool:
+        """
+        Waits until the laser has finished what it was doing (e.g. tuning to a
+        new wavelength), for at most timeout (s).
+
+        Returns:
+            bool: Whether it is ready.
+        """
+        if not self.ok or self.simulate:
+            return self.ok
+        try:
+            if self.is_visa:
+                previous = self.conn.timeout
+                self.conn.timeout = int(1000*timeout)
+            else:
+                self.conn.settimeout(timeout)
+            try:
+                self.query("*OPC?")
+                return True
+            finally:
+                if self.is_visa:
+                    self.conn.timeout = previous
+                else:
+                    self.conn.settimeout(self.timeout)
+        except Exception as e:
+            self.last_error = str(e)
+            return False
 
     def get_error(self) -> str:
         """

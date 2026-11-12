@@ -458,7 +458,7 @@ class LoopWizardDialog(QDialog):
             spin.setValue(source.value())
             spin.setKeyboardTracking(False)
             spin.setToolTip(source.toolTip())
-            spin.setMinimumWidth(120)
+            spin.setMinimumWidth(max(120, spin.sizeHint().width()))  # The whole value must be visible
             spin.valueChanged.connect(source.setValue)
             lbl = QLabel(label)
             settings_layout.addWidget(lbl, row, col)
@@ -541,7 +541,7 @@ class LoopWizardDialog(QDialog):
         self.spin_camera.setRange(m.cameraIndexSpin.minimum(), m.cameraIndexSpin.maximum())
         self.spin_camera.setValue(m.cameraIndexSpin.value())
         self.spin_camera.setToolTip(m.cameraIndexSpin.toolTip())
-        self.spin_camera.setMinimumWidth(70)
+        self.spin_camera.setMinimumWidth(max(70, self.spin_camera.sizeHint().width()))
         self.spin_camera.valueChanged.connect(m.cameraIndexSpin.setValue)
         select_layout.addWidget(self.spin_camera)
         self.check_camera_sim = QCheckBox("Simulate", self)

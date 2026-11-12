@@ -601,7 +601,7 @@ class MainWindow(FormUI, WindowUI):
         # All tab titles must be readable: make room for them
         self.devsTabs.setElideMode(Qt.TextElideMode.ElideNone)
         self.devsTabs.setUsesScrollButtons(False)
-        tabs_width = self.devsTabs.tabBar().sizeHint().width() + 4
+        tabs_width = max(self.devsTabs.tabBar().sizeHint().width() + 4, self.devsTabs.minimumSizeHint().width())
         self.devsTabs.setMinimumWidth(tabs_width)
         for group in (self.groupBox_2, self.groupBox_3):
             group.setMaximumWidth(max(group.maximumWidth(), tabs_width + 30))
@@ -673,7 +673,10 @@ class MainWindow(FormUI, WindowUI):
             w.setValue(val)
             w.setSuffix(suffix)
             w.setKeyboardTracking(False)
-            w.setMinimumWidth(60)
+            # No step buttons: in some styles (Windows) they take most of the field,
+            # hiding the value. The arrow keys and the mouse wheel still work.
+            w.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+            w.setMinimumWidth(w.sizeHint().width())
             if tip:
                 w.setToolTip(tip)
             setattr(self, name, w)

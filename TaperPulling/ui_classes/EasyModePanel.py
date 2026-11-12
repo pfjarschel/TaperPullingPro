@@ -15,7 +15,7 @@ import os
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QLabel,
-    QPushButton, QDoubleSpinBox, QCheckBox, QLineEdit, QProgressBar
+    QPushButton, QDoubleSpinBox, QCheckBox, QLineEdit, QProgressBar, QSizePolicy
 )
 from PyQt6.QtGui import QFont
 
@@ -50,6 +50,7 @@ class EasyModePanel(QWidget):
         spin.setValue(source.value())
         spin.setKeyboardTracking(False)
         spin.setToolTip(source.toolTip())
+        spin.setMinimumWidth(spin.sizeHint().width())  # The whole value must be visible
         spin.valueChanged.connect(source.setValue)
 
         def from_source(value):
@@ -112,7 +113,8 @@ class EasyModePanel(QWidget):
         layout.setSpacing(12)
 
         left = QWidget(self)
-        left.setFixedWidth(470)
+        left.setMinimumWidth(470)
+        left.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)  # As wide as its contents need
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(6)

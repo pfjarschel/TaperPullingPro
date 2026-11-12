@@ -17,8 +17,12 @@ If the trigger output of the laser is connected to the auxiliary channel of
 the DAQ, it is recorded and saved with the spectrum. It can then be used to
 refine the wavelengths afterwards (see TaperPullingLog).
 
-It does not block: call start(), then update() periodically (as often as
-possible, at least 10 times per second) until it returns False.
+The laser is asked as little as possible while it sweeps: a few times per
+second until the sweep is seen to start, then only now and then. Asking
+continuously can stall the mainframe.
+
+It does not block for long: call start(), then update() periodically (at least
+10 times per second) until it returns False.
 All wavelengths in nm, power in mW, times in s.
 """
 # =============================================================================
@@ -47,6 +51,10 @@ class TaperPullingSpectrum:
     pre_time = 0.3      # s. Signal recorded before the sweep command
     post_time = 0.3     # s. Signal recorded after the sweep
     wl_tolerance = 2e-4 # nm. The wavelength changed if it differs more than this
+    poll_interval = 0.1       # s. Time between wavelength readings, until the sweep starts
+    poll_interval_sweep = 2.0 # s. Time between wavelength readings, after it started
+    state_interval = 0.5      # s. Time between "is it still sweeping?" questions, at the end
+    start_timeout = 20.0      # s. Give up if the wavelength did not change in this time
 
     # State
     state = "idle"
@@ -61,6 +69,7 @@ class TaperPullingSpectrum:
     start_delay = None  # Time between the sweep command and the detected sweep start
     wl_before = 0.0     # Wavelength reported by the laser before the sweep
     polls = []          # (time since command, wavelength) of every wavelength reading
+    t_poll_next = 0.0   # Time (epoch) of the next question to the laser
 
     def __init__(self, data: TaperPullingData, laser: TaperPullingLaser):
         self.data = data
@@ -136,6 +145,10 @@ class TaperPullingSpectrum:
 
         if self.state == "positioning":
             if now - self.t_state >= self.settle_time:
+                # The laser must have arrived at the first wavelength before anything else
+                if not self.laser.wait_ready():
+                    self.fail(f"The laser did not get ready to sweep ({self.laser.last_error}).")
+                    return
                 self.wl_before = self.laser.get_wavelength()
                 self.data.start_recording("sweep")
                 self.state = "pre"
@@ -148,40 +161,63 @@ class TaperPullingSpectrum:
                 t_b = time.time()
                 self.t_command = (t_a + t_b)/2
                 self.polls = [(0.0, self.wl_before)]
+                self.t_poll_next = t_b + self.poll_interval
                 self.state = "sweeping"
 
         elif self.state == "sweeping":
-            # Where is the laser now?
-            t_a = time.time()
-            wl = self.laser.get_wavelength()
-            t_b = time.time()
-            t_poll = (t_a + t_b)/2 - self.t_command
+            elapsed_cmd = now - self.t_command
 
-            if self.start_delay is None and wl > self.wl_before + self.wl_tolerance:
-                # First change: the sweep started between the previous reading and
-                # this one. Assume the wavelength just read is exact at this time.
-                self.start_delay = max(t_poll - (wl - self.laser.sweep_start)/self.laser.sweep_speed,
-                                       self.polls[-1][0])
-            self.polls.append((t_poll, wl))
-
-            if self.start_delay is not None:
-                elapsed = t_poll - self.start_delay
+            if self.start_delay is None:
+                # Has it started? Ask where the laser is, a few times per second
+                if now >= self.t_poll_next:
+                    t_poll, wl = self.poll_wavelength()
+                    self.t_poll_next = time.time() + self.poll_interval
+                    if wl > self.wl_before + self.wl_tolerance:
+                        # First change: the sweep started between the previous reading and
+                        # this one. Assume the wavelength just read is exact at this time.
+                        self.start_delay = max(t_poll - (wl - self.laser.sweep_start)/self.laser.sweep_speed,
+                                               self.polls[-2][0])
+                        self.t_poll_next = time.time() + self.poll_interval_sweep
+                    elif t_poll > self.start_timeout:
+                        self.laser.stop_sweep()
+                        self.fail("The laser wavelength did not change after the sweep command.")
+            else:
+                # Sweeping: the progress comes from the clock, the laser is left alone
+                elapsed = elapsed_cmd - self.start_delay
                 self.progress = float(np.clip(elapsed/duration, 0.0, 1.0))
-                if elapsed >= duration and not self.laser.sweep_running():
-                    self.t_end = time.time()
-                    self.state = "post"
-                    self.t_state = self.t_end
-                elif elapsed > 1.5*duration + 20.0:
-                    self.laser.stop_sweep()
-                    self.fail("The laser did not finish the sweep in the expected time.")
-            elif t_poll > 20.0:
-                self.laser.stop_sweep()
-                self.fail("The laser wavelength did not change after the sweep command.")
+                if elapsed < duration:
+                    if now >= self.t_poll_next:
+                        self.poll_wavelength()
+                        self.t_poll_next = time.time() + self.poll_interval_sweep
+                elif now >= self.t_poll_next:
+                    # It should have finished: ask, now and then, until it says so
+                    self.t_poll_next = time.time() + self.state_interval
+                    if not self.laser.sweep_running():
+                        self.t_end = time.time()
+                        self.state = "post"
+                        self.t_state = self.t_end
+                    elif elapsed > 1.5*duration + 20.0:
+                        self.laser.stop_sweep()
+                        self.fail("The laser did not finish the sweep in the expected time.")
 
         elif self.state == "post":
             if now - self.t_state >= self.post_time:
                 self.data.stop_recording("sweep")
                 self.finish()
+
+    def poll_wavelength(self) -> tuple[float, float]:
+        """
+        Asks the laser for its wavelength.
+
+        Returns:
+            tuple: time since the sweep command (s), wavelength (nm).
+        """
+        t_a = time.time()
+        wl = self.laser.get_wavelength()
+        t_b = time.time()
+        t_poll = (t_a + t_b)/2 - self.t_command
+        self.polls.append((t_poll, wl))
+        return t_poll, wl
 
     def finish(self):
         rec = self.data.get_recording("sweep")
@@ -231,6 +267,8 @@ class TaperPullingSpectrum:
     def fail(self, message: str):
         self.error = message
         self.result = None
+        print(f"Sweep failed: {message}")
+        self.laser.print_log()
         self.end()
 
     def abort(self):
