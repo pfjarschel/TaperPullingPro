@@ -161,10 +161,11 @@ class TaperPullingData:
     last_spectrum_data = np.zeros((2, 2*spectrum_points))
     spectra = []
     spectra_freqs = []
-    spectra_t = []      # Time (epoch, s) of each spectrum
+    spectra_t = []      # Time (epoch, s) of each spectrum: the middle of its samples
     spectra_x = []      # Value given by x_provider for each spectrum (e.g. total pulled)
     spectra_v = []      # Second value given by x_provider (e.g. pulling velocity)
     x_provider = None   # Optional function returning (x, v) at the time it is called
+    provider_history = []  # (time, x, v) of every call to x_provider in this spectrogram
     
     # Full data recording (continuous mode only). Every sample is kept, no gaps.
     # Independent recorders, so that different measurements do not overwrite each other:
@@ -451,6 +452,7 @@ class TaperPullingData:
         self.spectra_t = []
         self.spectra_x = []
         self.spectra_v = []
+        self.provider_history = []
         
     def start_cont_loop(self):
         self.stop_cont_loop()
@@ -561,6 +563,7 @@ class TaperPullingData:
     def build_spectrogram(self, smooth=0.01, window=True, sigma=0.15):
         if not self.spectrogram_busy and not self.spectrogram_pause:
             self.spectrogram_busy = True
+            t_end = self.last_chunk_time  # Time of the last sample in the buffer
             spec_x, spec_y = self.get_spectrum(smooth, window, sigma)
             cuton_i = np.abs(spec_x - self.cuton_f).argmin()
             cutoff_i = np.abs(spec_x - self.cutoff_f).argmin()
@@ -570,11 +573,24 @@ class TaperPullingData:
                     x, v = self.x_provider()
                 except Exception:
                     pass
+
+            # The spectrum is of the last samples (centered by the window): it belongs to
+            # the middle of them, not to now. x and v are interpolated to that time.
+            now = time.time()
+            self.provider_history.append((now, x, v))
+            n_window = min(2*self.spectrum_points, self.buffer_size)
+            t_mid = min(t_end if t_end > 0 else now, now) - 0.5*n_window/self.sampling_rate
+            while len(self.provider_history) > 2 and self.provider_history[1][0] < t_mid - 5.0:
+                self.provider_history.pop(0)  # Older than needed
+            hist = np.array(self.provider_history)
+            x_mid = float(np.interp(t_mid, hist[:, 0], hist[:, 1]))
+            v_mid = float(np.interp(t_mid, hist[:, 0], hist[:, 2]))
+
             self.spectra_freqs = spec_x[cuton_i:cutoff_i]
             self.spectra.append(spec_y[cuton_i:cutoff_i].astype(np.float32))
-            self.spectra_t.append(time.time())
-            self.spectra_x.append(x)
-            self.spectra_v.append(v)
+            self.spectra_t.append(t_mid)
+            self.spectra_x.append(x_mid)
+            self.spectra_v.append(v_mid)
             
             self.spectrogram_busy = False
     

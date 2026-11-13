@@ -126,7 +126,8 @@ class MainWindow(FormUI, WindowUI):
     easy_mode = False
     sim_beat_phase = np.zeros(2)  # Simulated detector: phase of the beats between modes
     sim_diameter = 125.0          # Simulated detector: current waist diameter (µm)
-    spec_max_k = 2.0  # Spectrogram display limit (beats per µm pulled)
+    spec_max_k = 1.0  # Spectrogram display limit (beats per µm of total pull)
+    spec_window_mm = 0.512  # Spectrogram window, in mm of total pull, when set from the pull velocity
     profile_mode = "Standard"  # Can be Standard, Optimized or Loaded
     
     def __del__(self):
@@ -290,6 +291,14 @@ class MainWindow(FormUI, WindowUI):
         self.specLogCheck.setChecked(True)
         self.specLogCheck.setToolTip("Spectrogram colors in logarithmic scale: weak beats remain visible next to strong ones")
         self.horizontalLayout_19.insertWidget(1, self.specLogCheck)
+        self.specAutoCheck = QCheckBox("Auto (pull velocity)")
+        self.specAutoCheck.setObjectName("specAutoCheck")
+        self.specAutoCheck.setChecked(True)
+        self.specAutoCheck.setToolTip(
+            "Spectrogram samples set from the pull velocity and the sampling rate, so that every spectrum covers\n"
+            f"the same pulled length ({self.spec_window_mm:g} mm, the window centered on it). The spectrogram then looks the same\n"
+            "at any pull velocity: same resolution in pulled distance and in beats per µm.")
+        self.verticalLayout_48.addWidget(self.specAutoCheck)
         
         # Plots
         SMALL_SIZE = 7
@@ -441,6 +450,9 @@ class MainWindow(FormUI, WindowUI):
         self.autoVRangeCheck.clicked.connect(self.toggle_auto_vrange)
         self.zeroOffsetBut.clicked.connect(self.zero_offset)
         self.specsamplesSpin.valueChanged.connect(self.daq_init)
+        self.specAutoCheck.toggled.connect(lambda _: self.update_auto_spec_samples())
+        self.srateSpin.valueChanged.connect(lambda _: self.update_auto_spec_samples())
+        self.pullerPullVelSpin.valueChanged.connect(lambda _: self.update_auto_spec_samples())
         
         # Motors connections
         self.resetmotorsBut.clicked.connect(self.init_motors)
@@ -850,7 +862,7 @@ class MainWindow(FormUI, WindowUI):
             d = max(self.sim_diameter, 0.3)
             v = 0.0
             if self.core.motors.left_puller.moving and self.core.motors.right_puller.moving:
-                v = 1e3*self.core.motors.left_puller.pull_vel  # µm/s
+                v = 2e3*self.core.motors.left_puller.pull_vel  # µm/s, total pull (both pullers)
             dt = t - t[0] + (t[1] - t[0] if len(t) > 1 else 0.0)
             beat = np.zeros(len(t))
             for i, (k_2um, cutoff, amplitude) in enumerate(((0.39, 1.8, 0.05), (0.95, 3.2, 0.03))):
@@ -1100,6 +1112,7 @@ class MainWindow(FormUI, WindowUI):
                             w.setText(settings_dict[key])
                     except:
                         pass
+            self.update_auto_spec_samples()  # The saved samples may not match the saved velocity
     
     def load_default_settings(self):
         self.load_settings(self.default_settings_file)
@@ -1293,7 +1306,24 @@ class MainWindow(FormUI, WindowUI):
         self.markBut.setEnabled(False)
         self.toggle_manual_control()
         self.toggle_fiber_defaults()
-        
+        self.specsamplesSpin.setEnabled(not self.specAutoCheck.isChecked())
+
+    def update_auto_spec_samples(self):
+        """
+        With 'Auto' checked, sets the spectrogram samples from the pull velocity: the
+        window (twice the samples) covers spec_window_mm of total pull, which is twice
+        the velocity of each puller. 1024 samples at 0.125 mm/s and 1 kHz.
+        """
+        auto = self.specAutoCheck.isChecked()
+        self.specsamplesSpin.setEnabled(not auto)
+        v = self.pullerPullVelSpin.value()
+        if not auto or v <= 0 or self.core.pulling:
+            return
+        n = int(round(self.spec_window_mm*self.srateSpin.value()/(4*v)))
+        n = int(np.clip(n, self.specsamplesSpin.minimum(), self.specsamplesSpin.maximum()))
+        if n != self.specsamplesSpin.value():
+            self.specsamplesSpin.setValue(n)  # Restarts the acquisition with the new buffer
+
     def disable_controls(self):
         lines = self.findChildren(QLineEdit)
         for i in range(len(lines)):
@@ -1630,9 +1660,10 @@ class MainWindow(FormUI, WindowUI):
     def update_spectrogram_graph(self):
         """
         Draws the whole spectrogram acquired so far, against the pulled distance
-        recorded with each spectrum. The frequency axis is given in beats per µm 
-        pulled (by each motor), using the pulling velocity at the time of each 
-        spectrum, so that it remains valid if the velocity changes during the process.
+        recorded with each spectrum. The frequency axis is given in beats per µm of
+        total pull (twice the velocity of each puller), using the pulling velocity at
+        the time of each spectrum, so that it remains valid if the velocity changes
+        during the process.
         """
         n = min(len(self.data.spectra), len(self.data.spectra_x), len(self.data.spectra_v))
         freqs = np.array(self.data.spectra_freqs)
@@ -1649,9 +1680,10 @@ class MainWindow(FormUI, WindowUI):
         x_grid = np.linspace(x[0], x[-1], n_cols)
         idxs = np.clip(np.searchsorted(x, x_grid, side="right") - 1, 0, n - 1)
         
-        # Rows: uniform grid in beats per µm
+        # Rows: uniform grid in beats per µm of total pull (v: velocity of each puller)
         v0 = self.pullerPullVelSpin.value()
         v[v <= 0] = v0
+        v = 2*v
         k_max = min(self.spec_max_k, 1e-3*freqs[-1]/v.min())
         k_grid = np.linspace(1e-3*freqs[0]/v.max(), k_max, len(freqs))
         
