@@ -119,6 +119,7 @@ class MainWindow(FormUI, WindowUI):
     transm_i = 0
     events = []  # Events marked by the user during the process: (time, total pulled, label)
     run_folder = ""  # Folder where the data of the last process was saved
+    process_running = False  # Between start_pulling and stop_pulling (its data is saved once)
     # Puller positions after the last pull: where it ended ("left", "right"), and the reference
     # for the slack of loops ("ref_left", "ref_right": the same, or after tensioning the taper).
     # Also "folder" (of the pull) and "loop_started" (the Loop Wizard was opened since).
@@ -1921,9 +1922,15 @@ class MainWindow(FormUI, WindowUI):
         if self.manualStopCheck.isChecked():
             hz_function[0][-1] = 200.0
         self.core.start_process(hz_function)
+        self.process_running = True
         self.pullLoop_timer.start()
         
     def stop_pulling(self, save_data=True):
+        # Graph updates in the pull loop process pending events (flush_events), so Stop
+        # can be handled in the middle of it, and then the loop sees the process ended
+        # and stops it again: its data is saved only the first time.
+        was_running = self.process_running
+        self.process_running = False
         self.pullLoop_timer.stop()
         self.data.stop_spectrogram()
         if self.data.recording:
@@ -1949,7 +1956,7 @@ class MainWindow(FormUI, WindowUI):
             self.update_graph(self.realish_profile, self.graph_profmini_line_realish, self.graph_profmini_ax, self.graph_profmini)
         
         # Save data just to be safe
-        if save_data:
+        if save_data and was_running:
             self.autosave_data()
             # Where the pullers stopped (the straight taper): reference for the slack of loops.
             # Read once they have certainly stopped.
