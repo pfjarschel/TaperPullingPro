@@ -113,8 +113,9 @@ class MainWindow(FormUI, WindowUI):
     hz_sweep_n = 0
     rhz_array = []
     rhz_x_array = []
-    transm_array = np.zeros((max_tpts, 2))
+    transm_array = np.zeros((max_tpts, 4))  # Pulled (mm), mean, min, max power (mW)
     spectrogram_data = np.zeros((2,2))
+    graph_pow_band = None  # Min-max band of the transmission graph
     transm_i = 0
     events = []  # Events marked by the user during the process: (time, total pulled, label)
     run_folder = ""  # Folder where the data of the last process was saved
@@ -281,6 +282,11 @@ class MainWindow(FormUI, WindowUI):
             if not "_r" in cmap:
                 self.cmapCombo.addItem(cmap)
         self.cmapCombo.setCurrentText('PRGn')
+        self.specLogCheck = QCheckBox("Log")
+        self.specLogCheck.setObjectName("specLogCheck")
+        self.specLogCheck.setChecked(True)
+        self.specLogCheck.setToolTip("Spectrogram colors in logarithmic scale: weak beats remain visible next to strong ones")
+        self.horizontalLayout_19.insertWidget(1, self.specLogCheck)
         
         # Plots
         SMALL_SIZE = 7
@@ -303,7 +309,7 @@ class MainWindow(FormUI, WindowUI):
         self.graph_pow_ax = self.figure_pow.add_subplot()
         self.graph_pow_ax.set_xlabel("Pulled Dist. (mm)")
         self.graph_pow_ax.set_ylabel("Transm. Power. (mW)")
-        self.graph_pow_line, = self.graph_pow_ax.plot([0, 0], [0, 0])
+        self.graph_pow_line, = self.graph_pow_ax.plot([0, 0], [0, 0], lw=1.0)
         self.graph_pow_ax.grid(True)
         self.graph_pow.draw()
         
@@ -480,6 +486,7 @@ class MainWindow(FormUI, WindowUI):
         self.set0powBut.clicked.connect(self.set_ref_power)
         self.cmapCombo.currentTextChanged.connect(self.set_cmap)
         self.cmapRevCheck.clicked.connect(self.set_cmap)
+        self.specLogCheck.toggled.connect(lambda _: self.update_spectrogram_graph())
         
          # Menu connections
         self.actionSave_Data.triggered.connect(self.action_save_data)
@@ -1181,7 +1188,8 @@ class MainWindow(FormUI, WindowUI):
             
         transm_file = file_prefix + "_transmission.txt"
         if self.transm_i > 0:
-            np.savetxt(transm_file, self.transm_array[:self.transm_i-1])
+            np.savetxt(transm_file, self.transm_array[:self.transm_i-1],
+                       header="Pulled (mm), power (mW): mean, minimum, maximum (since the previous point)")
             
         profile_file = file_prefix + "_profile.txt"
         np.savetxt(profile_file, np.array(self.profile).T)
@@ -1329,6 +1337,7 @@ class MainWindow(FormUI, WindowUI):
         self.markBut.setEnabled(True)
         self.cmapCombo.setEnabled(True)
         self.cmapRevCheck.setEnabled(True)
+        self.specLogCheck.setEnabled(True)
         self.stopBut.setEnabled(True)
         
     def reset_pull_stats(self):
@@ -1343,8 +1352,9 @@ class MainWindow(FormUI, WindowUI):
         self.hotzoneIndSpin.setValue(0.0)
         self.rhz_array = [self.hz_function[1][0]]
         self.rhz_x_array = [0.0]
-        self.transm_array = np.zeros((60000, 2))
+        self.transm_array = np.zeros((60000, 4))
         self.transm_i = 0
+        self.data.take_monitor_stats()  # Start the statistics of the first point now
         self.update_graph([self.rhz_x_array, self.rhz_array], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
         self.hz_sweep_n = 0
         self._pull_data_started = False
@@ -1562,17 +1572,18 @@ class MainWindow(FormUI, WindowUI):
             self.waistLengthIndSpin.setValue(curr_hz)
             self.transLengthIndSpin.setValue((tp + self.hz_function[1][0] - curr_hz)/2)
                 
-            # Update transmission
+            # Update transmission: mean, and the band between minimum and maximum, of every
+            # sample since the previous point (beats faster than the updates show as the band)
+            v_mean, v_min, v_max = self.data.take_monitor_stats()
             if self.core.pulling and self.core.motors.left_puller.moving and self.core.motors.right_puller.moving:
-                self.transm_array[self.transm_i][0] = tp
-                self.transm_array[self.transm_i][1] = self.data.get_monitor_power(db=False)
+                power = self.data.get_power_from_voltage
+                self.transm_array[self.transm_i] = (tp, power(v_mean), power(v_min), power(v_max))
                 self.transm_i += 1
                 tdata = self.transm_array[:self.transm_i]
                 if self.transm_i > self.max_tpts:
                     idxs = np.linspace(1, self.transm_i - 2, self.max_tpts - 2, dtype=int)
                     tdata = np.concatenate(([tdata[0]], tdata[idxs], [tdata[-1]]))
-                    
-                self.update_graph(tdata.T, self.graph_pow_line, self.graph_pow_ax, self.graph_pow)
+                self.update_transmission_graph(tdata)
                 
             # Update Spectrogram
             if self.core.motors.left_puller.moving and self.core.motors.right_puller.moving:
@@ -1597,6 +1608,22 @@ class MainWindow(FormUI, WindowUI):
                 
             self.pull_busy = False
         
+    def update_transmission_graph(self, tdata: np.ndarray):
+        """
+        Draws the transmission: mean power (line) and the band between the minimum
+        and maximum (rows of tdata: pulled, mean, min, max).
+        """
+        if self.graph_pow_band is not None:
+            self.graph_pow_band.remove()
+        self.graph_pow_band = self.graph_pow_ax.fill_between(tdata[:, 0], tdata[:, 2], tdata[:, 3], lw=0, alpha=0.35,
+                                                             color=self.graph_pow_line.get_color())
+        x0, x1 = tdata[0, 0], tdata[-1, 0]
+        y0, y1 = np.min(tdata[:, 2]), np.max(tdata[:, 3])
+        dx = 0.02*(x1 - x0) if x1 > x0 else 0.5
+        dy = 0.05*(y1 - y0) if y1 > y0 else max(1e-6, 0.05*abs(y1))
+        self.update_graph(tdata[:, :2].T, self.graph_pow_line, self.graph_pow_ax, self.graph_pow,
+                          xlims=[x0 - dx, x1 + dx], ylims=[y0 - dy, y1 + dy])
+
     def update_spectrogram_graph(self):
         """
         Draws the whole spectrogram acquired so far, against the pulled distance
@@ -1629,9 +1656,19 @@ class MainWindow(FormUI, WindowUI):
         for j, i in enumerate(idxs):
             data[:, j] = np.interp(1e3*k_grid*v[i], freqs, self.data.spectra[i], right=0.0)
         
-        self.graph_spec_img.set_data(data)
+        # Logarithmic colors: the strong beats of the multimode region would otherwise leave
+        # the rest (the faster beats up to the cutoffs) faint. The lowest 30% are one color.
+        shown = data
+        if self.specLogCheck.isChecked():
+            peak = float(data.max())
+            shown = np.log10(np.maximum(data, max(peak*1e-6, 1e-30)))
+            low = float(np.percentile(shown, 30))
+        else:
+            low = float(data.min())
+        high = float(shown.max())
+        self.graph_spec_img.set_data(shown)
         self.graph_spec_img.set_extent((x_grid[0], x_grid[-1], k_grid[0], k_grid[-1]))
-        self.graph_spec_img.set_clim(data.min(), data.max())
+        self.graph_spec_img.set_clim(low, high if high > low else low + 1e-12)
         self.graph_spec.draw()
         self.graph_spec.flush_events()
         self.spectrogram_data = data

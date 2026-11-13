@@ -118,6 +118,14 @@ class TaperPullingData:
     monitor_interval = 20  # ms
     monitor_val = 0.0
     last_chunk_time = 0.0  # Time (epoch, s) the last samples in the buffer were received
+
+    # Mean, minimum and maximum of every sample since the last take_monitor_stats()
+    # (continuous mode): oscillations faster than the display updates are not lost
+    stats_lock = Lock()
+    stats_sum = 0.0
+    stats_n = 0
+    stats_min = np.inf
+    stats_max = -np.inf
     
     continuous_loop = None       # Acquisition thread (continuous mode)
     continuous_stop = None       # Event used to stop the acquisition thread
@@ -176,7 +184,8 @@ class TaperPullingData:
         """
         
         self.daq = TaperPullingDAQ()
-        
+        self.stats_lock = Lock()
+
         self.sampling_rate = sampling_rate
         self.cuton_f = cuton_f
         self.cutoff_f = cutoff_f
@@ -368,6 +377,22 @@ class TaperPullingData:
         
     def get_monitor_power(self, db=False):
         return self.get_power_from_voltage(self.monitor_val, db=db)
+
+    def take_monitor_stats(self) -> tuple[float, float, float]:
+        """
+        Mean, minimum and maximum of the signal (V) over every sample acquired since
+        the previous call, and starts over. Without new samples (or outside the
+        continuous mode), all three are the latest monitor value.
+        """
+        with self.stats_lock:
+            n = self.stats_n
+            stats = (self.stats_sum/n, self.stats_min, self.stats_max) if n > 0 else None
+            self.stats_sum, self.stats_n = 0.0, 0
+            self.stats_min, self.stats_max = np.inf, -np.inf
+        if stats is None:
+            v = self.monitor_val
+            return v, v, v
+        return stats
     
     def get_points(self, n:int):
         if self.stream_active():
@@ -458,6 +483,11 @@ class TaperPullingData:
             self.buffer = np.concatenate((self.buffer, chunk))[-self.buffer_size:]
             self.monitor_val = float(chunk.mean())
             self.last_chunk_time = t_chunk
+            with self.stats_lock:
+                self.stats_sum += float(np.sum(chunk))
+                self.stats_n += n
+                self.stats_min = min(self.stats_min, float(np.min(chunk)))
+                self.stats_max = max(self.stats_max, float(np.max(chunk)))
             
             for recorder in self.recorders.values():
                 if recorder.active:
