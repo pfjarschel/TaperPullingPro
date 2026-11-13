@@ -48,6 +48,7 @@ class TaperPullingSpectrum:
     trigger_step = 0.0  # nm. The laser outputs a trigger at every step. 0: only at the sweep start
     monitor_wl = 1550.0 # The laser goes back to this wavelength after the sweep
     settle_time = 1.0   # s. Wait at the first wavelength before sweeping
+    output_settle = 2.0 # s. Extra wait, if the laser output had to be turned back on
     pre_time = 0.3      # s. Signal recorded before the sweep command
     post_time = 0.3     # s. Signal recorded after the sweep
     wl_tolerance = 2e-4 # nm. The wavelength changed if it differs more than this
@@ -72,6 +73,7 @@ class TaperPullingSpectrum:
     polls = []          # (time since command, wavelength) of every wavelength reading
     t_poll_next = 0.0   # Time (epoch) of the next question to the laser
     use_triggers = False  # The trigger output of the laser is being recorded
+    output_was_off = False  # The laser had turned its output off, and it was turned back on
 
     def __init__(self, data: TaperPullingData, laser: TaperPullingLaser):
         self.data = data
@@ -112,6 +114,11 @@ class TaperPullingSpectrum:
         self.use_triggers = self.data.daq.aux_channel != ""
 
         try:
+            # The laser sometimes turns its output off by itself: check, and turn it back on
+            self.output_was_off = not self.laser.get_output()
+            if self.output_was_off:
+                print("The laser output was off: turned it back on before the sweep.")
+                self.laser.set_output(True)
             err = self.laser.setup_sweep(self.start_wl, self.stop_wl, self.speed, self.trigger_step)
             if err != "":
                 return err
@@ -147,7 +154,8 @@ class TaperPullingSpectrum:
         duration = self.laser.sweep_duration()
 
         if self.state == "positioning":
-            if now - self.t_state >= self.settle_time:
+            settle = self.settle_time + (self.output_settle if self.output_was_off else 0.0)
+            if now - self.t_state >= settle:
                 # The laser must have arrived at the first wavelength before anything else
                 if not self.laser.wait_ready():
                     self.fail(f"The laser did not get ready to sweep ({self.laser.last_error}).")
@@ -285,6 +293,7 @@ class TaperPullingSpectrum:
             "monitor_wl": float(self.monitor_wl),
             "laser": self.laser.idn,
             "laser_power": float(self.laser.power),
+            "laser_output_was_off": bool(self.output_was_off),
             "sampling_rate": float(rec["sampling_rate"]),
             "gain_V_per_mW": float(self.data.gain_v_mw),
             "offset_V": float(self.data.offset_v),

@@ -283,6 +283,15 @@ class TaperPullingLaser:
             self.write(f"SOUR{self.slot}:POW:STAT {1 if on else 0}")
             self.output = on
 
+    def get_output(self) -> bool:
+        """
+        Asks the laser whether its output is on. The laser can turn it off by
+        itself, without anything being sent to it.
+        """
+        if self.ok and not self.simulate:
+            self.output = int(float(self.query(f"SOUR{self.slot}:POW:STAT?"))) == 1
+        return self.output
+
     # Continuous sweep
     def setup_sweep(self, start: float, stop: float, speed: float, trigger_step: float=0.0) -> str:
         """

@@ -118,6 +118,7 @@ class MainWindow(FormUI, WindowUI):
     transm_i = 0
     events = []  # Events marked by the user during the process: (time, total pulled, label)
     run_folder = ""  # Folder where the data of the last process was saved
+    pull_end = None  # Puller positions at the end of the last pull: {"folder", "left", "right"}
     easy_mode = False
     sim_beat_phase = np.zeros(2)  # Simulated detector: phase of the beats between modes
     sim_diameter = 125.0          # Simulated detector: current waist diameter (µm)
@@ -1878,6 +1879,38 @@ class MainWindow(FormUI, WindowUI):
         # Save data just to be safe
         if save_data:
             self.autosave_data()
+            # Where the pullers stopped (the straight taper): reference for the slack of loops.
+            # Read once they have certainly stopped.
+            folder = self.run_folder
+            QTimer.singleShot(1000, lambda: self.store_pull_end_positions(folder))
+
+    def store_pull_end_positions(self, folder: str):
+        try:
+            left = self.core.motors.left_puller.get_position()
+            right = self.core.motors.right_puller.get_position()
+        except Exception as e:
+            print(f"Could not read the puller positions at the end of the pull: {e}")
+            return
+        self.pull_end = {"folder": folder, "left": float(left), "right": float(right)}
+
+    def get_pull_end_positions(self) -> tuple[float, float]|None:
+        """
+        Puller positions (left, right) at the end of the last pull, when the taper was
+        straight: the reference for the slack of loops made with it. If they were not
+        read when the pull ended, they are taken from the log of the pull (its last
+        positions, a few hundredths of mm before the pullers stopped). None if there
+        was no pull since the program started.
+        """
+        folder = self.run_folder
+        if not folder:
+            return None
+        if self.pull_end is not None and self.pull_end["folder"] == folder:
+            return self.pull_end["left"], self.pull_end["right"]
+        try:
+            with np.load(f"{folder}/pull_full_log.npz") as log:
+                return float(log["log_puller_left_pos"][-1]), float(log["log_puller_right_pos"][-1])
+        except Exception:
+            return None
 
     def autosave_data(self):
         """

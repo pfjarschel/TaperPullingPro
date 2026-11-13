@@ -62,6 +62,12 @@ class LoopWizardDialog(QDialog):
         self.init_left_pos = self.left_motor.get_position() if self.left_motor else 0.0
         self.init_right_pos = self.right_motor.get_position() if self.right_motor else 0.0
 
+        # Puller positions at the end of the pull (straight taper), if known: the slack
+        # measured from them does not restart when the wizard is opened again
+        self.pull_end_pos = None
+        if main is not None and hasattr(main, "get_pull_end_positions"):
+            self.pull_end_pos = main.get_pull_end_positions()
+
         # Save default velocities to restore after creeping
         self.default_left_vel = self.left_motor.vel if self.left_motor else 40.0
         self.default_right_vel = self.right_motor.vel if self.right_motor else 40.0
@@ -229,7 +235,18 @@ class LoopWizardDialog(QDialog):
         self.lbl_total_slack = QLabel("+0.000 mm")
         self.lbl_total_slack.setFont(mono_bold)
         self.lbl_total_slack.setStyleSheet("color: #0284c7;")
-        pos_layout.addWidget(self.lbl_total_slack, 3, 1, 1, 3)
+        pos_layout.addWidget(self.lbl_total_slack, 3, 1)
+        self.lbl_pull_slack = QLabel("since pull end: ---")
+        self.lbl_pull_slack.setFont(mono_font)
+        if self.pull_end_pos is not None:
+            self.lbl_pull_slack.setToolTip("Slack added since the end of the pull (straight taper). Saved with every "
+                                           "spectrum, and does not restart when the wizard is opened again.\n"
+                                           f"Puller positions at the end of the pull: {self.pull_end_pos[0]:.3f} mm, "
+                                           f"{self.pull_end_pos[1]:.3f} mm")
+        else:
+            self.lbl_pull_slack.setToolTip("No pull since the program started: the slack can only be measured from "
+                                           "where the motors were when the wizard was opened.")
+        pos_layout.addWidget(self.lbl_pull_slack, 3, 2, 1, 2)
 
         # Live Detector / Optical Power Reading
         pos_layout.addWidget(QLabel("Detector / Power:"), 4, 0)
@@ -718,7 +735,14 @@ class LoopWizardDialog(QDialog):
             return 0.0
         return (self.left_motor.get_position() - self.init_left_pos) + \
                (self.right_motor.get_position() - self.init_right_pos)
-    
+
+    def get_slack_from_pull_end(self) -> float|None:
+        """Slack added since the end of the pull (both motors), in mm. None if unknown."""
+        if self.pull_end_pos is None or not self.left_motor or not self.right_motor:
+            return None
+        return (self.left_motor.get_position() - self.pull_end_pos[0]) + \
+               (self.right_motor.get_position() - self.pull_end_pos[1])
+
     def start_sweep(self):
         if self.left_motor and self.right_motor and (self.left_motor.motor_moving() or self.right_motor.motor_moving()):
             QMessageBox.warning(self, "Sweep", "Wait until the motors stop before measuring a spectrum.")
@@ -749,6 +773,9 @@ class LoopWizardDialog(QDialog):
                 "left_displacement": l_pos - self.init_left_pos,
                 "right_displacement": r_pos - self.init_right_pos,
                 "slack": self.get_slack(),
+                "slack_from_pull_end": self.get_slack_from_pull_end(),
+                "pull_end_left_pos": self.pull_end_pos[0] if self.pull_end_pos is not None else None,
+                "pull_end_right_pos": self.pull_end_pos[1] if self.pull_end_pos is not None else None,
             }
             error = self.spectrum.start(metadata)
         if error != "":
@@ -787,7 +814,11 @@ class LoopWizardDialog(QDialog):
         index = result["info"]["metadata"]["index"]
         slack = result["info"]["metadata"]["slack"]
         info = result["info"]
-        details = f"{slack:+.3f} mm slack, started {info['start_delay']:.2f} s after the command, wavelengths from "
+        pull_slack = info["metadata"].get("slack_from_pull_end")
+        details = f"{slack:+.3f} mm slack" + (f" ({pull_slack:+.3f} mm since pull end)" if pull_slack is not None else "")
+        if info.get("laser_output_was_off"):
+            details += ", laser output was off and was turned back on"
+        details += ", started {info['start_delay']:.2f} s after the command, wavelengths from "
         if info["wavelength_source"] == "triggers":
             details += f"{info['trigger_count']} triggers ({info['speed_measured']:.3f} nm/s)"
         elif info["wavelength_source"] == "trigger_start":
@@ -899,6 +930,10 @@ class LoopWizardDialog(QDialog):
         self.lbl_right_delta.setText(f"{dr:+.3f} mm")
 
         self.lbl_total_slack.setText(f"{total_slack:+.3f} mm")
+        if self.pull_end_pos is not None:
+            pull_slack = (l_pos - self.pull_end_pos[0]) + (r_pos - self.pull_end_pos[1])
+            pull_slack = 0.0 if abs(pull_slack) < 5e-4 else pull_slack
+            self.lbl_pull_slack.setText(f"since pull end: {pull_slack:+.3f} mm")
 
         # Update motion indicators
         if self.left_motor.motor_moving():
