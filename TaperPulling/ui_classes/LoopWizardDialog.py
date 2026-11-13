@@ -62,11 +62,13 @@ class LoopWizardDialog(QDialog):
         self.init_left_pos = self.left_motor.get_position() if self.left_motor else 0.0
         self.init_right_pos = self.right_motor.get_position() if self.right_motor else 0.0
 
-        # Puller positions at the end of the pull (straight taper), if known: the slack
-        # measured from them does not restart when the wizard is opened again
-        self.pull_end_pos = None
-        if main is not None and hasattr(main, "get_pull_end_positions"):
-            self.pull_end_pos = main.get_pull_end_positions()
+        # Puller positions where the taper was straight (end of the pull, or after tensioning
+        # it), if known: the slack measured from them does not restart when the wizard is
+        # opened again. See MainWindow.get_slack_reference()
+        self.slack_ref = None
+        if main is not None and hasattr(main, "get_slack_reference"):
+            self.slack_ref = main.get_slack_reference()
+        self.pull_end_pos = self.slack_ref["reference"] if self.slack_ref is not None else None
 
         # Save default velocities to restore after creeping
         self.default_left_vel = self.left_motor.vel if self.left_motor else 40.0
@@ -236,13 +238,18 @@ class LoopWizardDialog(QDialog):
         self.lbl_total_slack.setFont(mono_bold)
         self.lbl_total_slack.setStyleSheet("color: #0284c7;")
         pos_layout.addWidget(self.lbl_total_slack, 3, 1)
-        self.lbl_pull_slack = QLabel("since pull end: ---")
+        self.lbl_pull_slack = QLabel("vs. straight: ---")
         self.lbl_pull_slack.setFont(mono_font)
-        if self.pull_end_pos is not None:
-            self.lbl_pull_slack.setToolTip("Slack added since the end of the pull (straight taper). Saved with every "
-                                           "spectrum, and does not restart when the wizard is opened again.\n"
-                                           f"Puller positions at the end of the pull: {self.pull_end_pos[0]:.3f} mm, "
-                                           f"{self.pull_end_pos[1]:.3f} mm")
+        if self.slack_ref is not None:
+            pe = self.slack_ref["pull_end"]
+            tension = self.slack_ref["tension"]
+            self.lbl_pull_slack.setToolTip(
+                "Slack added since the taper was straight: the end of the pull, or after tensioning it (Tension, "
+                "in the main window, before opening the wizard). Saved with every spectrum, and does not restart "
+                "when the wizard is opened again.\n"
+                f"Puller positions at the end of the pull: {pe[0]:.3f} mm, {pe[1]:.3f} mm\n"
+                + (f"Tensioned after the pull by {tension:.3f} mm, to: {self.pull_end_pos[0]:.3f} mm, "
+                   f"{self.pull_end_pos[1]:.3f} mm" if abs(tension) >= 5e-4 else "Not tensioned after the pull"))
         else:
             self.lbl_pull_slack.setToolTip("No pull since the program started: the slack can only be measured from "
                                            "where the motors were when the wizard was opened.")
@@ -736,8 +743,8 @@ class LoopWizardDialog(QDialog):
         return (self.left_motor.get_position() - self.init_left_pos) + \
                (self.right_motor.get_position() - self.init_right_pos)
 
-    def get_slack_from_pull_end(self) -> float|None:
-        """Slack added since the end of the pull (both motors), in mm. None if unknown."""
+    def get_slack_from_straight(self) -> float|None:
+        """Slack added since the taper was straight (both motors), in mm. None if unknown."""
         if self.pull_end_pos is None or not self.left_motor or not self.right_motor:
             return None
         return (self.left_motor.get_position() - self.pull_end_pos[0]) + \
@@ -773,9 +780,12 @@ class LoopWizardDialog(QDialog):
                 "left_displacement": l_pos - self.init_left_pos,
                 "right_displacement": r_pos - self.init_right_pos,
                 "slack": self.get_slack(),
-                "slack_from_pull_end": self.get_slack_from_pull_end(),
-                "pull_end_left_pos": self.pull_end_pos[0] if self.pull_end_pos is not None else None,
-                "pull_end_right_pos": self.pull_end_pos[1] if self.pull_end_pos is not None else None,
+                "slack_from_straight": self.get_slack_from_straight(),
+                "straight_left_pos": self.pull_end_pos[0] if self.slack_ref is not None else None,
+                "straight_right_pos": self.pull_end_pos[1] if self.slack_ref is not None else None,
+                "pull_end_left_pos": self.slack_ref["pull_end"][0] if self.slack_ref is not None else None,
+                "pull_end_right_pos": self.slack_ref["pull_end"][1] if self.slack_ref is not None else None,
+                "tension_after_pull": self.slack_ref["tension"] if self.slack_ref is not None else None,
             }
             error = self.spectrum.start(metadata)
         if error != "":
@@ -814,8 +824,8 @@ class LoopWizardDialog(QDialog):
         index = result["info"]["metadata"]["index"]
         slack = result["info"]["metadata"]["slack"]
         info = result["info"]
-        pull_slack = info["metadata"].get("slack_from_pull_end")
-        details = f"{slack:+.3f} mm slack" + (f" ({pull_slack:+.3f} mm since pull end)" if pull_slack is not None else "")
+        pull_slack = info["metadata"].get("slack_from_straight")
+        details = f"{slack:+.3f} mm slack" + (f" ({pull_slack:+.3f} mm vs. straight taper)" if pull_slack is not None else "")
         if info.get("laser_output_was_off"):
             details += ", laser output was off and was turned back on"
         details += ", started {info['start_delay']:.2f} s after the command, wavelengths from "
@@ -933,7 +943,7 @@ class LoopWizardDialog(QDialog):
         if self.pull_end_pos is not None:
             pull_slack = (l_pos - self.pull_end_pos[0]) + (r_pos - self.pull_end_pos[1])
             pull_slack = 0.0 if abs(pull_slack) < 5e-4 else pull_slack
-            self.lbl_pull_slack.setText(f"since pull end: {pull_slack:+.3f} mm")
+            self.lbl_pull_slack.setText(f"vs. straight: {pull_slack:+.3f} mm")
 
         # Update motion indicators
         if self.left_motor.motor_moving():

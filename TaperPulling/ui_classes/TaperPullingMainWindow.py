@@ -119,7 +119,10 @@ class MainWindow(FormUI, WindowUI):
     transm_i = 0
     events = []  # Events marked by the user during the process: (time, total pulled, label)
     run_folder = ""  # Folder where the data of the last process was saved
-    pull_end = None  # Puller positions at the end of the last pull: {"folder", "left", "right"}
+    # Puller positions after the last pull: where it ended ("left", "right"), and the reference
+    # for the slack of loops ("ref_left", "ref_right": the same, or after tensioning the taper).
+    # Also "folder" (of the pull) and "loop_started" (the Loop Wizard was opened since).
+    pull_end = None
     easy_mode = False
     sim_beat_phase = np.zeros(2)  # Simulated detector: phase of the beats between modes
     sim_diameter = 125.0          # Simulated detector: current waist diameter (µm)
@@ -1928,26 +1931,45 @@ class MainWindow(FormUI, WindowUI):
         except Exception as e:
             print(f"Could not read the puller positions at the end of the pull: {e}")
             return
-        self.pull_end = {"folder": folder, "left": float(left), "right": float(right)}
+        self.pull_end = {"folder": folder, "left": float(left), "right": float(right),
+                         "ref_left": float(left), "ref_right": float(right), "loop_started": False}
 
-    def get_pull_end_positions(self) -> tuple[float, float]|None:
+    def store_tension_reference(self):
         """
-        Puller positions (left, right) at the end of the last pull, when the taper was
-        straight: the reference for the slack of loops made with it. If they were not
-        read when the pull ended, they are taken from the log of the pull (its last
-        positions, a few hundredths of mm before the pullers stopped). None if there
-        was no pull since the program started.
+        After tensioning the taper (before making a loop): the slack of loops is
+        measured from here, where the taper is straight.
+        """
+        try:
+            self.pull_end["ref_left"] = float(self.core.motors.left_puller.get_position())
+            self.pull_end["ref_right"] = float(self.core.motors.right_puller.get_position())
+        except Exception as e:
+            print(f"Could not read the puller positions after tensioning: {e}")
+
+    def get_slack_reference(self) -> dict|None:
+        """
+        Puller positions after the last pull: "pull_end" (left, right) where the pull
+        ended, and "reference" (left, right) for the slack of loops made with it: the
+        same, or where the taper was tensioned to, if Tension was used before the Loop
+        Wizard. "tension": how much the pullers moved back (both, mm) to get there.
+
+        If the positions were not read when the pull ended, they are taken from the log
+        of the pull (its last positions, a few hundredths of mm before the pullers
+        stopped). None if there was no pull since the program started.
         """
         folder = self.run_folder
         if not folder:
             return None
-        if self.pull_end is not None and self.pull_end["folder"] == folder:
-            return self.pull_end["left"], self.pull_end["right"]
-        try:
-            with np.load(f"{folder}/pull_full_log.npz") as log:
-                return float(log["log_puller_left_pos"][-1]), float(log["log_puller_right_pos"][-1])
-        except Exception:
-            return None
+        pe = self.pull_end
+        if pe is None or pe["folder"] != folder:
+            try:
+                with np.load(f"{folder}/pull_full_log.npz") as log:
+                    left, right = float(log["log_puller_left_pos"][-1]), float(log["log_puller_right_pos"][-1])
+            except Exception:
+                return None
+            pe = {"left": left, "right": right, "ref_left": left, "ref_right": right}
+        return {"pull_end": (pe["left"], pe["right"]),
+                "reference": (pe["ref_left"], pe["ref_right"]),
+                "tension": (pe["left"] - pe["ref_left"]) + (pe["right"] - pe["ref_right"])}
 
     def autosave_data(self):
         """
@@ -1969,6 +1991,11 @@ class MainWindow(FormUI, WindowUI):
             if box_resp == QMessageBox.StandardButton.Ok:
                 self.core.motors.left_puller.move_relative(-0.1)
                 self.core.motors.right_puller.move_relative(-0.1)
+                # Tensioning the taper after the pull, before making a loop: the slack of
+                # the loop will be measured from the straight taper
+                pe = self.pull_end
+                if pe is not None and pe["folder"] == self.run_folder and not pe["loop_started"]:
+                    QTimer.singleShot(1500, self.store_tension_reference)
             
     def cleave(self):
         if self.core.standby:
@@ -2004,6 +2031,8 @@ class MainWindow(FormUI, WindowUI):
     def loop(self):
         # Open interactive Loop Wizard Dialog
         wizard = LoopWizardDialog(self, core=self.core, main=self)
+        if self.pull_end is not None and self.pull_end["folder"] == self.run_folder:
+            self.pull_end["loop_started"] = True  # Tension no longer moves the slack reference
         wizard.exec()
         
     
