@@ -5,297 +5,253 @@
 # Gleb Wataghin Physics Institute (IFGW), University of Campinas
 # =============================================================================
 """
-This module contains the TaperPullingSim class. This class is useful not only for
-the fabrication of fiber tapers, but also as a design tool alongside, the TaperShape
-class, due to the many functions available that can be used to study and explore
-the shape of fiber tapers.
-It can simulate the taper fabrication process (currently, only flame brushing or
-an unrealistic hot-zone that can change length), outputting the fiber shape during
-each step of the process (hot-zone size or flame position).
-It can also aid in monitoring the fabrication process, showin valuable inferred
-data from the pulling stats (total pulled, etc.)
-All length units in mm.
-Wavelength parameter in µm.
+This module contains the TaperPullingSim class. It simulates the fabrication of a
+fiber taper by flame brushing, before pulling it, and animates the process: the
+flame sweeping along the fiber, and the fiber getting thinner under it.
+
+It is useful as a design tool, alongside the TaperShape class: for a hotzone
+function (hotzone size vs. total pulled distance), it gives the shape of the
+fiber at each moment of the process, as the setup is expected to make it.
+
+The simulation uses the same model as the estimate shown while pulling
+(TaperPullingEstimate): the flame heats the fiber with a gaussian profile, the
+elongation is shared along the fiber in proportion to the heating, and volume is
+conserved. The flame moves as the motors of the setup were seen to do it, in
+both brushing modes (standard: the flame sweeps along a fiber that is pulled
+symmetrically; relative: the flame is fixed, and the pullers move the fiber in
+sinusoidal sweeps). Everything is shown in the frame of the centre of the fiber.
+
+    sim = TaperPullingSim()
+    sim.relative = False
+    z, r_arrs, total_pulled = sim.simulate([[0, 33], [3.5, 3.5]])
+    sim.show_last_sim_animation()                  # Live window
+    sim.show_last_sim_animation("taper.gif")       # Saved (also .mp4, with ffmpeg)
+
+All length units in mm, unless noted.
 """
 # =============================================================================
 
-import os
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import savgol_filter
+from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 
+try:
+    from TaperPulling.TaperPullingEstimate import (TaperEstimator, planned_flame_motion,
+                                                   BRUSHER_REVERSAL_DECEL, RELATIVE_SWEEP_GAIN)
+except ImportError:
+    from TaperPullingEstimate import (TaperEstimator, planned_flame_motion,
+                                      BRUSHER_REVERSAL_DECEL, RELATIVE_SWEEP_GAIN)
 
-# Get relevant paths
-thispath = os.path.dirname(os.path.realpath(__file__)).replace("\\", "/")
-rootpath = thispath
-respath = f"{rootpath}/resources"
 
 class TaperPullingSim:
     """
-    This class contains simulation routines for the flame brushing method.
-    It can also simulate an unrealistic growing/shrinking flame, which gives a result
-    that usually matches the designed shape (but with smoothed edges).
+    Simulates and animates the fabrication of a taper by flame brushing.
     """
-    
+
     # Fabrication parameters
-    vp = 0.125  # Pulling velocity (mm/s)
-    vf = 2.0  # Flame velocity (mm/s)
-    af0 = 4.5  # Flame acceleration (mm/s2)
-       
-    # Physical parameters
-    min_flame_size = 1.0  # Flame real length (mm)
+    vp = 0.125  # Pulling velocity, each puller (mm/s)
+    vf = 2.4  # Flame brushing velocity (mm/s)
+    flame_size = 0.6  # Flame size: width (FWHM) of the heated region (mm)
+    min_span = 1.5  # Sweeps shorter than this are not made: the flame stays at the centre (mm)
+    relative = False  # Brushing mode: False for standard, True for relative
     r0 = 0.0625  # Initial fiber radius (mm)
 
-    # Flame brushing parameters
-    predict_reverse_direction = True  # Flame starts decelerating before reaching hotzone limit
-    turn_off_at_edges = False  # Turn pulling off at edges (compensates for low acceleration)
-    end_brush_at_edge = False  # Wait until brushing reaches next edge to end
-    compensate_flame_size = True  # Subtract flame size from hotzones
-    
     # Simulation parameters
-    time_step = 0.01  # Time step used in simulation (s)
-    move_flame = True  # If false, will consider a growing flame
-    smooth_inside_flame = True  # Smooth out all points inside flame
-    heat_reach = 0.0  # Exponentially decaying hotzone reach beyond flame, 0 to disable. WIP, can dramatically change the results.
-    min_heat_reach = 0.001  # Cut-off reach that is below this value, helps speed up simulation
-    reduce_frames_factor = 1  # Capture each Xth frame
-    max_frames = 1024  # Set an upper frame limit
-    pos_0 = 0.0   # Flame initial position (middle)
-    
-    # Last simulation results
-    z_arr = np.zeros(11)  # Array to keep z positions
-    r_arrs = np.zeros((11, 11))  # Array to keep all profile arrays
-    fpos_arr = np.zeros(11)  # Array to keep flame positions
-    hz_arr = np.zeros(11)  # Array to keep hotzones
-    fsize_arr = np.zeros(11)  # Array to keep flame size when flame grows
-    
+    time_step = 0.02  # Time step (s)
+    grid_step = 0.01  # Step of the grid along the fiber (mm)
+    max_frames = 1024  # Upper limit of stored frames (profiles)
+
+    # Last simulation results (one value, or profile, for each frame)
+    z_arr = np.zeros(11)  # Positions along the fiber, from its centre
+    r_arrs = np.zeros((1, 11))  # Radius profiles
+    x_arr = np.zeros(1)  # Total pulled
+    fpos_arr = np.zeros(1)  # Flame positions, from the fiber centre
+    hz_arr = np.zeros(1)  # Hotzone sizes
+    d_arr = np.zeros(1)  # Waist (thinnest) diameters (µm)
+
     def __init__(self, r0: float=0.0625):
         """
-        This class contains taper fabrication simulation routines.
-        
         Args:
-        r0: Initial fiber radius in mm. Default is 0.0625.
+            r0: Initial fiber radius in mm. Default is 0.0625.
         """
-        
         self.r0 = r0
-        
-    def simulate(self, hotzone_function: list[list[float]]|np.ndarray):
-         # Set hotzone function
+        self._anim = None
+
+    def simulate(self, hotzone_function: list[list[float]]|np.ndarray, x_end: float|None=None):
+        """
+        Simulates the pull of a taper with a hotzone function.
+
+        Args:
+            hotzone_function: 2D list or array: total pulled distances, and the hotzone
+                size at each of them (as given by TaperShape.hz_from_profile()).
+            x_end (float): Pull up to here. Defaults to the end of the hotzone function
+                (beyond it, its last value is kept).
+
+        Returns:
+            z_arr: Positions along the fiber, from its centre.
+            r_arrs: Radius profiles, one for each stored frame (their total pulled
+                distances, flame positions... are kept in x_arr, fpos_arr, hz_arr, d_arr).
+            total_pulled: Total pulled distance at the end.
+        """
         try:
-            hotzone_function = np.array(hotzone_function)
-        except:
-            raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
-        if hotzone_function.shape[0] < 2:
-            raise Exception("Error: hotzone_function must be a 2D list or numpy array.")
-        
-        hz_x = hotzone_function[0]
-        hz_y = hotzone_function[1]
-        
-        # Definitions
-        total_to_pull = hz_x.max()  # Distance to pull, two sides
-        total_pulled = 0.0  # Pulled distance, two sides
-        hz0 = hz_y[0]  # Initial hotzone
-        lw = hz_y[-1]  # Waist length
-        half_pull = total_to_pull/2.0  # Distance to pull, one side
-        fiber_l = 1.5*(total_to_pull + lw)  # Total simulated fiber length
-        dx = self.vp*self.time_step  # Pulling step
-        dx_f = self.vf*self.time_step  # Flame position step
-        dt = self.time_step
-        pts = int(np.round(fiber_l/dx))
-        steps = int(np.round(half_pull/dx))
-        
-        # Simulation preparations
-        if steps/self.reduce_frames_factor > self.max_frames:
-            self.reduce_frames_factor = int(steps/self.max_frames)
-        pos_1 = self.pos_0  # Flame position
-        prev_pos = self.pos_0  # Flame previous position
-        hz1 = hz0  # Hot Zone initial size
-        flame_size = self.min_flame_size  # Flame initial size
-        cur_vf = 0  # Current flame velocity
-        af = self.af0  # Current acceleration
-        self.z_arr = np.linspace(-fiber_l/2.0, fiber_l/2.0, pts)  # Position array
-        self.fpos_arr = np.zeros(steps)  # Array to keep flame positions
-        self.hz_arr = np.zeros(steps)  # Array to keep hotzones
-        self.fsize_arr = np.zeros(steps)  # Array to keep flame size when flame grows
-        delta_x = (self.z_arr[-1] - self.z_arr[0])/(pts - 1)
-        r_arr = self.r0*np.ones(pts)  # Radius array
-        self.r_arrs = np.zeros((int(steps/self.reduce_frames_factor) + 1, pts))  # Array to keep all r arrays
-        self.r_arrs[0] = r_arr
-        compensate_l = self.compensate_flame_size*(flame_size)/2
-        
-        t0 = time.time()
-        t1 = t0
-        i = 1
-        done = False
-        last_sweep = False
-        
-        while not done:
-            turn_off_condition = np.abs(np.abs(cur_vf) - self.vf) > 0.10*self.vf
-            if not self.turn_off_at_edges or (self.turn_off_at_edges and not turn_off_condition) or not self.move_flame:
-                # Store flame position and size, hotzone size, and mean waist radius
-                if i < len(self.fpos_arr):
-                    self.fpos_arr[i] = pos_1
-                    self.hz_arr[i] = hz1
-                    self.fsize_arr[i] = flame_size
-                else:
-                    self.fpos_arr = np.concatenate([self.fpos_arr, [pos_1]])
-                    self.fsize_arr = np.concatenate([self.fsize_arr, [flame_size]])
-                    self.hz_arr = np.concatenate([self.hz_arr, [hz1]])
-                
-                # Get indexes of the flame limits, before and after moving 
-                jfl = np.abs(self.z_arr - (np.min([pos_1, prev_pos]) - flame_size/2.0)).argmin()
-                jfr = np.abs(self.z_arr - (np.max([pos_1, prev_pos]) + flame_size/2.0)).argmin() + 1
-                flame_n = jfr - jfl
-                
-                # Smooth out hot zone
-                if (not self.move_flame) or self.smooth_inside_flame:
-                    r_arr[jfl:jfr] = np.mean(r_arr[jfl:jfr])
+            hz = np.array(hotzone_function, dtype=float)
+        except Exception:
+            raise ValueError("hotzone_function must be a 2D list or numpy array.")
+        if hz.ndim != 2 or hz.shape[0] < 2 or hz.shape[1] < 2:
+            raise ValueError("hotzone_function must be a 2D list or numpy array.")
+        hz_x, hz_y = hz[0], hz[1]
+        if x_end is None:
+            x_end = float(hz_x.max())
 
-                # Decrease radius and create one transition point at each side
-                if self.heat_reach == 0.0 or (not self.move_flame):
-                    decrease_factors = np.ones(flame_n)*np.sqrt(delta_x/(delta_x + 2*dx/flame_n))  # Simple volume conservation
-                    jl = jfl
-                    jr = jfr
-                else:
-                    # Gaussian decaying reach beyond flame
-                    gauss_l = np.exp(-((self.z_arr[:jfl] - self.z_arr[jfl])**2)/(2*(self.heat_reach**2)))
-                    gauss_r = np.exp(-((self.z_arr[jfr + 1:] - self.z_arr[jfr])**2)/(2*(self.heat_reach**2)))
-                    jl = np.abs(gauss_l - self.min_heat_reach).argmin()
-                    jr = -np.abs(np.flip(gauss_r) -  self.min_heat_reach).argmin()
-                    heat_function = np.concatenate([gauss_l[jl:], np.ones(flame_n), gauss_r[:jr + 1]])
-                    effective_n = flame_n + np.sum(gauss_l[jl:]) + np.sum(gauss_r[:jr + 1])  # Effective number of dxs
-                    decrease_factors = np.sqrt(delta_x/(delta_x + heat_function*2*dx/effective_n))  # Decaying volume conservation
+        # The grid has to hold all the fiber that gets tapered: half of the pulled
+        # distance, plus how far the flame reaches, on each side
+        sweep = max(float(hz_y.max()) - self.flame_size, 0.0)
+        reach = max(RELATIVE_SWEEP_GAIN*sweep/2, sweep/2 + self.vf**2/(2*BRUSHER_REVERSAL_DECEL))
+        half = x_end/2 + reach + 3*self.flame_size + 1.0
+        est = TaperEstimator(self.r0, self.flame_size, ds=self.grid_step, margin=half)
+        keep = np.abs(est.s) <= half
+        self.z_arr = est.s[keep]
 
-                r_left = r_arr[0:jl]
-                r_right = r_arr[jr:]
-                r_arr[jl:jr] = r_arr[jl:jr]*decrease_factors
-                r_left = np.roll(r_left, -1)
-                r_left[-1] = (r_arr[jl - 1] + r_arr[jl])/2.0
-                r_right = np.roll(r_right, 1)
-                r_right[0] = (r_arr[jr - 1] + r_arr[jr])/2.0
-
-                r_arr[0:jl] = r_left
-                r_arr[jr:] = r_right
-
-                # Store result (not all frames, reduced by the defined factor)
-                if i % self.reduce_frames_factor == 0:
-                    idx = int(i/self.reduce_frames_factor)
-                    if idx <  len(self.r_arrs):
-                        self.r_arrs[idx] = r_arr
-                    else:
-                        self.r_arrs = np.concatenate([self.r_arrs, [r_arr]])
-                
-                # Change flame/hotzone
-                total_pulled = 2*dx*(i)               
-                hz1 = np.interp(total_pulled, hz_x, hz_y)
-
-                i += 1
-                if i >= steps:
-                    if self.end_brush_at_edge and self.move_flame:
-                        last_sweep = True
-                    else:
-                        done = True
-            
-            if self.move_flame:  
-                # Check if flame reached end of hotzone (reverse direction)
-                hz_l = self.pos_0 - hz1/2 + compensate_l
-                hz_r = self.pos_0 + hz1/2 - compensate_l
-                
-                # Calculate flame velocity
-                cur_vf += af*self.time_step
-                if af >= 0:
-                    if cur_vf > self.vf: cur_vf = self.vf
-                else:
-                    if cur_vf < -self.vf: cur_vf = -self.vf
-                dx_f = cur_vf*self.time_step
-
-                if self.predict_reverse_direction and (not self.turn_off_at_edges):
-                    decel_t = np.abs(cur_vf/af)
-                    decel_x = np.abs(af)*(decel_t**2)/2
-                    decel_steps = np.round(decel_t/dt)
-                    decel_total_pulled = 2*dx*(i + decel_steps)
-                    decel_hz = np.interp(decel_total_pulled, hz_x, hz_y)
-                    decel_hz_l = self.pos_0 - decel_hz/2 + compensate_l
-                    decel_hz_r = self.pos_0 + decel_hz/2 - compensate_l
-                    
-                    if last_sweep:
-                        if (af > 0 and (pos_1 >= hz_r)) or (af < 0 and (pos_1 <= hz_l)):
-                            done = True
-                    else:
-                        if (af > 0 and (pos_1 + decel_x >= decel_hz_r)):
-                            af = -self.af0
-                        elif (af < 0 and (pos_1 - decel_x <= decel_hz_l)):
-                            af = self.af0
-                else:
-                    if (af > 0 and (pos_1 >= hz_r)) or (af < 0 and (pos_1 <= hz_l)):
-                        af = -af
-                        if last_sweep:
-                            done = True
-
-                # Move flame
-                prev_pos = pos_1
-                pos_1 += dx_f
-            
-            else:
-                # If the flame grows, the hotzone is the flamesize, and position remains the same
-                flame_size = hz1
-                dx_f = 0
-            if flame_size < self.min_flame_size:
-                flame_size = self.min_flame_size
-
-            # Print progress each second
-            t2 = time.time() - t1
-            if t2 >= 1.0:
-                ratio = float(i)/float(steps)
+        steps = int(x_end/(2*self.vp*self.time_step)) + 1
+        every = max(1, int(np.ceil(steps/self.max_frames)))
+        r_arrs, x_arr, fpos_arr, d_arr = [], [], [], []
+        motion = planned_flame_motion([hz_x, hz_y], x_end, self.flame_size, self.min_span, self.vf,
+                                      self.vp, self.relative, dt=self.time_step)
+        t0 = t1 = time.time()
+        i, x, u, stored = 0, 0.0, 0.0, False
+        for i, (x, u) in enumerate(motion):
+            est.add(x, u)
+            stored = i % every == 0
+            if stored:
+                r_arrs.append(est.radius()[keep])
+                x_arr.append(x)
+                fpos_arr.append(u)
+                d_arr.append(est.diameter)
+            if time.time() - t1 >= 1.0:
                 t1 = time.time()
-                t_tot = t1 - t0
-                t_left = t_tot/ratio - t_tot
-                print(f"Simulation progress: {(100*i/steps):.1f}%. {t_left:.0f} s remaining      ", end="\r")
+                ratio = max(i, 1)/steps
+                print(f"Simulation progress: {100*ratio:.1f}%. {(t1 - t0)*(1/ratio - 1):.0f} s remaining      ", end="\r")
+        if not stored:  # The end of the pull is always kept
+            r_arrs.append(est.radius()[keep])
+            x_arr.append(x)
+            fpos_arr.append(u)
+            d_arr.append(est.diameter)
         print("Simulation done                                           ")
-        self.r_arrs[-1] = r_arr  # Safety
-        
-        return self.z_arr, self.r_arrs, total_pulled
-    
-    def show_last_sim_animation(self, smooth_window: float=0.02):
-        smooth_w = int(smooth_window*len(self.r_arrs[0]))
-        
-        plt.ion()
-        fig1, ax1 = plt.subplots(1, 1)
-        line1, = ax1.plot(self.z_arr, self.r_arrs[0]*1000.0, color='tab:blue')
-        line2, = ax1.plot(self.z_arr, -self.r_arrs[0]*1000.0, color='tab:blue')
-        line3, = ax1.plot([self.fpos_arr[0] - self.fsize_arr[0]/2, self.fpos_arr[0] - self.fsize_arr[0]/2], 
-                          [-self.r0*1000, self.r0*1000], color="tab:red")
-        line4, = ax1.plot([self.fpos_arr[0] + self.fsize_arr[0]/2, self.fpos_arr[0] + self.fsize_arr[0]/2],
-                          [-self.r0*1000, self.r0*1000], color="tab:red")
-        line5, = ax1.plot([self.pos_0 - self.hz_arr[0]/2, self.pos_0 - self.hz_arr[0]/2], 
-                          [-self.r0*1000, self.r0*1000], '--', color="tab:green")
-        line6, = ax1.plot([self.pos_0 + self.hz_arr[0]/2, self.pos_0 + self.hz_arr[0]/2], 
-                          [-self.r0*1000, self.r0*1000], '--', color="tab:green")
 
-        t0 = time.time()
-        for i in range(len(self.r_arrs)):
-            r_data = savgol_filter(self.r_arrs[i], smooth_w, 1)
-            line1.set_ydata(r_data*1000.0)
-            line2.set_ydata(-r_data*1000.0)
-            
-            j = int(i*self.reduce_frames_factor)
-            if j >= len(self.fpos_arr): 
-                j = len(self.fpos_arr) - 1
-            line3.set_xdata([self.fpos_arr[j] - self.fsize_arr[j]/2, self.fpos_arr[j] - self.fsize_arr[j]/2])
-            line4.set_xdata([self.fpos_arr[j] + self.fsize_arr[j]/2, self.fpos_arr[j] + self.fsize_arr[j]/2])
-            line5.set_xdata([self.pos_0 - self.hz_arr[j]/2, self.pos_0 - self.hz_arr[j]/2])
-            line6.set_xdata([self.pos_0 + self.hz_arr[j]/2, self.pos_0 + self.hz_arr[j]/2])
-            fig1.canvas.draw()
-            fig1.canvas.flush_events()
-            if not plt.fignum_exists(fig1.number):
-                break
-        print(f"Animation FPS: {(len(self.r_arrs)/(time.time() - t0)):.2f}")
-        plt.ioff()
-        
-        r_data = savgol_filter(self.r_arrs[-1], smooth_w, 1)
-        line1.set_ydata(r_data*1000.0)
-        line2.set_ydata(-r_data*1000.0)
-        fig1.canvas.draw()
-        fig1.canvas.flush_events()
-        plt.show()
+        self.r_arrs = np.array(r_arrs)
+        self.x_arr = np.array(x_arr)
+        self.fpos_arr = np.array(fpos_arr)
+        self.d_arr = np.array(d_arr)
+        self.hz_arr = np.interp(self.x_arr, hz_x, hz_y)
+
+        return self.z_arr, self.r_arrs, float(self.x_arr[-1])
+
+    def _flame_image(self) -> np.ndarray:
+        # Glow of the flame: gaussian along the fiber (FWHM = flame size, over a width of
+        # 3 flame sizes), brighter near the fiber. Pale yellow where hottest, orange outside.
+        xi = np.linspace(-1.5, 1.5, 121)[None, :]
+        yi = np.linspace(-1.0, 1.0, 81)[:, None]
+        heat = np.exp(-0.5*(xi/0.4247)**2)*(0.4 + 0.6*np.exp(-0.5*(yi/0.45)**2))
+        img = np.empty(heat.shape + (4,))
+        cold, hot = np.array([1.0, 0.35, 0.05]), np.array([1.0, 0.93, 0.65])
+        img[..., :3] = cold + (hot - cold)*heat[..., None]**1.5
+        img[..., 3] = 0.9*heat
+        return img
+
+    def show_last_sim_animation(self, save_path: str|None=None, fps: int=30, frame_step: int=1,
+                                zoom_margin: float=2.5, show: bool|None=None, dpi: int=110):
+        """
+        Animates the last simulation: the flame sweeping, and the fiber getting thinner.
+        Above, the whole taper; below, the region around the hotzone, with a radius scale
+        that follows the fiber as it gets thinner (so the process can be seen until the end).
+
+        Args:
+            save_path (str): If given, the animation is saved to this file (.gif, or
+                .mp4 if ffmpeg is installed).
+            fps (int): Frames per second.
+            frame_step (int): Shows only each frame_step-th stored frame (faster, smaller files).
+            zoom_margin (float): The view below goes this far beyond the largest hotzone, on each side.
+            show (bool): Open a window with the animation. Defaults to True, or False when saving.
+            dpi (int): Resolution of the saved file.
+
+        Returns:
+            The matplotlib FuncAnimation.
+        """
+        if len(self.r_arrs) < 2:
+            raise RuntimeError("Nothing to show: run simulate() first.")
+        if show is None:
+            show = save_path is None
+
+        z, um = self.z_arr, 1000.0
+        r0_um = self.r0*um
+        frames = list(range(0, len(self.r_arrs), max(1, int(frame_step))))
+        if frames[-1] != len(self.r_arrs) - 1:
+            frames.append(len(self.r_arrs) - 1)
+        zoom_half = min(self.hz_arr.max()/2 + zoom_margin, z[-1])
+        in_zoom = np.abs(z) <= zoom_half
+        flame_half = 1.5*self.flame_size
+
+        bg, panel, glass, edge, text, grid, green = ("#0b0f14", "#111821", "#7fb8e6", "#dff1ff", "#c9d4df",
+                                                     "#243242", "#5fd38d")
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6.5), facecolor=bg,
+                                       gridspec_kw={"height_ratios": [1, 1.5], "hspace": 0.32})
+        flame_img = self._flame_image()
+        fibers, flames, hz_lines = [], [], []
+        for ax in (ax1, ax2):
+            ax.set_facecolor(panel)
+            ax.tick_params(colors=text, labelsize=9)
+            for spine in ax.spines.values():
+                spine.set_color(grid)
+            ax.grid(True, color=grid, linewidth=0.6)
+            ax.set_axisbelow(True)
+            ax.set_ylabel("Radius (µm)", color=text)
+            fibers.append(ax.fill(z, z*0, facecolor=glass, edgecolor=edge, linewidth=0.8, zorder=2)[0])
+            flames.append(ax.imshow(flame_img, extent=(-1, 1, -1, 1), aspect="auto", origin="lower",
+                                    interpolation="bilinear", zorder=3))
+            hz_lines.append([ax.axvline(0.0, linestyle="--", color=green, linewidth=1.0, alpha=0.7, zorder=4)
+                             for _ in range(2)])
+        ax2.set_xlabel("Position along the fiber (mm)", color=text)
+        ax1.set_title("Whole taper", color=text, fontsize=10, loc="left")
+        ax2.set_title("Around the hotzone (radius scale follows the fiber)", color=text, fontsize=10, loc="left")
+        ax1.axvspan(-zoom_half, zoom_half, color="white", alpha=0.04, zorder=1)
+        ax1.set_xlim(z[0], z[-1])
+        ax1.set_ylim(-1.7*r0_um, 1.7*r0_um)
+        ax2.set_xlim(-zoom_half, zoom_half)
+        mode = "relative" if self.relative else "standard"
+        readout = fig.text(0.5, 0.955, "", color=edge, ha="center", va="center", family="monospace", fontsize=12)
+        fig.text(0.985, 0.012, f"{mode} brushing  ·  flame {self.flame_size:g} mm", color=text, alpha=0.6,
+                 ha="right", va="bottom", fontsize=8)
+        fig.subplots_adjust(left=0.09, right=0.975, top=0.89, bottom=0.09)
+
+        def draw(i):
+            r = self.r_arrs[i]*um
+            outline = np.column_stack([np.concatenate([z, z[::-1]]), np.concatenate([r, -r[::-1]])])
+            y2 = 1.35*r[in_zoom].max()
+            ax2.set_ylim(-y2, y2)
+            u, hz_now = self.fpos_arr[i], self.hz_arr[i]
+            for ax, fiber, flame, lines in zip((ax1, ax2), fibers, flames, hz_lines):
+                fiber.set_xy(outline)
+                y = ax.get_ylim()[1]
+                flame.set_extent((u - flame_half, u + flame_half, -y, y))
+                lines[0].set_xdata([-hz_now/2, -hz_now/2])
+                lines[1].set_xdata([hz_now/2, hz_now/2])
+            ax1.set_xlim(z[0], z[-1])  # (imshow's set_extent can change the limits)
+            ax2.set_xlim(-zoom_half, zoom_half)
+            d = self.d_arr[i]
+            d_txt = f"{d:6.2f} µm" if d >= 10 else f"{d:6.3f} µm"
+            readout.set_text(f"pulled {self.x_arr[i]:6.2f} mm     waist ⌀ {d_txt}     hotzone {hz_now:5.2f} mm")
+            return ()
+
+        draw(frames[0])
+        self._anim = FuncAnimation(fig, draw, frames=frames, interval=1000.0/fps, blit=False, repeat=False)
+        if save_path is not None:
+            writer = PillowWriter(fps=fps) if save_path.lower().endswith(".gif") else FFMpegWriter(fps=fps, bitrate=4000)
+            t0 = time.time()
+            self._anim.save(save_path, writer=writer, dpi=dpi, savefig_kwargs={"facecolor": bg})
+            print(f"Animation saved to {save_path} ({len(frames)} frames, {time.time() - t0:.0f} s)")
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+        return self._anim

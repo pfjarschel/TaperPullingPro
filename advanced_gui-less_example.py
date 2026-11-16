@@ -24,7 +24,6 @@ from TaperPulling.TaperShape import TaperShape
 from TaperPulling.TaperPullingSim import TaperPullingSim
 from TaperPulling.TaperPullingCore import TaperPullingCore
 from TaperPulling.TaperPullingData import TaperPullingData
-from scipy.signal import savgol_filter
 
 
 # Initialize design modules
@@ -38,7 +37,7 @@ r_core = 4.1e-3  # Radius core, mm
 n_core_ratio = 1.0036  # Core to cladding refractive index ratio
 n_medium = 1.0  # Usually air
 min_l = 2  # Minimum hotzone size, mm
-flame_size = 1.0  # Estimated flame size, mm
+flame_size = 0.6  # Estimated flame size, mm
 rw = 0.4e-3  # Desired final radius, mm
 lw = 3  # Desired waist length, mm
 f = 0.9  # Adiabaticity factor. 0 to 1. Above 1 it is NOT adiabatic.
@@ -54,19 +53,15 @@ hz_function = np.array([x_arr, l_arr])
 
 # Set up fabrication simulation with real values
 sim_man.vp = 0.125  # Pulling speed, mm/s
-sim_man.vf = 2.0  # Flame brushing speed, mm/s
-sim_man.af0 = 45  # Flame acceleration, mm/s2
-sim_man.min_flame_size = flame_size
-sim_man.compensate_flame_size = True
-sim_man.predict_reverse_direction = True
-sim_man.max_frames = 10000
-sim_man.reduce_frames_factor = 1
+sim_man.vf = 2.4  # Flame brushing speed, mm/s
+sim_man.flame_size = flame_size
+sim_man.relative = False  # Brushing mode (standard)
 
 # Simulate fabrication in advance
 sim_z_arr, sim_r_arrs, sim_total_pulled = sim_man.simulate(hz_function)
-sim_total_pulled_arr = np.linspace(0.0, sim_total_pulled, len(sim_r_arrs))
-# Smooth the resulting profile a little
-final_shape = savgol_filter(sim_r_arrs[-1], int(len(sim_r_arrs[-1])/50), 1)
+sim_total_pulled_arr = sim_man.x_arr  # Total pulled at each simulated profile
+final_shape = sim_r_arrs[-1]
+# sim_man.show_last_sim_animation()  # Uncomment to watch the simulated process
 
 # Initialize core
 core = TaperPullingCore()
@@ -183,8 +178,8 @@ while not core.standby:
     
     frame_idx = np.abs(sim_total_pulled_arr - core.total_pulled).argmin()
     # instant_hz = np.interp(core.total_pulled, hz_function[0], hz_function[1])
-    line_sim_top.set_ydata(savgol_filter(sim_r_arrs[frame_idx], int(len(sim_r_arrs[frame_idx])/50), 1)*1000.0)
-    line_sim_bot.set_ydata(-savgol_filter(sim_r_arrs[frame_idx], int(len(sim_r_arrs[frame_idx])/50), 1)*1000.0)
+    line_sim_top.set_ydata(sim_r_arrs[frame_idx]*1000.0)
+    line_sim_bot.set_ydata(-sim_r_arrs[frame_idx]*1000.0)
     # line_sim_fl.set_xdata([b_pos[-1] - core.brusher_x0 - flame_size/2, b_pos[-1] - core.brusher_x0 - flame_size/2])
     # line_sim_fr.set_xdata([b_pos[-1] - core.brusher_x0 + flame_size/2, b_pos[-1] - core.brusher_x0 + flame_size/2])
     # line_sim_hzl.set_ydata([b_pos[-1] - core.brusher_x0 - instant_hz/2, b_pos[-1] - core.brusher_x0 - instant_hz/2])
