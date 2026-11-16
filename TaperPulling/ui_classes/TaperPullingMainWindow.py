@@ -24,6 +24,7 @@ import cv2
 
 # Import taper pulling classes
 from TaperPulling.TaperShape import TaperShape
+from TaperPulling.TaperPullingEstimate import TaperEstimator
 from TaperPulling.TaperPullingSim import TaperPullingSim
 from TaperPulling.TaperPullingCore import TaperPullingCore
 from TaperPulling.TaperPullingData import TaperPullingData
@@ -139,6 +140,9 @@ class MainWindow(FormUI, WindowUI):
         
         # Initialize taper classes
         self.shape = TaperShape()
+        self.estimator = TaperEstimator()  # Taper shape estimated from the flame motion while pulling
+        self.est_log_i = 0                 # Rows of the process log already used by the estimate
+        self.est_graph_t = 0.0
         self.simultaion = TaperPullingSim()
         self.core = TaperPullingCore()
         self.data = TaperPullingData()
@@ -423,6 +427,9 @@ class MainWindow(FormUI, WindowUI):
         # Easy mode: simplified view, that can replace the complete one
         self.modeBut = QPushButton("Easy mode")
         self.modeBut.setToolTip("Switches between the complete view (Advanced) and a simplified one (Easy)")
+        self.fSizeSpin.setToolTip("Length of fiber heated by the flame (mm).\n"
+                                  "Brushing: the flame sweeps the hotzone minus this length.\n"
+                                  "Diameter estimate: width (FWHM) of the heating profile.")
         self.modeBut.clicked.connect(lambda: self.set_easy_mode(not self.easy_mode))
         self.statusBar.addPermanentWidget(self.modeBut)
         self.actionEasy_mode = QAction("Easy mode", self)
@@ -1290,6 +1297,34 @@ class MainWindow(FormUI, WindowUI):
         
         np.savez_compressed(filename, **arrays)
         
+    def update_estimate(self, final: bool=False):
+        """
+        Feeds the new rows of the process log (while pulling) to the taper estimate,
+        and shows the estimated waist diameter and profile (TaperPullingEstimate).
+        """
+        log = self.core.process_log
+        n = len(log)
+        if n < self.est_log_i:
+            self.est_log_i = 0
+        if n == self.est_log_i and not final:
+            return
+        cols = self.core.process_log_columns
+        it, ix, ist, iu = (cols.index(c) for c in ("time", "total_pulled", "stage", "flame_rel_pos"))
+        for row in log[self.est_log_i:n]:
+            if row[ist] == 3:
+                self.estimator.add_logged(row[it], row[ix], row[iu])
+        self.est_log_i = n
+        if self.estimator.last_x is None:
+            return
+        
+        d = self.estimator.diameter
+        self.waistDiamIndSpin.setValue(d)
+        self.sim_diameter = d
+        if final or time.time() - self.est_graph_t >= 1.0:
+            self.est_graph_t = time.time()
+            self.realish_profile = np.array(self.estimator.profile())
+            self.update_graph(self.realish_profile, self.graph_profmini_line_realish, self.graph_profmini_ax, self.graph_profmini)
+        
     def mark_event(self):
         # Time and position are taken at the click, not when the label is confirmed
         t = time.time()
@@ -1392,6 +1427,9 @@ class MainWindow(FormUI, WindowUI):
         self.update_graph([self.rhz_x_array, self.rhz_array], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
         self.hz_sweep_n = 0
         self._pull_data_started = False
+        self.estimator.reset(r0=self.d0Spin.value()/2000.0, flame_fwhm=self.fSizeSpin.value())
+        self.est_log_i = 0
+        self.est_graph_t = 0.0
 
     # Timer functions
     def mainLoop(self):
@@ -1579,18 +1617,13 @@ class MainWindow(FormUI, WindowUI):
                         self.rhz_x_array.append(tp)
                         rhz_data = np.array([self.rhz_x_array, self.rhz_array])
                         self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
-                        
-                        # Update profile graph with profile from real hz
-                        self.realish_profile = self.shape.profile_from_hz(np.array(self.rhz_x_array), np.array(self.rhz_array))                        
-                        self.update_graph(self.realish_profile, self.graph_profmini_line_realish, self.graph_profmini_ax, self.graph_profmini)
-                        
-                        curr_d = 2000*self.realish_profile[1][-1]
-                        self.waistDiamIndSpin.setValue(curr_d)
-                        self.sim_diameter = curr_d
                 else:
                     # Wait for at least 2 edges to calculate width
                     pass
                 self.hz_sweep_n += 1
+            
+            # Estimated taper shape (waist diameter and profile), from the flame motion
+            self.update_estimate()
                 
             # Update est. values
             # Designed hz         
@@ -1952,8 +1985,8 @@ class MainWindow(FormUI, WindowUI):
             self.rhz_x_array.append(final_tp)
             rhz_data = np.array([self.rhz_x_array, self.rhz_array])
             self.update_graph(rhz_data, self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
-            self.realish_profile = self.shape.profile_from_hz(np.array(self.rhz_x_array), np.array(self.rhz_array))
-            self.update_graph(self.realish_profile, self.graph_profmini_line_realish, self.graph_profmini_ax, self.graph_profmini)
+        if was_running:
+            self.update_estimate(final=True)
         
         # Save data just to be safe
         if save_data and was_running:

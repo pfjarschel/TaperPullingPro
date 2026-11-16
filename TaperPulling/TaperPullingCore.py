@@ -147,7 +147,7 @@ class TaperPullingCore:
     process_log = []
     process_log_columns = ["time", "stage", "total_pulled", "brusher_pos", "flame_io_pos",
                            "puller_left_pos", "puller_right_pos", "hotzone_target",
-                           "pull_vel_left", "pull_vel_right"]
+                           "pull_vel_left", "pull_vel_right", "flame_rel_pos"]
     process_log_stages = {0: "going_to_start", 1: "flame_approaching", 2: "flame_holding",
                           3: "pulling", 4: "stopping"}
     
@@ -389,7 +389,21 @@ class TaperPullingCore:
         self.process_log.append((self.time_now, stage_i, self.total_pulled,
                                  self.brusher_pos, self.flame_io_pos,
                                  self.puller_left_pos, self.puller_right_pos, hz,
-                                 self.motors.left_puller.pull_vel, self.motors.right_puller.pull_vel))
+                                 self.motors.left_puller.pull_vel, self.motors.right_puller.pull_vel,
+                                 self.flame_rel_pos()))
+    
+    def flame_rel_pos(self) -> float:
+        """
+        Position of the flame relative to the centre of the fiber being pulled (mm),
+        as measured by the motors. In the relative mode, the pullers move the fiber
+        under a static flame, around the positions they had when pulling started.
+        """
+        if self.brusher_pos is None or self.puller_left_pos is None or self.puller_right_pos is None:
+            return 0.0
+        if self.rel_pull:
+            centre = (getattr(self, 'r_golden_offset', 0.0) - getattr(self, 'l_golden_offset', 0.0))/2.0
+            return (self.puller_right_pos - self.puller_left_pos)/2.0 - centre
+        return self.brusher_pos - self.brusher_x0
         
     def get_process_log(self) -> np.ndarray:
         """
