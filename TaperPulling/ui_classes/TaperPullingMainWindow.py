@@ -24,7 +24,7 @@ import cv2
 
 # Import taper pulling classes
 from TaperPulling.TaperShape import TaperShape
-from TaperPulling.TaperPullingEstimate import TaperEstimator
+from TaperPulling.TaperPullingEstimate import TaperEstimator, predict_pull, pull_scale
 from TaperPulling.TaperPullingSim import TaperPullingSim
 from TaperPulling.TaperPullingCore import TaperPullingCore
 from TaperPulling.TaperPullingData import TaperPullingData
@@ -143,6 +143,7 @@ class MainWindow(FormUI, WindowUI):
         self.estimator = TaperEstimator()  # Taper shape estimated from the flame motion while pulling
         self.est_log_i = 0                 # Rows of the process log already used by the estimate
         self.est_graph_t = 0.0
+        self.plan_cache = {}               # Predictions of the waist diameter, for the plan
         self.simultaion = TaperPullingSim()
         self.core = TaperPullingCore()
         self.data = TaperPullingData()
@@ -481,6 +482,10 @@ class MainWindow(FormUI, WindowUI):
         self.enhanceHZCheck.clicked.connect(self.enhanced_edge_warn)
         self.adaptivelCheck.clicked.connect(self.set_adaptive_vel)
         self.relPullCheck.clicked.connect(self.set_rel_pull)
+        self.relPullCheck.toggled.connect(self.replan)
+        # The planned pull depends on how the flame will move
+        for spin in (self.fSizeSpin, self.brusherMinSpanSpin, self.brusherVelSpin, self.pullerPullVelSpin, self.d0Spin):
+            spin.valueChanged.connect(self.replan)
         
         # Motor LEDs
         self.brInitLed_ef = self.make_led_clickable(self.brInitLed, self.core.motors.brusher)
@@ -1427,7 +1432,8 @@ class MainWindow(FormUI, WindowUI):
         self.update_graph([self.rhz_x_array, self.rhz_array], self.graph_hz_real_line, self.graph_hz_ax, self.graph_hz)
         self.hz_sweep_n = 0
         self._pull_data_started = False
-        self.estimator.reset(r0=self.d0Spin.value()/2000.0, flame_fwhm=self.fSizeSpin.value())
+        self.estimator.reset(r0=self.d0Spin.value()/2000.0, flame_fwhm=self.fSizeSpin.value(),
+                             pull_scale=pull_scale(self.relPullCheck.isChecked()))
         self.est_log_i = 0
         self.est_graph_t = 0.0
 
@@ -2109,23 +2115,79 @@ class MainWindow(FormUI, WindowUI):
         
     
     # Taper params functions
+    def predict_waist(self, hz_function, x_end: float|None=None, d_target: float|None=None):
+        """
+        Waist diameter (µm) vs. total pulled (mm) predicted for a hotzone function, with
+        the current flame and brushing settings (see TaperPullingEstimate.predict_pull).
+        """
+        hz_function = np.asarray(hz_function, dtype=float)
+        settings = (self.fSizeSpin.value(), self.brusherMinSpanSpin.value(), self.brusherVelSpin.value(),
+                    self.pullerPullVelSpin.value(), self.relPullCheck.isChecked(), self.d0Spin.value())
+        key = (hz_function.tobytes(), x_end, d_target, settings)
+        if key not in self.plan_cache:
+            if len(self.plan_cache) > 50:
+                self.plan_cache.clear()
+            flame, min_span, v_brush, v_pull, rel, d0 = settings
+            self.plan_cache[key] = predict_pull(hz_function, flame, min_span, v_brush, v_pull, rel,
+                                                r0=d0/2000.0, x_end=x_end, d_target=d_target)
+        return self.plan_cache[key]
+    
+    def replan(self):
+        """
+        Brushing settings changed: the predicted waist (or the distance to pull) changes.
+        """
+        if self.profile_mode == "Standard":
+            self.recalc_params()
+        else:
+            self.show_predicted_waist()
+            
+    def show_predicted_waist(self):
+        """
+        For a calculated or loaded hotzone function: the waist diameter it should give
+        with the current brushing settings.
+        """
+        try:
+            x, d = self.predict_waist(self.hz_function)
+            designed = 2e3*self.shape.profile_from_hz(self.hz_function[0], self.hz_function[1])[1][-1]
+            self.statusBar.showMessage(f"Predicted waist diameter with the current brushing: {d[-1]:.2f} µm "
+                                       f"(the hotzone function was designed for {designed:.2f} µm)")
+        except Exception as e:
+            print(f"Waist prediction failed: {e}")
+        
     def recalc_params(self):
         alpha = self.alphaSpin.value()
         x0 = self.x0Spin.value()
         dw = 1e-3*self.dwSpin.value()
         d0 = 1e-3*self.d0Spin.value()
         hz0 = self.l0Spin.value()
-
+        
+        # Predicted with the flame motion of the brushing mode in use (the classic model, a 
+        # uniformly heated hotzone, is far off in the relative mode). The hotzone grows 
+        # linearly with the pulled distance (alpha), and the flame stays still when the
+        # sweep would be too short.
+        hz_line = np.array([[0.0, 1000.0], [hz0, hz0 + alpha*1000.0]])
         if self.distPriorRadio.isChecked():
-            rw = self.shape.calc_rw_uniform_hz(hz0, alpha, x0, d0/2.0)
-            self.dwSpin.setValue(1e3*2*rw)
-            dw = 2*rw
+            x, d = self.predict_waist(hz_line, x_end=x0)
+            dw = 1e-3*d[-1]
+            self.dwSpin.setValue(1e3*dw)
         elif self.diamPriorRadio.isChecked():
-            x0 = self.shape.calc_pull_uniform_hz(hz0, alpha, dw/2.0, d0/2.0)
+            x, d = self.predict_waist(hz_line, x_end=1000.0, d_target=1e3*dw)
+            if len(d) > 1 and d[-1] <= 1e3*dw:
+                x0 = float(np.interp(np.log(1e3*dw), np.log(d[-2:][::-1]), x[-2:][::-1]))
+            else:
+                x0 = float(x[-1])
             self.x0Spin.setValue(x0)
-            
-        z0 = (1 - alpha)*x0/2
-        lw = hz0 + alpha*x0
+        
+        # Graphs and lengths: classic model with an effective hotzone, k times the commanded
+        # one, so that it gives the predicted waist at the end
+        hz_x = np.linspace(0.0, max(x0, 1e-3), self.shape.n_points)
+        hz_l = np.maximum(hz0 + alpha*hz_x, 1e-3)
+        k = 1.0
+        if 0 < dw < d0:
+            k = 0.5*np.sum(np.diff(hz_x)*(1/hz_l[1:] + 1/hz_l[:-1])/2)/np.log(d0/dw)
+        
+        z0 = (1 - k*alpha)*x0/2
+        lw = k*(hz0 + alpha*x0)
 
         self.setTransLengthSpin.setValue(z0)
         self.setWaistLengthSpin.setValue(lw)
@@ -2137,7 +2199,7 @@ class MainWindow(FormUI, WindowUI):
         else:
             hz_data = np.array([np.linspace(0.0, x0, self.shape.n_points), np.ones(self.shape.n_points)*hz0])
         
-        profile_data = self.shape.profile_from_hz(hz_data[0], hz_data[1])
+        profile_data = self.shape.profile_from_hz(hz_data[0], k*hz_data[1])
         self.profile_angles = self.shape.profile_angles(profile_data[0], profile_data[1])
         ideal_prof = self.shape.ideal_adiabatic_profile(dw/2.0, 1.0)
         self.adiab_angles = self.shape.profile_angles(ideal_prof[0], ideal_prof[1])
@@ -2238,6 +2300,7 @@ class MainWindow(FormUI, WindowUI):
                         self.timeleftLabel.setText(f"Time left: {self.core.get_time_left(self.total_to_pull, 0.0):.2f} s")
                         
                         self.profile_mode = "Loaded"
+                        self.show_predicted_waist()
                         self.statusBar.showMessage(f"Hotzone file loaded")
                 except:
                     pass
@@ -2292,7 +2355,7 @@ class MainWindow(FormUI, WindowUI):
                 self.timeleftLabel.setText(f"Time left: {self.core.get_time_left(self.total_to_pull, 0.0):.2f} s")
                 
                 self.profile_mode = "Optimized"
-                self.statusBar.showMessage(f"Profile calculated successfully!")
+                self.show_predicted_waist()
             except Exception as e:
                 print(e)
                 
