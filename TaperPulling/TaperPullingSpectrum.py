@@ -20,6 +20,12 @@ each sample:
   sweep started when it changes. The wavelengths are then calculated from the
   time since the start, at the nominal sweep speed.
 
+With a trigger at every wavelength step, the sweep is complete when the last
+one is recorded. If the laser then keeps saying it is sweeping, it is told to
+stop and the spectrum is kept (with a warning). When a sweep fails, whatever was
+recorded is kept (get_failed()), with the commands sent to the laser, to find
+out what happened.
+
 It does not block for long: call start(), then update() periodically (at least
 10 times per second) until it returns False.
 All wavelengths in nm, power in mW, times in s.
@@ -54,7 +60,9 @@ class TaperPullingSpectrum:
     wl_tolerance = 2e-4 # nm. The wavelength changed if it differs more than this
     poll_interval = 0.1       # s. Time between wavelength readings, until the sweep starts
     poll_interval_sweep = 2.0 # s. Time between wavelength readings, after it started
-    state_interval = 0.5      # s. Time between "is it still sweeping?" questions, at the end
+    state_interval = 1.0      # s. Time between "is it still sweeping?" questions, at the end
+    end_grace = 10.0          # s. With a trigger at every step: if the laser still says it is sweeping this
+                              # long after the last trigger (normally 0.6 to 4.3 s), it is told to stop
     start_timeout = 20.0      # s. Give up if the sweep was not seen to start in this time
     trigger_interval = 0.25   # s. Time between looks at the recorded trigger signal
 
@@ -63,9 +71,12 @@ class TaperPullingSpectrum:
     running = False
     progress = 0.0      # 0 to 1
     error = ""
+    warning = ""        # Something unusual happened, but the spectrum is fine
     result = None       # Dictionary with the last spectrum, see get_result()
+    failed = None       # Same, with only the raw data, for the last sweep that failed. See get_failed()
     metadata = {}
     t_state = 0.0
+    t_start = 0.0       # Time (epoch) start() was called
     t_command = 0.0     # Time (epoch) the sweep command was sent
     t_end = 0.0
     start_delay = None  # Time between the sweep command and the detected sweep start
@@ -107,8 +118,11 @@ class TaperPullingSpectrum:
 
         self.metadata = dict(metadata) if metadata is not None else {}
         self.error = ""
+        self.warning = ""
         self.progress = 0.0
         self.result = None
+        self.failed = None
+        self.t_start = time.time()
         self.start_delay = None
         self.polls = []
         self.use_triggers = self.data.daq.aux_channel != ""
@@ -219,14 +233,53 @@ class TaperPullingSpectrum:
                         self.t_end = time.time()
                         self.state = "post"
                         self.t_state = self.t_end
-                    elif elapsed > 1.5*duration + 20.0:
+                        return
+                    # With a trigger at every step, all of them recorded means the data is complete
+                    t_last = self.last_trigger_time()
+                    if t_last is not None and time.time() - self.t_command - t_last > self.end_grace:
+                        self.warning = (f"The laser still said it was sweeping {time.time() - self.t_command - t_last:.0f} s "
+                                        f"after its last trigger. It was told to stop (the spectrum is complete).")
+                        print(f"Sweep: {self.warning}")
+                        self.laser.print_log(since=self.t_start)
                         self.laser.stop_sweep()
-                        self.fail("The laser did not finish the sweep in the expected time.")
+                        self.t_end = time.time()
+                        self.state = "post"
+                        self.t_state = self.t_end
+                    elif elapsed > 1.5*duration + 20.0:
+                        n = len(self.recorded_triggers()[2]) if self.use_triggers else None
+                        self.ask_laser_state()
+                        self.laser.stop_sweep()
+                        self.fail("The laser did not finish the sweep in the expected time" +
+                                  (f" ({n} of {self.laser.sweep_trigger_count()} triggers recorded)."
+                                   if n is not None and self.laser.sweep_trigger_count() > 0 else "."))
 
         elif self.state == "post":
             if now - self.t_state >= self.post_time:
                 self.data.stop_recording("sweep")
                 self.finish()
+
+    def last_trigger_time(self) -> float|None:
+        """
+        With a trigger at every step: time of the last trigger of the sweep (s,
+        relative to the sweep command), if all of them were recorded. None if not
+        (or if the triggers are not recorded).
+        """
+        n_expected = self.laser.sweep_trigger_count()
+        if not self.use_triggers or n_expected == 0:
+            return None
+        t_trig = self.recorded_triggers()[2]
+        return float(t_trig[-1]) if len(t_trig) >= n_expected else None
+
+    def ask_laser_state(self):
+        """
+        Asks the laser what it is doing, after something went wrong. The answers
+        go to the laser log (printed and saved with the failed sweep).
+        """
+        for ask in (self.laser.get_wavelength, self.laser.get_output, self.laser.get_error):
+            try:
+                ask()
+            except Exception as e:
+                print(f"Error asking the laser its state: {e}")
 
     def poll_wavelength(self) -> tuple[float, float]:
         """
@@ -278,7 +331,7 @@ class TaperPullingSpectrum:
         polls = np.array(self.polls, dtype=float).reshape(-1, 2)
 
         info = {
-            "format_version": 3,
+            "format_version": 4,
             "saved_at": datetime.now().isoformat(timespec="seconds"),
             "units": {"wavelength": "nm", "signal": "V", "power": "mW", "time": "s"},
             "start_wl": float(self.laser.sweep_start),
@@ -297,6 +350,8 @@ class TaperPullingSpectrum:
             "sampling_rate": float(rec["sampling_rate"]),
             "gain_V_per_mW": float(self.data.gain_v_mw),
             "offset_V": float(self.data.offset_v),
+            "warning": self.warning,
+            "laser_log": self.laser.log_lines(self.t_start, self.t_command),
             "metadata": self.metadata,
         }
 
@@ -318,8 +373,58 @@ class TaperPullingSpectrum:
         self.error = message
         self.result = None
         print(f"Sweep failed: {message}")
-        self.laser.print_log()
+        self.laser.print_log(since=self.t_start)
+        if self.state in ("sweeping", "post"):
+            # Keep what was recorded, to find out what happened
+            try:
+                self.failed = self.raw_result()
+            except Exception as e:
+                print(f"Error keeping the data of the failed sweep: {e}")
         self.end()
+
+    def raw_result(self) -> dict:
+        """
+        What was recorded so far, with no spectrum (empty wavelength, signal and
+        power): same format as get_result().
+        """
+        rec, raw_time, t_trig = self.recorded_triggers()
+        polls = np.array(self.polls, dtype=float).reshape(-1, 2)
+        info = {
+            "format_version": 4,
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "units": {"wavelength": "nm", "signal": "V", "power": "mW", "time": "s"},
+            "error": self.error,
+            "state": self.state,
+            "start_wl": float(self.laser.sweep_start),
+            "stop_wl": float(self.laser.sweep_stop),
+            "speed": float(self.laser.sweep_speed),
+            "trigger_step": float(self.laser.sweep_trigger_step),
+            "start_delay": float(self.start_delay) if self.start_delay is not None else None,
+            "wavelength_source": "none",
+            "trigger_count": int(len(t_trig)),
+            "trigger_count_expected": int(self.laser.sweep_trigger_count()),
+            "command_time": float(self.t_command),
+            "monitor_wl": float(self.monitor_wl),
+            "laser": self.laser.idn,
+            "laser_power": float(self.laser.power),
+            "laser_output_was_off": bool(self.output_was_off),
+            "sampling_rate": float(rec["sampling_rate"]),
+            "gain_V_per_mW": float(self.data.gain_v_mw),
+            "offset_V": float(self.data.offset_v),
+            "laser_log": self.laser.log_lines(self.t_start, self.t_command),
+            "metadata": self.metadata,
+        }
+        return {
+            "wavelength": np.zeros(0),
+            "signal": np.zeros(0),
+            "power": np.zeros(0),
+            "raw_time": raw_time,
+            "raw_signal": np.asarray(rec["signal"], dtype=np.float32),
+            "raw_trigger": np.asarray(rec["aux"], dtype=np.float32),
+            "poll_time": polls[:, 0],
+            "poll_wavelength": polls[:, 1],
+            "info": info,
+        }
 
     def abort(self):
         """
@@ -354,6 +459,15 @@ class TaperPullingSpectrum:
             info: dictionary with the sweep settings and metadata.
         """
         return self.result
+
+    def get_failed(self) -> dict|None:
+        """
+        Returns what was recorded during the last sweep, if it failed after the
+        sweep command (None otherwise). Same format as get_result(), but without
+        a spectrum (wavelength, signal and power are empty). info["error"] says
+        what went wrong, info["laser_log"] has the commands sent to the laser.
+        """
+        return self.failed
 
     @staticmethod
     def save(result: dict, filename: str):

@@ -817,7 +817,19 @@ class LoopWizardDialog(QDialog):
         result = self.spectrum.get_result()
         if result is None:
             self.sweep_progress.setValue(0)
-            self.lbl_sweep_status.setText(self.spectrum.error)
+            status = self.spectrum.error
+            # Keep whatever was recorded, to find out what went wrong
+            failed = self.spectrum.get_failed()
+            if failed is not None:
+                try:
+                    index = failed["info"]["metadata"]["index"]
+                    filename = os.path.join(self.get_spectra_folder(), f"failed_sweep_{index:03d}_{datetime.now().strftime('%H_%M_%S')}.npz")
+                    self.spectrum.save(failed, filename)
+                    status += f" Recorded data saved: {os.path.basename(self.spectra_folder)}/{os.path.basename(filename)}"
+                    self.lbl_sweep_status.setToolTip(filename)
+                except Exception as e:
+                    status += f" (recorded data NOT saved: {e})"
+            self.lbl_sweep_status.setText(status)
             return
         
         # Save
@@ -835,6 +847,8 @@ class LoopWizardDialog(QDialog):
             details += "the start trigger"
         else:
             details += "the time since the start (no triggers)"
+        if info.get("warning"):
+            details += ". WARNING: " + info["warning"]
         try:
             filename = os.path.join(self.get_spectra_folder(), f"spectrum_{index:03d}.npz")
             self.spectrum.save(result, filename)

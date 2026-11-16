@@ -66,6 +66,7 @@ class TaperPullingLaser:
     sim_r = 0.80             # Self-coupling amplitude
     sim_lead_time = 0.3      # Delay between the sweep command and the sweep start (random at each sweep)
     sim_trigger_width = 0.005  # s
+    sim_end_delay = 3.0      # Time the laser still says it is sweeping after the end (0.6 to 4.3 s in the real one)
 
     def __init__(self):
         """
@@ -172,18 +173,56 @@ class TaperPullingLaser:
             return resp
         return ""
 
-    def print_log(self, last: int=60):
+    def log_lines(self, since: float=0.0, t_ref: float|None=None) -> list[str]:
+        """
+        Returns the commands sent to the laser since a time (epoch), with the
+        answers and how long each one took, one per line. The same question with
+        the same answer, repeated, is shown once, with how many times it was asked.
+
+        Args:
+            since (float): Only the commands sent after this time (epoch, s).
+            t_ref (float): Times are shown relative to this (epoch, s). Defaults
+                to the last command.
+        """
+        entries = [e for e in self.log if e[0] >= since]
+        if len(entries) == 0:
+            return []
+        if t_ref is None:
+            t_ref = entries[-1][0]
+
+        # Group repetitions: [first entry, last entry, count, longest duration]
+        groups = []
+        for e in entries:
+            if len(groups) > 0 and groups[-1][0][1] == e[1] and groups[-1][0][2] == e[2]:
+                groups[-1][1] = e
+                groups[-1][2] += 1
+                groups[-1][3] = max(groups[-1][3], e[3])
+            else:
+                groups.append([e, e, 1, e[3]])
+
+        lines = []
+        for first, last, count, longest in groups:
+            t, cmd, resp, duration = first
+            line = f"{t - t_ref:9.3f}  {cmd}" + (f"  ->  {resp}" if resp is not None else "")
+            if count > 1:
+                line += f"  (x{count}, until {last[0] - t_ref:.3f}, longest {1e3*longest:.0f} ms)"
+            else:
+                line += f"  ({1e3*duration:.0f} ms)"
+            lines.append(line)
+        return lines
+
+    def print_log(self, last: int=60, since: float=0.0):
         """
         Prints the last commands sent to the laser, with the answers and how long
         each one took. Useful to find out what happened when something goes wrong.
+        Repeated questions with the same answer take a single line.
         """
-        entries = list(self.log)[-last:]
-        if len(entries) == 0:
+        lines = self.log_lines(since)[-last:]
+        if len(lines) == 0:
             return
-        t_ref = entries[-1][0]
         print("Last commands sent to the laser (time in s, relative to the last one):")
-        for t, cmd, resp, duration in entries:
-            print(f"  {t - t_ref:9.3f}  {cmd}" + (f"  ->  {resp}" if resp is not None else "") + f"  ({1e3*duration:.0f} ms)")
+        for line in lines:
+            print("  " + line)
 
     def wait_ready(self, timeout: float=15.0) -> bool:
         """
@@ -346,6 +385,16 @@ class TaperPullingLaser:
     def sweep_duration(self) -> float:
         return (self.sweep_stop - self.sweep_start)/self.sweep_speed
 
+    def sweep_trigger_count(self) -> int:
+        """
+        Number of triggers output during a whole sweep, with a trigger at every
+        step (one at the start, then one per step). 0 if there is only the start
+        trigger.
+        """
+        if self.sweep_trigger_step <= 0:
+            return 0
+        return int(np.floor((self.sweep_stop - self.sweep_start)/self.sweep_trigger_step + 1e-6)) + 1
+
     def start_sweep(self):
         if self.ok:
             self.write(f"SOUR{self.slot}:WAV:SWE STAR")
@@ -362,7 +411,7 @@ class TaperPullingLaser:
         if self.ok and not self.simulate:
             return int(float(self.query(f"SOUR{self.slot}:WAV:SWE?"))) != 0
         elif self.simulate:
-            return 0.0 <= (time.time() - self.sweep_t0) < (self.sim_lead_time + self.sweep_duration())
+            return 0.0 <= (time.time() - self.sweep_t0) < (self.sim_lead_time + self.sweep_duration() + self.sim_end_delay)
         return False
 
     # Simulation
@@ -381,7 +430,8 @@ class TaperPullingLaser:
         """
         t = np.asarray(t, dtype=float)
         ts = t - self.sweep_t0 - self.sim_lead_time
-        sweeping = (ts >= 0.0) & (ts < self.sweep_duration())
+        # Including the trigger at the last step, at the very end
+        sweeping = (ts >= 0.0) & (ts < self.sweep_duration() + self.sim_trigger_width)
         if self.sweep_trigger_step > 0:
             # Time since the last step
             since = np.mod(ts, self.sweep_trigger_step/self.sweep_speed)

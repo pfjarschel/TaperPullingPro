@@ -8,6 +8,9 @@ This module reads the files saved by the taper pulling program, so that
 analysis code does not need to know how they are organized:
     - the full process log ("*_full_log.npz") saved after each fabrication;
     - the transmission spectra ("spectrum_*.npz") measured with the tunable laser.
+      Sweeps that failed are saved as "failed_sweep_*.npz" (same format, with
+      only the raw data: info["error"] and info["laser_log"] say what happened).
+      load_spectra() ignores them; load_spectrum() reads them.
 
 It only depends on numpy, and can be copied and used on its own:
 
