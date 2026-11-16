@@ -56,12 +56,16 @@ class LoopWizardDialog(QDialog):
         self.sweep_count = 0       # Sweeps started (including the ones that failed): numbers the files
         self.spectra_folder = ""   # Created when the first spectrum is saved
 
-        # Store initial positions for delta tracking and reset functionality
+        # Store initial positions for delta tracking and reset functionality. If the motors
+        # are not ready yet (still connecting), this is done when they are
         self.left_motor = self.core.motors.left_puller if self.core else None
         self.right_motor = self.core.motors.right_puller if self.core else None
-
-        self.init_left_pos = self.left_motor.get_position() if self.left_motor else 0.0
-        self.init_right_pos = self.right_motor.get_position() if self.right_motor else 0.0
+        self.init_left_pos = None
+        self.init_right_pos = None
+        self.default_left_vel = 40.0
+        self.default_right_vel = 40.0
+        self.motors_were_ready = False
+        self.check_motors_ready()
 
         # Puller positions where the taper was straight (end of the pull, or after tensioning
         # it), if known: the slack measured from them does not restart when the wizard is
@@ -71,9 +75,6 @@ class LoopWizardDialog(QDialog):
             self.slack_ref = main.get_slack_reference()
         self.pull_end_pos = self.slack_ref["reference"] if self.slack_ref is not None else None
 
-        # Save default velocities to restore after creeping
-        self.default_left_vel = self.left_motor.vel if self.left_motor else 40.0
-        self.default_right_vel = self.right_motor.vel if self.right_motor else 40.0
         self.is_holding_continuous = False
 
         # Current step (0: Loosen, 1: Twist, 2: Tension)
@@ -737,29 +738,49 @@ class LoopWizardDialog(QDialog):
             self.camera_timer.stop()
             self.camera.close()
 
-    def get_slack(self):
-        """Slack added since the wizard was opened (both motors), in mm."""
-        if not self.left_motor or not self.right_motor:
-            return 0.0
+    def motors_ready(self) -> bool:
+        """Both pullers exist and are connected."""
+        return bool(self.left_motor and self.right_motor and self.left_motor.ok and self.right_motor.ok)
+
+    def check_motors_ready(self) -> bool:
+        """
+        Whether the motors are ready. The first time they are, their positions (the
+        reference for the slack, and for Reset) and velocities are taken.
+        """
+        ready = self.motors_ready()
+        if ready and not self.motors_were_ready:
+            self.init_left_pos = self.left_motor.get_position()
+            self.init_right_pos = self.right_motor.get_position()
+            # Default velocities, restored after creeping
+            self.default_left_vel = self.left_motor.vel
+            self.default_right_vel = self.right_motor.vel
+        self.motors_were_ready = self.motors_were_ready or ready
+        return ready
+
+    def get_slack(self) -> float|None:
+        """Slack added since the wizard was opened (both motors), in mm. None if the motors are not ready."""
+        if not self.check_motors_ready():
+            return None
         return (self.left_motor.get_position() - self.init_left_pos) + \
                (self.right_motor.get_position() - self.init_right_pos)
 
     def get_slack_from_straight(self) -> float|None:
         """Slack added since the taper was straight (both motors), in mm. None if unknown."""
-        if self.pull_end_pos is None or not self.left_motor or not self.right_motor:
+        if self.pull_end_pos is None or not self.check_motors_ready():
             return None
         return (self.left_motor.get_position() - self.pull_end_pos[0]) + \
                (self.right_motor.get_position() - self.pull_end_pos[1])
 
     def start_sweep(self):
-        if self.left_motor and self.right_motor and (self.left_motor.motor_moving() or self.right_motor.motor_moving()):
+        if self.check_motors_ready() and (self.left_motor.motor_moving() or self.right_motor.motor_moving()):
             QMessageBox.warning(self, "Sweep", "Wait until the motors stop before measuring a spectrum.")
             return
         
         error = self.main.prepare_sweep()
         if error == "":
-            l_pos = self.left_motor.get_position() if self.left_motor else 0.0
-            r_pos = self.right_motor.get_position() if self.right_motor else 0.0
+            ready = self.check_motors_ready()
+            l_pos = self.left_motor.get_position() if ready else None
+            r_pos = self.right_motor.get_position() if ready else None
             # Image of the loop, as it is right before the sweep
             index = self.sweep_count + 1
             snapshot = ""
@@ -778,8 +799,8 @@ class LoopWizardDialog(QDialog):
                 "note": self.edit_sweep_note.text().strip(),
                 "left_pos": l_pos,
                 "right_pos": r_pos,
-                "left_displacement": l_pos - self.init_left_pos,
-                "right_displacement": r_pos - self.init_right_pos,
+                "left_displacement": l_pos - self.init_left_pos if ready else None,
+                "right_displacement": r_pos - self.init_right_pos if ready else None,
                 "slack": self.get_slack(),
                 "slack_from_straight": self.get_slack_from_straight(),
                 "straight_left_pos": self.pull_end_pos[0] if self.slack_ref is not None else None,
@@ -840,7 +861,10 @@ class LoopWizardDialog(QDialog):
         slack = result["info"]["metadata"]["slack"]
         info = result["info"]
         pull_slack = info["metadata"].get("slack_from_straight")
-        details = f"{slack:+.3f} mm slack" + (f" ({pull_slack:+.3f} mm vs. straight taper)" if pull_slack is not None else "")
+        if slack is None:
+            details = "slack unknown: motors not ready"
+        else:
+            details = f"{slack:+.3f} mm slack" + (f" ({pull_slack:+.3f} mm vs. straight taper)" if pull_slack is not None else "")
         if info.get("laser_output_was_off"):
             details += ", laser output was off and was turned back on"
         details += ", started {info['start_delay']:.2f} s after the command, wavelengths from "
@@ -888,7 +912,8 @@ class LoopWizardDialog(QDialog):
         self.img_map.set_clim(np.nanmin(data), np.nanmax(data))
         ticks = np.unique(np.linspace(1, n, min(n, 10)).astype(int))
         self.ax_map.set_yticks(ticks)
-        self.ax_map.set_yticklabels([f"{self.spectra[i - 1][2]:+.3f}" for i in ticks])
+        self.ax_map.set_yticklabels([f"{self.spectra[i - 1][2]:+.3f}" if self.spectra[i - 1][2] is not None else "?"
+                                     for i in ticks])
         self.ax_spec.set_xlim(wl_min, wl_max)
         self.canvas.draw_idle()
 
@@ -936,7 +961,10 @@ class LoopWizardDialog(QDialog):
             self.lbl_power_db.setToolTip(f"Reference power: {ref_dbm:.2f} dBm")
             self.lbl_detector_v.setText(f"{volt:.3f} V")
 
-        if not self.left_motor or not self.right_motor:
+        if not self.check_motors_ready():
+            for label in (self.lbl_left_status, self.lbl_right_status):
+                label.setText("NOT READY")
+                label.setStyleSheet("color: #9ca3af; font-weight: 500;")
             return
 
         l_pos = max(0.0, self.left_motor.get_position())
@@ -989,7 +1017,7 @@ class LoopWizardDialog(QDialog):
         self._execute_step(-step, -step)
 
     def _execute_step(self, d_left, d_right):
-        if not self.left_motor or not self.right_motor:
+        if not self.check_motors_ready():
             return
 
         l_pos = self.left_motor.get_position()
@@ -1030,7 +1058,7 @@ class LoopWizardDialog(QDialog):
         self._start_continuous_move(direction=-1)
 
     def _start_continuous_move(self, direction):
-        if not self.left_motor or not self.right_motor:
+        if not self.check_motors_ready():
             return
 
         self.is_holding_continuous = True
@@ -1054,7 +1082,7 @@ class LoopWizardDialog(QDialog):
 
     def on_hold_released(self):
         """Stop motors immediately on button release and restore default velocities."""
-        if not self.left_motor or not self.right_motor:
+        if not self.check_motors_ready():
             return
 
         self.left_motor.stop(0)
@@ -1076,6 +1104,8 @@ class LoopWizardDialog(QDialog):
 
     def do_reset_positions(self):
         """Return both puller motors to the initial positions recorded when the wizard was opened."""
+        if not self.check_motors_ready():
+            return
         reply = QMessageBox.question(
             self, "Reset Positions",
             f"Return both motors to initial positions?\nLeft: {self.init_left_pos:.3f} mm\nRight: {self.init_right_pos:.3f} mm",
@@ -1099,9 +1129,8 @@ class LoopWizardDialog(QDialog):
     def closeEvent(self, event):
         """Ensure all motors are stopped, velocities restored, and timer killed upon closing."""
         self.do_emergency_stop()
-        if self.left_motor:
+        if self.motors_ready() and self.motors_were_ready:
             self.left_motor.set_velocity(self.default_left_vel)
-        if self.right_motor:
             self.right_motor.set_velocity(self.default_right_vel)
         if self.spectrum is not None and self.spectrum.running:
             self.spectrum.abort()

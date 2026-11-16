@@ -384,6 +384,9 @@ class GenericTLMotor:
         self.opened = False
         
     def get_status_bits(self):
+        # Asking a controller that is not open crashes the library (access violation)
+        if not self.opened or self.serial_c is None:
+            return 0
         status_bits = eval(f"self.lib.{self.lib_prfx}_GetStatusBits(self.serial_c)")
         return status_bits
         
@@ -600,6 +603,8 @@ class GenericTLMotor:
         return self.pos
     
     def motor_stopped(self):
+        if not self.ok:  # Not connected (or still connecting): not moving
+            return True
         status_bits = self.get_status_bits()
         if bool(status_bits & 0x00000010) or bool(status_bits & 0x00000020):
             return False
@@ -607,6 +612,8 @@ class GenericTLMotor:
             return True
         
     def motor_moving(self):
+        if not self.ok:  # Not connected (or still connecting): not moving
+            return False
         status_bits = self.get_status_bits()
         if bool(status_bits & 0x00000010) or bool(status_bits & 0x00000020):
             return True
