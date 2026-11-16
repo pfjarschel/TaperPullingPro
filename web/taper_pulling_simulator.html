@@ -796,7 +796,7 @@ function drawTransmission() {
       trans.env = { nx, lo, hi };
     }
     const { lo, hi } = trans.env, cx = g.X(cur.x);
-    for (const part of [0, 1]) {    // After the cursor: faint. Before it: full.
+    for (const part of [1]) {    // After the cursor: faint. Before it: full.
       ctx.save(); ctx.beginPath();
       if (part === 0) ctx.rect(cx, g.T, g.L + g.pw - cx, g.ph); else ctx.rect(g.L, g.T, cx - g.L, g.ph);
       ctx.clip();
@@ -815,7 +815,7 @@ function drawTransmission() {
     if (img) {
       const x0 = g.X(sp.x0), x1 = g.X(sp.x1);
       ctx.imageSmoothingEnabled = true;
-      for (const part of [0, 1]) {
+      for (const part of [1]) {
         ctx.save(); ctx.beginPath();
         if (part === 0) ctx.rect(cx, g.T, g.L + g.pw - cx, g.ph); else ctx.rect(g.L, g.T, cx - g.L, g.ph);
         ctx.clip(); ctx.globalAlpha = part === 0 ? 0.3 : 1;
