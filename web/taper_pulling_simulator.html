@@ -65,10 +65,10 @@ input[type=range] { accent-color: var(--accent); }
 
 .controls { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
 .group { display: flex; flex-direction: column; gap: 8px; }
-.row { display: grid; grid-template-columns: minmax(0, 1fr) 74px 34px; gap: 2px 8px; align-items: center; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 80px 40px; gap: 2px 8px; align-items: center; }
 .row label { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
 .row input[type=range] { width: 100%; min-width: 0; }
-.row input[type=number] { width: 100%; text-align: right; font-variant-numeric: tabular-nums; }
+.row input[type=number] { width: 100%; box-sizing: border-box; text-align: right; font-variant-numeric: tabular-nums; }
 .row .unit { font-size: 12px; color: var(--muted); }
 .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { flex: 1; border: 0; border-radius: 0; background: var(--field); padding: 6px 4px; }
@@ -471,8 +471,8 @@ function startSim() {
     $("classicHint").textContent = `Final waist: ${fmtD(sEnd)} simulated, ${fmtD(cEnd)} by the textbook model.` +
       (smAt !== null ? ` Single mode from ${smAt.toFixed(1)} mm.` : "");
     $("busy").hidden = true; $("busy").textContent = "simulating…";
-    t = reducedMotion ? 0.6*sim.totalTime : 0;
-    setPlaying(!reducedMotion);
+    t = Math.min(t, sim.totalTime);      // Same moment of the process, playing or not as before
+    if (playing && t >= sim.totalTime) setPlaying(false);
     drawAll();
   })();
 }
