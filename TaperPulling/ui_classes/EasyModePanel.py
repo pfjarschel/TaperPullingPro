@@ -307,7 +307,9 @@ class EasyModePanel(QWidget):
             self.set_status(self.lbl_motors, "Not initialized", "off")
 
         # Laser
-        if not m.laser.ok:
+        if m.laser_connecting:
+            self.set_status(self.lbl_laser, "Connecting...", "busy")
+        elif not m.laser.ok:
             self.set_status(self.lbl_laser, "Not connected", "off")
         elif m.laser.output:
             self.set_status(self.lbl_laser, "On", "ok")

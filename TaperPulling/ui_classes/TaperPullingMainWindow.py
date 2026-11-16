@@ -21,6 +21,7 @@ import time
 from datetime import datetime
 import json
 import cv2
+from threading import Thread
 
 # Import taper pulling classes
 from TaperPulling.TaperShape import TaperShape
@@ -91,6 +92,7 @@ class MainWindow(FormUI, WindowUI):
     
     # Flow control variables
     done_loading = False
+    laser_connecting = False  # A connection to the laser is in progress (in the background)
     going_2start = False
     go2start_busy = False
     init_busy = False
@@ -160,6 +162,10 @@ class MainWindow(FormUI, WindowUI):
         self.toggle_fiber_defaults()
         
         self.done_loading = True
+        
+        # Connect to the laser with the saved settings. If it fails, it stays disconnected
+        if self.laserAddrText.text().strip() != "" or self.laserSimCheck.isChecked():
+            self.laser_connect(auto=True)
         
     def closeEvent(self, event):
         reply = QMessageBox.question(self, 'Exiting...',
@@ -808,7 +814,7 @@ class MainWindow(FormUI, WindowUI):
         grid.setRowStretch(9, 1)
         self.devsTabs.addTab(tab, "Laser")
 
-        self.laserConnectBut.clicked.connect(self.laser_connect)
+        self.laserConnectBut.clicked.connect(lambda: self.laser_connect())
         self.laserOutBut.clicked.connect(self.laser_toggle_output)
         self.laserWlSpin.valueChanged.connect(self.laser_apply)
         self.laserPowSpin.valueChanged.connect(self.laser_apply)
@@ -826,17 +832,51 @@ class MainWindow(FormUI, WindowUI):
             self.laserTrigCombo.setCurrentText(prev)
         self.laserTrigCombo.blockSignals(False)
         
-    def laser_connect(self):
+    def laser_connect(self, auto: bool=False):
+        """
+        Connects to the laser, in the background: the program does not freeze if
+        it takes long (e.g. wrong address). The laser must not be used meanwhile.
+
+        Args:
+            auto (bool): Automatic connection, when the program starts.
+        """
+        if self.laser_connecting:
+            return
         simulate = self.laserSimCheck.isChecked()
+        address = self.laserAddrText.text()
+        slot = self.laserSlotSpin.value()
         self.laserStatusLabel.setText("Connecting...")
-        QCoreApplication.processEvents()
+        self.laserConnectBut.setEnabled(False)
+        self.laser_connecting = True
         
-        ok = self.laser.connect(self.laserAddrText.text(), self.laserSlotSpin.value(), simulate)
+        result = {"ok": False}
+        def work():
+            try:
+                result["ok"] = self.laser.connect(address, slot, simulate)
+            except Exception as e:
+                self.laser.last_error = str(e)
+        thread = Thread(target=work, daemon=True)
+        thread.start()
+        
+        # The rest happens here, in the interface thread, when the connection is done
+        def check():
+            if thread.is_alive():
+                QTimer.singleShot(100, check)
+            else:
+                self.laser_connected(result["ok"], simulate, auto)
+        QTimer.singleShot(100, check)
+        
+    def laser_connected(self, ok: bool, simulate: bool, auto: bool):
+        self.laser_connecting = False
+        self.laserConnectBut.setEnabled(True)
         if ok:
             self.laserStatusLabel.setText(f"Connected: {self.laser.idn}")
             self.laser_apply()
             self.laserOutBut.setChecked(self.laser.output)
             self.laser_toggle_output()
+        elif auto:
+            self.laserStatusLabel.setText(f"Not connected (automatic connection at startup failed: {self.laser.last_error})")
+            print(f"Laser: automatic connection at startup failed: {self.laser.last_error}")
         else:
             self.laserStatusLabel.setText(f"Connection failed: {self.laser.last_error}")
         
@@ -847,7 +887,7 @@ class MainWindow(FormUI, WindowUI):
     def laser_apply(self):
         self.laser.set_limits(self.laserMinWlSpin.value(), self.laserMaxWlSpin.value())
         self.spectrum.monitor_wl = self.laser.clamp(self.laserWlSpin.value())
-        if self.laser.ok and not self.spectrum.running:
+        if self.laser.ok and not self.spectrum.running and not self.laser_connecting:
             try:
                 self.laser.set_power(self.laserPowSpin.value())
                 self.laser.set_wavelength(self.laserWlSpin.value(), wait=False)
@@ -855,6 +895,9 @@ class MainWindow(FormUI, WindowUI):
                 self.laserStatusLabel.setText(f"Communication error: {e}")
                 
     def laser_toggle_output(self):
+        if self.laser_connecting:  # Not now: the button goes back to how it was
+            self.laserOutBut.setChecked(self.laser.output)
+            return
         on = self.laserOutBut.isChecked()
         try:
             self.laser.set_output(on)
@@ -899,6 +942,8 @@ class MainWindow(FormUI, WindowUI):
         """
         if self.core.pulling or self.pullLoop_timer.isActive():
             return "Wavelength sweeps are not possible while pulling."
+        if self.laser_connecting:
+            return "The laser is still connecting. Try again in a few seconds."
         if not self.laser.ok:
             return "The laser is not connected. Connect it in the 'Laser' tab of the main window."
         if not self.laser.output:
