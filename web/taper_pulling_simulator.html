@@ -117,7 +117,6 @@ footer { color: var(--muted); font-size: 12px; max-width: 90ch; }
             <option value="5" selected>5×</option><option value="10">10×</option><option value="20">20×</option><option value="50">50×</option>
           </select>
         </label>
-        <label for="chkT"><input type="checkbox" id="chkT"> Transmission</label>
       </div>
 
       <div class="charts">
@@ -133,7 +132,7 @@ footer { color: var(--muted); font-size: 12px; max-width: 90ch; }
         </div>
       </div>
 
-      <div class="charts" id="transBox" hidden>
+      <div class="charts" id="transBox">
         <div class="chart">
           <h2>Transmission while pulling</h2>
           <p>Light at 1550 nm through the taper, relative to the untapered fiber.</p>
@@ -742,7 +741,7 @@ function drawAll() {
      { x: sim.frameX, y: sim.frameD, n: sim.nFrames, color: glass }],
     [{ y: SINGLE_MODE_D, color: ok, label: "single mode at 1550 nm" }]);
 
-  if ($("chkT").checked) drawTransmission();
+  drawTransmission();
 
   $("roPulled").textContent = cur.x.toFixed(2).padStart(5, " ") + " mm";
   $("roWaist").textContent = fmtD(cur.d);
@@ -835,7 +834,6 @@ function drawTransmission() {
     ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.textAlign = "left"; ctx.font = "11px Inter, system-ui, sans-serif"; ctx.fillText("beat frequency (Hz)", g.L + 5, g.T + 3);
   });
 }
-$("chkT").addEventListener("change", () => { $("transBox").hidden = !$("chkT").checked; if (sim) drawAll(); });
 
 // ---- Chart interaction: seek, and edit the custom hotzone points ------------------------------
 function chartPointer(cv, key, editable) {
