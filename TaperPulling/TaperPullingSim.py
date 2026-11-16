@@ -19,7 +19,8 @@ elongation is shared along the fiber in proportion to the heating, and volume is
 conserved. The flame moves as the motors of the setup were seen to do it, in
 both brushing modes (standard: the flame sweeps along a fiber that is pulled
 symmetrically; relative: the flame is fixed, and the pullers move the fiber in
-sinusoidal sweeps). Everything is shown in the frame of the centre of the fiber.
+sinusoidal sweeps). Everything is shown in the frame of the fiber: the middle point
+between the pullers stays in place.
 
     sim = TaperPullingSim()
     sim.relative = False
@@ -32,6 +33,7 @@ All length units in mm, unless noted.
 # =============================================================================
 
 import time
+from math import erf
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
@@ -63,10 +65,10 @@ class TaperPullingSim:
     max_frames = 1024  # Upper limit of stored frames (profiles)
 
     # Last simulation results (one value, or profile, for each frame)
-    z_arr = np.zeros(11)  # Positions along the fiber, from its centre
+    z_arr = np.zeros(11)  # Positions along the fiber, from the middle point between the pullers
     r_arrs = np.zeros((1, 11))  # Radius profiles
     x_arr = np.zeros(1)  # Total pulled
-    fpos_arr = np.zeros(1)  # Flame positions, from the fiber centre
+    fpos_arr = np.zeros(1)  # Flame positions, from the middle point between the pullers
     hz_arr = np.zeros(1)  # Hotzone sizes
     d_arr = np.zeros(1)  # Waist (thinnest) diameters (µm)
 
@@ -118,25 +120,34 @@ class TaperPullingSim:
         r_arrs, x_arr, fpos_arr, d_arr = [], [], [], []
         motion = planned_flame_motion([hz_x, hz_y], x_end, self.flame_size, self.min_span, self.vf,
                                       self.vp, self.relative, dt=self.time_step)
+        # The model keeps the centre of the fiber (the material) in place, so each side only
+        # moves while the flame is on it. What really stays in place is the middle point
+        # between the pullers: the profiles are shifted to that frame (offset), where both
+        # sides move out continuously.
+        def store():
+            r_arrs.append(np.interp(self.z_arr - offset, est.s, est.radius()))
+            x_arr.append(x)
+            fpos_arr.append(u + offset)
+            d_arr.append(est.diameter)
+
         t0 = t1 = time.time()
         i, x, u, stored = 0, 0.0, 0.0, False
+        last_x, last_u, offset = 0.0, 0.0, 0.0
         for i, (x, u) in enumerate(motion):
             est.add(x, u)
+            # Fraction of the elongation that happens to the left of the centre, minus 1/2
+            left = 0.5*(1 + erf(-0.5*(u + last_u)/(est.sigma*np.sqrt(2))))
+            offset += (x - last_x)*(left - 0.5)
+            last_x, last_u = x, u
             stored = i % every == 0
             if stored:
-                r_arrs.append(est.radius()[keep])
-                x_arr.append(x)
-                fpos_arr.append(u)
-                d_arr.append(est.diameter)
+                store()
             if time.time() - t1 >= 1.0:
                 t1 = time.time()
                 ratio = max(i, 1)/steps
                 print(f"Simulation progress: {100*ratio:.1f}%. {(t1 - t0)*(1/ratio - 1):.0f} s remaining      ", end="\r")
         if not stored:  # The end of the pull is always kept
-            r_arrs.append(est.radius()[keep])
-            x_arr.append(x)
-            fpos_arr.append(u)
-            d_arr.append(est.diameter)
+            store()
         print("Simulation done                                           ")
 
         self.r_arrs = np.array(r_arrs)
