@@ -278,6 +278,40 @@ class TaperPullingSpectrum:
                 self.data.stop_recording("sweep")
                 self.finish()
 
+    def live_spectrum(self, max_points: int=2000) -> tuple[np.ndarray, np.ndarray]|None:
+        """
+        The spectrum measured so far, during a sweep, to show it while it is
+        measured. Only what was already recorded is used: nothing is asked to the
+        laser. The wavelengths are calculated as in the final spectrum, but from
+        the triggers recorded so far. The final spectrum is not affected.
+
+        Args:
+            max_points (int): The samples are averaged in groups, so that there
+                are at most this many points.
+
+        Returns:
+            tuple: wavelength (nm), power (mW). None if the sweep has not started yet.
+        """
+        if not self.running or self.state not in ("sweeping", "post") or self.start_delay is None:
+            return None
+        rec, raw_time, t_trig = self.recorded_triggers()
+        start, stop, speed = self.laser.sweep_start, self.laser.sweep_stop, self.laser.sweep_speed
+        if len(t_trig) > 0:
+            wl = wavelengths_from_triggers(raw_time, t_trig, start, stop, speed, self.laser.sweep_trigger_step)[0]
+        else:
+            wl = start + speed*(raw_time - self.start_delay)
+        inside = (wl >= start) & (wl <= stop)
+        wl = wl[inside]
+        signal = np.asarray(rec["signal"], dtype=float)[inside]
+        if len(wl) < 2:
+            return None
+        group = int(np.ceil(len(wl)/max(max_points, 1)))
+        if group > 1:
+            n = (len(wl)//group)*group
+            wl = wl[:n].reshape(-1, group).mean(axis=1)
+            signal = signal[:n].reshape(-1, group).mean(axis=1)
+        return wl, self.data.get_power_from_voltage(signal)
+
     def last_trigger_time(self) -> float|None:
         """
         With a trigger at every step: time of the last trigger of the sweep (s,

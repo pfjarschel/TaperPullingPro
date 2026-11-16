@@ -14,6 +14,7 @@ and a snapshot is saved with every spectrum.
 """
 
 import os
+import time
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -54,6 +55,8 @@ class LoopWizardDialog(QDialog):
         # Spectra measured in this session
         self.spectra = []          # (wavelength, power, slack)
         self.sweep_count = 0       # Sweeps started (including the ones that failed): numbers the files
+        self.live_interval = 0.3   # s. The spectrum being measured is shown, updated this often
+        self.t_live = 0.0          # Time (epoch) of the last update of the spectrum being measured
         self.spectra_folder = ""   # Created when the first spectrum is saved
 
         # Store initial positions for delta tracking and reset functionality. If the motors
@@ -822,6 +825,7 @@ class LoopWizardDialog(QDialog):
         self.btn_sweep_abort.setEnabled(True)
         self.sweep_progress.setValue(0)
         self.lbl_sweep_status.setText("Sweeping...")
+        self.start_live_spectrum()
         self.sweep_timer.start()
         
     def abort_sweep(self):
@@ -831,6 +835,8 @@ class LoopWizardDialog(QDialog):
         running = self.spectrum.update()
         self.sweep_progress.setValue(int(1000*self.spectrum.progress))
         if running:
+            if time.time() - self.t_live >= self.live_interval:
+                self.update_live_spectrum()
             return
         
         self.sweep_timer.stop()
@@ -854,6 +860,7 @@ class LoopWizardDialog(QDialog):
                 except Exception as e:
                     status += f" (recorded data NOT saved: {e})"
             self.lbl_sweep_status.setText(status)
+            self.update_spectrum_graphs()  # Back to the spectra measured before
             return
         
         # Save
@@ -867,7 +874,7 @@ class LoopWizardDialog(QDialog):
             details = f"{slack:+.3f} mm slack" + (f" ({pull_slack:+.3f} mm vs. straight taper)" if pull_slack is not None else "")
         if info.get("laser_output_was_off"):
             details += ", laser output was off and was turned back on"
-        details += ", started {info['start_delay']:.2f} s after the command, wavelengths from "
+        details += f", started {info['start_delay']:.2f} s after the command, wavelengths from "
         if info["wavelength_source"] == "triggers":
             details += f"{info['trigger_count']} triggers ({info['speed_measured']:.3f} nm/s)"
         elif info["wavelength_source"] == "trigger_start":
@@ -889,8 +896,43 @@ class LoopWizardDialog(QDialog):
         self.edit_sweep_note.clear()
         self.update_spectrum_graphs()
         
+    def start_live_spectrum(self):
+        """
+        Prepares the graph of the last spectrum to show the one being measured,
+        with the previous one (the last measured) for comparison.
+        """
+        self.t_live = 0.0
+        self.line_spec.set_data([], [])
+        if len(self.spectra) > 0:
+            self.line_prev.set_data(self.spectra[-1][0], self.spectra[-1][1])
+        else:
+            self.line_prev.set_data([], [])
+        self.ax_spec.set_xlim(self.main.laser.sweep_start, self.main.laser.sweep_stop)
+        self.canvas.draw_idle()
+
+    def update_live_spectrum(self):
+        """
+        Shows the spectrum being measured (what was recorded so far). Not too
+        often: drawing takes time from everything else.
+        """
+        self.t_live = time.time()
+        try:
+            live = self.spectrum.live_spectrum()
+        except Exception as e:
+            print(f"Error showing the spectrum being measured: {e}")
+            live = None
+        if live is None:
+            return
+        self.line_spec.set_data(*live)
+        self.ax_spec.relim()
+        self.ax_spec.autoscale_view(scalex=False)
+        self.canvas.draw_idle()
+
     def update_spectrum_graphs(self):
         if len(self.spectra) == 0:
+            self.line_spec.set_data([], [])
+            self.line_prev.set_data([], [])
+            self.canvas.draw_idle()
             return
         
         # Last and previous spectra
@@ -898,6 +940,8 @@ class LoopWizardDialog(QDialog):
         self.line_spec.set_data(wl, power)
         if len(self.spectra) > 1:
             self.line_prev.set_data(self.spectra[-2][0], self.spectra[-2][1])
+        else:
+            self.line_prev.set_data([], [])
         self.ax_spec.relim()
         self.ax_spec.autoscale(True)
         
