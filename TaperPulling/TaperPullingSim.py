@@ -53,7 +53,7 @@ class TaperPullingSim:
     vp = 0.125  # Pulling velocity, each puller (mm/s)
     vf = 2.4  # Flame brushing velocity (mm/s)
     flame_size = 0.6  # Flame size: width (FWHM) of the heated region (mm)
-    min_span = 1.5  # Sweeps shorter than this are not made: the flame stays at the centre (mm)
+    min_span = 0.5  # Sweeps shorter than this are not made: the flame stays at the centre (mm)
     relative = False  # Brushing mode: False for standard, True for relative
     r0 = 0.0625  # Initial fiber radius (mm)
 
