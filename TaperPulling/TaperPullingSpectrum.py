@@ -20,9 +20,13 @@ each sample:
   sweep started when it changes. The wavelengths are then calculated from the
   time since the start, at the nominal sweep speed.
 
-With a trigger at every wavelength step, the sweep is complete when the last
-one is recorded. Our laser sometimes keeps saying it is sweeping after the end,
-forever (parked at the last wavelength, harmless): if it does, it is told to stop.
+Our laser sometimes keeps saying it is sweeping after the end, forever (parked
+at the last wavelength, harmless). So the end is not left to it: with a trigger
+at every wavelength step, the sweep is complete when the last one is recorded.
+Otherwise (or if some triggers are missing), once the sweep should have
+finished, the laser is asked (once per second) whether it is still sweeping and,
+if it says so, its wavelength: the sweep is over when it is at the last one.
+Either way, it is told to stop.
 When a sweep fails, whatever was recorded is kept (get_failed()), with the
 commands sent to the laser, to find out what happened.
 
@@ -58,6 +62,9 @@ class TaperPullingSpectrum:
     pre_time = 0.3      # s. Signal recorded before the sweep command
     post_time = 0.3     # s. Signal recorded after the sweep
     wl_tolerance = 2e-4 # nm. The wavelength changed if it differs more than this
+    end_wl_tolerance = 0.01  # nm. The sweep reached its end if the wavelength is this close to the last one
+    trigger_wait = 2.0        # s. With a trigger at every step, time allowed for the last one to be recorded,
+                              # after the expected end, before asking the laser
     poll_interval = 0.1       # s. Time between wavelength readings, until the sweep starts
     poll_interval_sweep = 2.0 # s. Time between wavelength readings, after it started
     state_interval = 1.0      # s. Time between "is it still sweeping?" questions, at the end
@@ -243,9 +250,18 @@ class TaperPullingSpectrum:
                         return
                     if now < self.t_state_next:
                         return
-                    # Otherwise, ask the laser, now and then, until it says it finished
+                    if self.use_triggers and self.laser.sweep_trigger_count() > 0 and elapsed < duration + self.trigger_wait:
+                        return  # The last trigger may not have been recorded yet
+                    # Otherwise, ask the laser, now and then, until it says it finished,
+                    # or until it is at the last wavelength (it sometimes never says so)
                     self.t_state_next = now + self.state_interval
                     if not self.laser.sweep_running():
+                        self.t_end = time.time()
+                        self.state = "post"
+                        self.t_state = self.t_end
+                    elif self.poll_wavelength()[1] >= self.laser.sweep_stop - self.end_wl_tolerance:
+                        self.stopped_at_end = True
+                        self.laser.stop_sweep()
                         self.t_end = time.time()
                         self.state = "post"
                         self.t_state = self.t_end

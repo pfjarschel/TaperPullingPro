@@ -67,6 +67,7 @@ class TaperPullingLaser:
     sim_lead_time = 0.3      # Delay between the sweep command and the sweep start (random at each sweep)
     sim_trigger_width = 0.005  # s
     sim_end_delay = 3.0      # Time the laser still says it is sweeping after the end (0.6 to 4.3 s in the real one)
+    sim_t_stop = 0.0         # Time (epoch) the last sweep was interrupted (stop, or new wavelength). Inf while sweeping
 
     def __init__(self):
         """
@@ -293,6 +294,8 @@ class TaperPullingLaser:
             if wait:
                 self.query("*OPC?")
             self.wavelength = wl
+            if self.simulate:
+                self.sim_t_stop = min(self.sim_t_stop, time.time())  # Leaves the end of the last sweep
         return wl
 
     def get_wavelength(self) -> float:
@@ -400,18 +403,22 @@ class TaperPullingLaser:
             self.write(f"SOUR{self.slot}:WAV:SWE STAR")
             if self.simulate:
                 self.sim_lead_time = np.random.uniform(0.2, 0.6)
+                self.sim_t_stop = np.inf
             self.sweep_t0 = time.time()
 
     def stop_sweep(self):
         if self.ok:
             self.write(f"SOUR{self.slot}:WAV:SWE STOP")
-            self.sweep_t0 = 0.0
+            if self.simulate:
+                self.sim_t_stop = min(self.sim_t_stop, time.time())
 
     def sweep_running(self) -> bool:
         if self.ok and not self.simulate:
             return int(float(self.query(f"SOUR{self.slot}:WAV:SWE?"))) != 0
         elif self.simulate:
-            return 0.0 <= (time.time() - self.sweep_t0) < (self.sim_lead_time + self.sweep_duration() + self.sim_end_delay)
+            now = time.time()
+            return now < self.sim_t_stop and \
+                0.0 <= (now - self.sweep_t0) < (self.sim_lead_time + self.sweep_duration() + self.sim_end_delay)
         return False
 
     # Simulation
@@ -421,8 +428,12 @@ class TaperPullingLaser:
         """
         t = np.asarray(t, dtype=float)
         ts = t - self.sweep_t0 - self.sim_lead_time
-        sweeping = (ts >= 0.0) & (ts < self.sweep_duration())
-        return np.where(sweeping, self.sweep_start + self.sweep_speed*ts, self.wavelength)
+        active = t < self.sim_t_stop
+        sweeping = active & (ts >= 0.0) & (ts < self.sweep_duration())
+        # After the sweep, it stays at the last wavelength until told otherwise
+        ended = active & (ts >= self.sweep_duration())
+        return np.where(sweeping, self.sweep_start + self.sweep_speed*ts,
+                        np.where(ended, self.sweep_stop, self.wavelength))
 
     def sim_trigger(self, t) -> np.ndarray:
         """
@@ -431,7 +442,7 @@ class TaperPullingLaser:
         t = np.asarray(t, dtype=float)
         ts = t - self.sweep_t0 - self.sim_lead_time
         # Including the trigger at the last step, at the very end
-        sweeping = (ts >= 0.0) & (ts < self.sweep_duration() + self.sim_trigger_width)
+        sweeping = (t < self.sim_t_stop) & (ts >= 0.0) & (ts < self.sweep_duration() + self.sim_trigger_width)
         if self.sweep_trigger_step > 0:
             # Time since the last step
             since = np.mod(ts, self.sweep_trigger_step/self.sweep_speed)
