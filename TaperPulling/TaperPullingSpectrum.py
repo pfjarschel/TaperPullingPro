@@ -21,10 +21,10 @@ each sample:
   time since the start, at the nominal sweep speed.
 
 With a trigger at every wavelength step, the sweep is complete when the last
-one is recorded. If the laser then keeps saying it is sweeping, it is told to
-stop and the spectrum is kept (with a warning). When a sweep fails, whatever was
-recorded is kept (get_failed()), with the commands sent to the laser, to find
-out what happened.
+one is recorded. Our laser sometimes keeps saying it is sweeping after the end,
+forever (parked at the last wavelength, harmless): if it does, it is told to stop.
+When a sweep fails, whatever was recorded is kept (get_failed()), with the
+commands sent to the laser, to find out what happened.
 
 It does not block for long: call start(), then update() periodically (at least
 10 times per second) until it returns False.
@@ -61,8 +61,8 @@ class TaperPullingSpectrum:
     poll_interval = 0.1       # s. Time between wavelength readings, until the sweep starts
     poll_interval_sweep = 2.0 # s. Time between wavelength readings, after it started
     state_interval = 1.0      # s. Time between "is it still sweeping?" questions, at the end
-    end_grace = 10.0          # s. With a trigger at every step: if the laser still says it is sweeping this
-                              # long after the last trigger (normally 0.6 to 4.3 s), it is told to stop
+    end_grace = 0.5           # s. With a trigger at every step: wait this long after the last trigger, then
+                              # tell the laser to stop if it still says it is sweeping
     start_timeout = 20.0      # s. Give up if the sweep was not seen to start in this time
     trigger_interval = 0.25   # s. Time between looks at the recorded trigger signal
 
@@ -71,7 +71,7 @@ class TaperPullingSpectrum:
     running = False
     progress = 0.0      # 0 to 1
     error = ""
-    warning = ""        # Something unusual happened, but the spectrum is fine
+    stopped_at_end = False  # The laser still said it was sweeping after the last trigger, and was told to stop
     result = None       # Dictionary with the last spectrum, see get_result()
     failed = None       # Same, with only the raw data, for the last sweep that failed. See get_failed()
     metadata = {}
@@ -83,6 +83,7 @@ class TaperPullingSpectrum:
     wl_before = 0.0     # Wavelength reported by the laser before the sweep
     polls = []          # (time since command, wavelength) of every wavelength reading
     t_poll_next = 0.0   # Time (epoch) of the next question to the laser
+    t_state_next = 0.0  # Time (epoch) of the next "is it still sweeping?" question, at the end
     use_triggers = False  # The trigger output of the laser is being recorded
     output_was_off = False  # The laser had turned its output off, and it was turned back on
 
@@ -118,7 +119,7 @@ class TaperPullingSpectrum:
 
         self.metadata = dict(metadata) if metadata is not None else {}
         self.error = ""
-        self.warning = ""
+        self.stopped_at_end = False
         self.progress = 0.0
         self.result = None
         self.failed = None
@@ -227,21 +228,24 @@ class TaperPullingSpectrum:
                         self.poll_wavelength()
                         self.t_poll_next = time.time() + self.poll_interval_sweep
                 elif now >= self.t_poll_next:
-                    # It should have finished: ask, now and then, until it says so
-                    self.t_poll_next = time.time() + self.state_interval
-                    if not self.laser.sweep_running():
-                        self.t_end = time.time()
-                        self.state = "post"
-                        self.t_state = self.t_end
-                        return
-                    # With a trigger at every step, all of them recorded means the data is complete
+                    self.t_poll_next = now + self.trigger_interval
                     t_last = self.last_trigger_time()
-                    if t_last is not None and time.time() - self.t_command - t_last > self.end_grace:
-                        self.warning = (f"The laser still said it was sweeping {time.time() - self.t_command - t_last:.0f} s "
-                                        f"after its last trigger. It was told to stop (the spectrum is complete).")
-                        print(f"Sweep: {self.warning}")
-                        self.laser.print_log(since=self.t_start)
-                        self.laser.stop_sweep()
+                    if t_last is not None:
+                        # With a trigger at every step, all of them recorded means the data is complete
+                        if now - self.t_command - t_last >= self.end_grace:
+                            if self.laser.sweep_running():
+                                # It sometimes never says it finished
+                                self.stopped_at_end = True
+                                self.laser.stop_sweep()
+                            self.t_end = time.time()
+                            self.state = "post"
+                            self.t_state = self.t_end
+                        return
+                    if now < self.t_state_next:
+                        return
+                    # Otherwise, ask the laser, now and then, until it says it finished
+                    self.t_state_next = now + self.state_interval
+                    if not self.laser.sweep_running():
                         self.t_end = time.time()
                         self.state = "post"
                         self.t_state = self.t_end
@@ -350,7 +354,7 @@ class TaperPullingSpectrum:
             "sampling_rate": float(rec["sampling_rate"]),
             "gain_V_per_mW": float(self.data.gain_v_mw),
             "offset_V": float(self.data.offset_v),
-            "warning": self.warning,
+            "laser_stopped_at_end": bool(self.stopped_at_end),
             "laser_log": self.laser.log_lines(self.t_start, self.t_command),
             "metadata": self.metadata,
         }

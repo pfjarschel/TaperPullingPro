@@ -53,6 +53,7 @@ class LoopWizardDialog(QDialog):
         
         # Spectra measured in this session
         self.spectra = []          # (wavelength, power, slack)
+        self.sweep_count = 0       # Sweeps started (including the ones that failed): numbers the files
         self.spectra_folder = ""   # Created when the first spectrum is saved
 
         # Store initial positions for delta tracking and reset functionality
@@ -760,7 +761,7 @@ class LoopWizardDialog(QDialog):
             l_pos = self.left_motor.get_position() if self.left_motor else 0.0
             r_pos = self.right_motor.get_position() if self.right_motor else 0.0
             # Image of the loop, as it is right before the sweep
-            index = len(self.spectra) + 1
+            index = self.sweep_count + 1
             snapshot = ""
             if self.camera is not None and self.camera.ok and self.check_auto_snapshot.isChecked():
                 try:
@@ -788,6 +789,8 @@ class LoopWizardDialog(QDialog):
                 "tension_after_pull": self.slack_ref["tension"] if self.slack_ref is not None else None,
             }
             error = self.spectrum.start(metadata)
+            if error == "":
+                self.sweep_count = index
         if error != "":
             QMessageBox.warning(self, "Sweep", error)
             return
@@ -823,7 +826,7 @@ class LoopWizardDialog(QDialog):
             if failed is not None:
                 try:
                     index = failed["info"]["metadata"]["index"]
-                    filename = os.path.join(self.get_spectra_folder(), f"failed_sweep_{index:03d}_{datetime.now().strftime('%H_%M_%S')}.npz")
+                    filename = os.path.join(self.get_spectra_folder(), f"spectrum_{index:03d}.npz")
                     self.spectrum.save(failed, filename)
                     status += f" Recorded data saved: {os.path.basename(self.spectra_folder)}/{os.path.basename(filename)}"
                     self.lbl_sweep_status.setToolTip(filename)
@@ -847,8 +850,8 @@ class LoopWizardDialog(QDialog):
             details += "the start trigger"
         else:
             details += "the time since the start (no triggers)"
-        if info.get("warning"):
-            details += ". WARNING: " + info["warning"]
+        if info.get("laser_stopped_at_end"):
+            details += ", laser told to stop at the end"
         try:
             filename = os.path.join(self.get_spectra_folder(), f"spectrum_{index:03d}.npz")
             self.spectrum.save(result, filename)

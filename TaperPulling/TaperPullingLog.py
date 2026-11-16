@@ -8,9 +8,9 @@ This module reads the files saved by the taper pulling program, so that
 analysis code does not need to know how they are organized:
     - the full process log ("*_full_log.npz") saved after each fabrication;
     - the transmission spectra ("spectrum_*.npz") measured with the tunable laser.
-      Sweeps that failed are saved as "failed_sweep_*.npz" (same format, with
-      only the raw data: info["error"] and info["laser_log"] say what happened).
-      load_spectra() ignores them; load_spectrum() reads them.
+      Sweeps that failed are saved the same way, with only the raw data (no
+      spectrum): info["error"] and info["laser_log"] say what happened.
+      load_spectra() skips them, unless asked not to.
 
 It only depends on numpy, and can be copied and used on its own:
 
@@ -334,8 +334,13 @@ def load_spectrum(filename: str) -> Spectrum:
     return Spectrum(filename)
 
 
-def load_spectra(folder: str) -> list[Spectrum]:
+def load_spectra(folder: str, include_failed: bool=False) -> list[Spectrum]:
     """
     Reads all transmission spectra in a folder, in the order they were measured.
+
+    Args:
+        include_failed (bool): Also return the sweeps that failed (they have
+            only the raw data, info["error"] says what happened).
     """
-    return [Spectrum(f) for f in sorted(glob.glob(os.path.join(folder, "spectrum_*.npz")))]
+    spectra = [Spectrum(f) for f in sorted(glob.glob(os.path.join(folder, "spectrum_*.npz")))]
+    return [s for s in spectra if include_failed or not s.info.get("error")]
