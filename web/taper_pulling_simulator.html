@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taper Pulling Simulator</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a dark "viewport" stage (the fiber under the flame) with its transport bar and two small
+   charts on the left; one column of controls on the right. Stacks to one column when narrow. */
+:root {
+  --bg: #f2f5f8; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #d5dde6;
+  --accent: #c8501c; --accent-ink: #ffffff; --glass: #2f7fbf; --ok: #1f8a55; --field: #f7f9fb;
+  --stage: #0b0f14; --stage-panel: #111821; --stage-grid: #243242; --stage-text: #c9d4df;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e141b; --panel: #151d27; --ink: #e3ebf3; --muted: #93a2b2; --line: #2a3644;
+  --accent: #f0763a; --accent-ink: #1a0d05; --glass: #7fb8e6; --ok: #5fd38d; --field: #101720;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e141b; --panel: #151d27; --ink: #e3ebf3; --muted: #93a2b2; --line: #2a3644;
+  --accent: #f0763a; --accent-ink: #1a0d05; --glass: #7fb8e6; --ok: #5fd38d; --field: #101720;
+  color-scheme: dark }
+
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45;
+  padding-block: 20px 32px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+header h1 { font-family: var(--font-display); font-weight: 600; font-size: 24px; margin: 0; letter-spacing: -0.01em; }
+header p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.stage { background: var(--stage); border-radius: 10px; padding: 10px 10px 6px; display: flex; flex-direction: column; gap: 4px; position: relative; }
+.stage canvas { display: block; width: 100%; touch-action: none; }
+#cvWhole { height: 150px; } #cvZoom { height: 290px; }
+.stage .cap { color: var(--stage-text); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.75; padding-left: 4px; }
+.readout { display: flex; flex-wrap: wrap; gap: 4px 22px; font-family: var(--font-mono); font-size: 13px; color: #dff1ff; padding: 2px 4px 6px; font-variant-numeric: tabular-nums; }
+.readout span b { font-weight: 400; color: var(--stage-text); opacity: 0.7; margin-right: 6px; }
+.chip { font-family: var(--font-body); font-size: 11px; padding: 1px 8px; border-radius: 99px; border: 1px solid #3a4a5c; color: var(--stage-text); }
+.chip.on { border-color: #5fd38d; color: #5fd38d; }
+.busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(11,15,20,0.55); color: #dff1ff; font-family: var(--font-mono); font-size: 13px; border-radius: 10px; pointer-events: none; }
+
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.transport input[type=range] { flex: 1 1 200px; min-width: 120px; }
+button, select, input, textarea { font: inherit; color: inherit; }
+button { background: var(--field); border: 1px solid var(--line); border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; min-width: 84px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select, input[type=number], textarea { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+input[type=range] { accent-color: var(--accent); }
+.transport label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 640px) { .charts { grid-template-columns: minmax(0, 1fr); } }
+.chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 6px; min-width: 0; }
+.chart h2, .controls h2 { font-family: var(--font-display); font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+.chart p { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.chart canvas { display: block; width: 100%; height: 190px; touch-action: none; cursor: crosshair; }
+
+.controls { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
+.group { display: flex; flex-direction: column; gap: 8px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 74px 34px; gap: 2px 8px; align-items: center; }
+.row label { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.row input[type=range] { width: 100%; min-width: 0; }
+.row input[type=number] { width: 100%; text-align: right; font-variant-numeric: tabular-nums; }
+.row .unit { font-size: 12px; color: var(--muted); }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; border: 0; border-radius: 0; background: var(--field); padding: 6px 4px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+textarea { width: 100%; box-sizing: border-box; min-height: 120px; font-family: var(--font-mono); font-size: 12px; resize: vertical; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+details .group { margin-top: 8px; }
+footer { color: var(--muted); font-size: 12px; max-width: 90ch; }
+</style>
+
+</head>
+<body style="margin:0">
+<div class="wrap">
+  <header>
+    <h1>Taper Pulling Simulator</h1>
+    <p>A flame sweeps along an optical fiber while it is pulled from both ends. Watch the fiber get thinner under the flame, and see how the hotzone, the flame and the way it moves shape the taper.</p>
+  </header>
+
+  <div class="layout">
+    <div class="main">
+      <div class="stage">
+        <div class="readout" aria-live="off">
+          <span><b>pulled</b><span id="roPulled">0.00 mm</span></span>
+          <span><b>waist ⌀</b><span id="roWaist">125.0 µm</span></span>
+          <span><b>hotzone</b><span id="roHz">3.50 mm</span></span>
+          <span><b>time</b><span id="roTime">0 s</span></span>
+          <span class="chip" id="chipSM">multimode at 1550 nm</span>
+        </div>
+        <div class="cap">Whole taper</div>
+        <canvas id="cvWhole"></canvas>
+        <div class="cap">Around the hotzone · radius scale follows the fiber</div>
+        <canvas id="cvZoom"></canvas>
+        <div class="busy" id="busy" hidden>simulating…</div>
+      </div>
+
+      <div class="transport">
+        <button class="primary" id="btnPlay" type="button">Play</button>
+        <button id="btnRestart" type="button">Restart</button>
+        <input type="range" id="scrub" min="0" max="1000" step="1" value="0" aria-label="Position in the process">
+        <label for="speed">Speed
+          <select id="speed">
+            <option value="0.5">0.5×</option><option value="1">1×</option><option value="2">2×</option>
+            <option value="5" selected>5×</option><option value="10">10×</option><option value="20">20×</option><option value="50">50×</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="charts">
+        <div class="chart">
+          <h2>Hotzone vs. pulled distance</h2>
+          <p id="hzHint">The length the flame covers, as the fiber is pulled.</p>
+          <canvas id="cvHz"></canvas>
+        </div>
+        <div class="chart">
+          <h2>Waist diameter vs. pulled distance</h2>
+          <p>Simulated (solid) and the textbook model for the same hotzone (dashed).</p>
+          <canvas id="cvD"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="group">
+        <h2>Brushing mode</h2>
+        <div class="seg" id="segMode">
+          <button type="button" data-v="standard" aria-pressed="true">Standard</button>
+          <button type="button" data-v="relative" aria-pressed="false">Relative</button>
+        </div>
+        <p class="hint" id="modeHint"></p>
+      </div>
+
+      <div class="group">
+        <h2>Hotzone profile</h2>
+        <div class="seg" id="segProfile">
+          <button type="button" data-v="constant" aria-pressed="true">Constant</button>
+          <button type="button" data-v="linear" aria-pressed="false">Linear</button>
+          <button type="button" data-v="custom" aria-pressed="false">Custom</button>
+        </div>
+        <div id="profileRows" class="group"></div>
+        <div id="customBox" class="group" hidden>
+          <p class="hint">Drag the points on the hotzone chart. Double-click the chart to add a point, or a point to remove it. Or edit the table: pulled distance, hotzone (mm).</p>
+          <textarea id="customText" spellcheck="false" aria-label="Hotzone table: pulled distance, hotzone"></textarea>
+          <div class="btnrow">
+            <button type="button" id="btnApplyTable">Apply table</button>
+            <button type="button" id="btnAdiabatic">Adiabatic example</button>
+          </div>
+        </div>
+        <p class="hint" id="classicHint"></p>
+      </div>
+
+      <div class="group">
+        <h2>Flame and motion</h2>
+        <div id="processRows" class="group"></div>
+      </div>
+
+      <details>
+        <summary>Setup calibration</summary>
+        <div id="advRows" class="group"></div>
+        <p class="hint">How the motors of the reference setup really move, measured from recorded pulls.</p>
+      </details>
+    </div>
+  </div>
+
+  <footer>
+    Model: the flame heats the fiber with a gaussian profile as wide as the flame; the elongation is shared along the fiber in proportion to the heating, and volume is conserved. The waist of a silica fiber in air guides a single mode at 1550 nm below 1.14 µm. Space bar: play or pause.
+  </footer>
+</div>
+
+<script>
+"use strict";
+/*SIM-BEGIN*/
+// ---------------------------------------------------------------------------------------------
+// Simulation (same model as TaperPullingEstimate.py). Lengths in mm, times in s.
+// ---------------------------------------------------------------------------------------------
+function erf(x) {
+  const t = 1/(1 + 0.3275911*Math.abs(x));
+  const y = 1 - (((((1.061405429*t - 1.453152027)*t) + 1.421413741)*t - 0.284496736)*t + 0.254829592)*t*Math.exp(-x*x);
+  return x >= 0 ? y : -y;
+}
+function interp(x, xs, ys) {
+  const n = xs.length;
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[n - 1]) return ys[n - 1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xs[mid] <= x) lo = mid; else hi = mid; }
+  const w = xs[hi] - xs[lo];
+  return w > 0 ? ys[lo] + (ys[hi] - ys[lo])*(x - xs[lo])/w : ys[hi];
+}
+
+// p: {hzX, hzY, xEnd, flame, minSpan, vBrush, vPull, relative, r0, decel, gain, dt, ds, maxFrames}
+// Returns an object with advance(maxSteps) -> true when finished, and the results.
+function createSim(p) {
+  const dt = p.dt || 0.02, ds = p.ds || 0.01, pollInterval = 0.05;
+  const hzMax = Math.max.apply(null, p.hzY);
+  const sweep = Math.max(hzMax - p.flame, 0);
+  const reach = Math.max(p.gain*sweep/2, sweep/2 + p.vBrush*p.vBrush/(2*p.decel));
+  const viewHalf = p.xEnd/2 + reach + 3*p.flame + 1.0;
+  const gridHalf = viewHalf + 1.0;
+  const i0 = Math.round(gridHalf/ds), n = 2*i0 + 1;
+  const lnA = new Float64Array(n).fill(2*Math.log(p.r0));
+  const cum = new Float64Array(n), eArr = new Float64Array(n);
+  const sigma = Math.max(p.flame, 4*ds)/(2*Math.sqrt(2*Math.log(2)));
+
+  const steps = Math.floor(p.xEnd/(2*p.vPull*dt)) + 1;
+  const every = Math.max(1, Math.ceil(steps/(p.maxFrames || 1000)));
+  const dz = 2*ds, mHalf = Math.floor(viewHalf/dz), m = 2*mHalf + 1;
+  const maxF = Math.ceil(steps/every) + 2;
+  const sim = {
+    p, dt, dz, m, mHalf, viewHalf, steps, every, sigma, done: false, progress: 0,
+    frames: new Float32Array(maxF*m), nFrames: 0,
+    frameStep: new Float32Array(maxF), frameX: new Float32Array(maxF), frameD: new Float32Array(maxF),
+    flamePos: new Float32Array(steps + 2), nSteps: 0, totalTime: 0,
+  };
+
+  // Stretches the fiber by dx, heated by the flame at u (the centre of the fiber stays in place)
+  function step(dx, u) {
+    const j0 = Math.max(0, Math.floor((u - 6*sigma)/ds) + i0), j1 = Math.min(n - 1, Math.ceil((u + 6*sigma)/ds) + i0);
+    let sum = 0;
+    for (let j = j0; j <= j1; j++) { const a = ((j - i0)*ds - u)/sigma; const g = Math.exp(-0.5*a*a); eArr[j] = g; sum += g; }
+    const k = dx/(sum*ds);
+    let c = 0;
+    for (let j = j0; j <= j1; j++) { eArr[j] *= k; c += eArr[j]*ds; cum[j] = c; }
+    const total = c;
+    const vc = i0 < j0 ? 0 : (i0 > j1 ? total : cum[i0]);
+    for (let i = n - 1; i > i0; i--) {       // Upwind, for s > 0
+      const inside = i >= j0 && i <= j1;
+      const v = (i < j0 ? 0 : (i > j1 ? total : cum[i])) - vc;
+      lnA[i] -= v*(lnA[i] - lnA[i - 1])/ds + (inside ? eArr[i] : 0);
+    }
+    for (let i = 0; i < i0; i++) {           // Upwind, for s < 0
+      const inside = i >= j0 && i <= j1;
+      const v = (i < j0 ? 0 : (i > j1 ? total : cum[i])) - vc;
+      lnA[i] -= v*(lnA[i + 1] - lnA[i])/ds + (inside ? eArr[i] : 0);
+    }
+    if (i0 >= j0 && i0 <= j1) lnA[i0] -= eArr[i0];
+  }
+
+  // Flame motion, as the motors of the setup do it
+  let x = 0, u = 0, v = p.vBrush, direction = 1, phase = 0;
+  const comp = 1.66*p.vBrush*pollInterval;
+  function moveFlame() {
+    const hz = interp(x, p.hzX, p.hzY);
+    if (p.relative) {
+      const amplitude = (hz - p.flame)/2;
+      if (amplitude < p.minSpan/2) { u = 0; phase = 0; }
+      else {
+        const omega = Math.min((Math.PI/2)*p.vBrush/amplitude, 15);
+        phase = (phase + omega*dt) % (2*Math.PI);
+        u = p.gain*amplitude*Math.sin(phase);
+      }
+    } else if (hz - p.flame < p.minSpan) { u = 0; v = p.vBrush; }
+    else {
+      const edge = hz/2 - comp - p.flame/2;
+      if (direction*u >= edge) direction = -direction;
+      const target = direction*p.vBrush, dv = p.decel*dt;
+      v = Math.abs(target - v) <= dv ? target : v + Math.sign(target - v)*dv;
+      u += v*dt;
+    }
+    x += 2*p.vPull*dt;
+  }
+
+  // The model keeps the centre of the fiber in place. What really stays in place is the middle
+  // point between the pullers: the stored profiles are shifted to that frame (offset).
+  let lastX = 0, lastU = 0, offset = 0, i = 0, stored = false, first = true;
+  function store() {
+    const f = sim.nFrames, base = f*m;
+    let minLn = Infinity;
+    for (let j = 0; j < n; j++) if (lnA[j] < minLn) minLn = lnA[j];
+    for (let kk = 0; kk < m; kk++) {
+      const pos = ((kk - mHalf)*dz - offset)/ds + i0;
+      const a = Math.min(Math.max(Math.floor(pos), 0), n - 2), w = Math.min(Math.max(pos - a, 0), 1);
+      sim.frames[base + kk] = Math.exp(0.5*(lnA[a] + (lnA[a + 1] - lnA[a])*w));
+    }
+    sim.frameStep[f] = i; sim.frameX[f] = x; sim.frameD[f] = 2000*Math.exp(0.5*minLn);
+    sim.nFrames++;
+  }
+  sim.advance = function (maxSteps) {
+    let count = 0;
+    while (x <= p.xEnd && count < maxSteps) {
+      if (first) first = false;
+      else {
+        const dx = x - lastX, du = u - lastU;
+        if (dx > 0) {
+          const nsub = Math.min(Math.max(Math.ceil(Math.abs(du)/(sigma/2)), Math.ceil(dx/ds), 1), 500);
+          for (let kk = 0; kk < nsub; kk++) step(dx/nsub, lastU + du*(kk + 0.5)/nsub);
+          const left = 0.5*(1 + erf(-0.5*(u + lastU)/(sigma*Math.SQRT2)));
+          offset += dx*(left - 0.5);
+        }
+      }
+      lastX = x; lastU = u;
+      sim.flamePos[i] = u + offset;
+      stored = i % every === 0;
+      if (stored) store();
+      moveFlame();
+      i++; count++;
+    }
+    sim.nSteps = i;
+    sim.progress = Math.min(1, i/steps);
+    if (x > p.xEnd) {
+      if (!stored) { i--; x = lastX; store(); i++; }
+      sim.totalTime = (sim.nSteps - 1)*dt;
+      sim.done = true;
+    }
+    return sim.done;
+  };
+  return sim;
+}
+
+// Textbook model: uniformly heated hotzone, r = r0*exp(-1/2 * integral(dx/L))
+function classicDiameters(hzX, hzY, xEnd, r0, npts) {
+  const xs = new Float64Array(npts), ds_ = new Float64Array(npts);
+  let acc = 0, prevInv = 1/interp(0, hzX, hzY);
+  for (let k = 0; k < npts; k++) {
+    const x = xEnd*k/(npts - 1), inv = 1/Math.max(interp(x, hzX, hzY), 1e-6);
+    if (k > 0) acc += 0.5*(inv + prevInv)*(x - xs[k - 1]);
+    prevInv = inv; xs[k] = x; ds_[k] = 2000*r0*Math.exp(-0.5*acc);
+  }
+  return { x: xs, d: ds_ };
+}
+/*SIM-END*/
+
+// ---------------------------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------------------------
+const SINGLE_MODE_D = 1.139;  // µm: TE01/TM01 cutoff of a silica rod in air, at 1550 nm
+const ADIABATIC = [[0, 5.64], [4, 5.54], [6, 5.24], [8, 4.67], [10, 3.74], [12, 2.30], [12.7, 2.0], [20, 2.03], [24, 2.20], [26, 2.48], [28, 3.0]];
+const $ = id => document.getElementById(id);
+
+const state = {
+  mode: "standard", profile: "constant",
+  l0: 3.5, alpha: 0.1, pull: 34, flame: 0.6, vBrush: 2.4, vPull: 0.125, minSpan: 0.5, d0: 125,
+  decel: 11, gain: 1.18,
+  custom: ADIABATIC.map(q => q.slice()),
+};
+const ROWS = {
+  profileRows: [
+    { key: "l0", label: "Initial hotzone", unit: "mm", min: 1, max: 12, step: 0.1 },
+    { key: "alpha", label: "Hotzone growth per mm pulled (α)", unit: "", min: -0.2, max: 0.5, step: 0.01, only: "linear" },
+    { key: "pull", label: "Total pulled distance", unit: "mm", min: 2, max: 70, step: 0.5 },
+  ],
+  processRows: [
+    { key: "flame", label: "Flame size", unit: "mm", min: 0.2, max: 3, step: 0.05 },
+    { key: "vBrush", label: "Brushing speed", unit: "mm/s", min: 0.5, max: 8, step: 0.1 },
+    { key: "vPull", label: "Pulling speed (each side)", unit: "mm/s", min: 0.05, max: 0.5, step: 0.005 },
+    { key: "minSpan", label: "Shortest sweep the motor does", unit: "mm", min: 0, max: 3, step: 0.1 },
+    { key: "d0", label: "Fiber diameter", unit: "µm", min: 50, max: 250, step: 1 },
+  ],
+  advRows: [
+    { key: "decel", label: "Deceleration when the flame reverses (standard)", unit: "mm/s²", min: 2, max: 60, step: 0.5 },
+    { key: "gain", label: "Real sweep / commanded sweep (relative)", unit: "", min: 0.8, max: 1.5, step: 0.01 },
+  ],
+};
+const rowEls = {};
+for (const [box, rows] of Object.entries(ROWS)) {
+  for (const r of rows) {
+    const div = document.createElement("div");
+    div.className = "row";
+    div.innerHTML = `<label for="n_${r.key}">${r.label}</label>
+      <input type="range" id="r_${r.key}" min="${r.min}" max="${r.max}" step="${r.step}" aria-label="${r.label}">
+      <input type="number" id="n_${r.key}" min="${r.min}" max="${r.max}" step="${r.step}">
+      <span class="unit">${r.unit}</span>`;
+    $(box).appendChild(div);
+    const range = div.querySelector("input[type=range]"), num = div.querySelector("input[type=number]");
+    range.value = num.value = state[r.key];
+    const set = (val, from) => {
+      let x = parseFloat(val);
+      if (!isFinite(x)) return;
+      x = Math.min(r.max, Math.max(r.min, x));
+      state[r.key] = x;
+      if (from !== range) range.value = x;
+      if (from !== num) num.value = x;
+      scheduleSim();
+    };
+    range.addEventListener("input", () => set(range.value, range));
+    num.addEventListener("change", () => { set(num.value, null); });
+    rowEls[r.key] = { div, only: r.only, range, num };
+  }
+}
+function bindSeg(id, key, after) {
+  const seg = $(id);
+  seg.addEventListener("click", ev => {
+    const b = ev.target.closest("button"); if (!b) return;
+    const prev = state[key];
+    state[key] = b.dataset.v;
+    for (const o of seg.querySelectorAll("button")) o.setAttribute("aria-pressed", o === b ? "true" : "false");
+    after(prev); scheduleSim();
+  });
+}
+bindSeg("segMode", "mode", updateHints);
+bindSeg("segProfile", "profile", prev => {
+  if (state.profile === "custom" && prev !== "custom") {   // Start from what was on screen
+    const hz = hzFunction(prev);
+    state.custom = hz.x.map((x, k) => [x, hz.y[k]]);
+    if (state.custom.length === 2) state.custom.splice(1, 0, [(hz.x[0] + hz.x[1])/2, (hz.y[0] + hz.y[1])/2]);
+  }
+  syncProfileUI();
+});
+function syncProfileUI() {
+  const custom = state.profile === "custom";
+  $("profileRows").hidden = custom; $("customBox").hidden = !custom;
+  for (const r of Object.values(rowEls)) if (r.only) r.div.hidden = state.profile !== r.only;
+  if (custom) $("customText").value = state.custom.map(q => `${+q[0].toFixed(2)}, ${+q[1].toFixed(3)}`).join("\n");
+  $("hzHint").textContent = custom ? "Drag the points. Double-click to add or remove one."
+                                   : "The length the flame covers, as the fiber is pulled.";
+}
+function updateHints() {
+  $("modeHint").textContent = state.mode === "standard"
+    ? "The flame sweeps back and forth at constant speed, along a fiber pulled symmetrically."
+    : "The flame stays still. The two pullers move the fiber past it, in sinusoidal sweeps.";
+}
+function hzFunction(profile) {
+  profile = profile || state.profile;
+  if (profile === "custom") return { x: state.custom.map(q => q[0]), y: state.custom.map(q => q[1]) };
+  const a = profile === "linear" ? state.alpha : 0;
+  return { x: [0, state.pull], y: [state.l0, Math.max(0.3, state.l0 + a*state.pull)] };
+}
+function cleanCustom() {
+  state.custom.sort((a, b) => a[0] - b[0]);
+  state.custom[0][0] = 0;
+  for (const q of state.custom) q[1] = Math.min(15, Math.max(0.3, q[1]));
+}
+$("btnApplyTable").addEventListener("click", () => {
+  const pts = [];
+  for (const line of $("customText").value.split("\n")) {
+    const nums = line.split(/[\s,;]+/).filter(Boolean).map(Number);
+    if (nums.length >= 2 && nums.every(isFinite) && nums[0] >= 0 && nums[1] > 0) pts.push([nums[0], nums[1]]);
+  }
+  if (pts.length < 2 || Math.max(...pts.map(q => q[0])) < 1) { $("classicHint").textContent = "The table needs at least two lines: pulled distance, hotzone."; return; }
+  state.custom = pts; cleanCustom(); syncProfileUI(); scheduleSim();
+});
+$("btnAdiabatic").addEventListener("click", () => { state.custom = ADIABATIC.map(q => q.slice()); syncProfileUI(); scheduleSim(); });
+
+// ---- Simulation run -------------------------------------------------------------------------
+let sim = null, pending = null, simTimer = 0, classic = null, hzNow = null, smAt = null;
+let t = 0, playing = false, lastTs = 0;
+const reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function scheduleSim() { clearTimeout(simTimer); simTimer = setTimeout(startSim, 180); }
+function startSim() {
+  const hz = hzFunction();
+  const xEnd = hz.x[hz.x.length - 1];
+  const p = { hzX: hz.x, hzY: hz.y, xEnd, flame: state.flame, minSpan: state.minSpan, vBrush: state.vBrush, vPull: state.vPull,
+              relative: state.mode === "relative", r0: state.d0/2000, decel: state.decel, gain: state.gain, dt: 0.02, ds: 0.01, maxFrames: 1000 };
+  const job = createSim(p);
+  pending = job;
+  $("busy").hidden = false;
+  (function chunk() {
+    if (pending !== job) return;       // Replaced by newer settings
+    const t0 = performance.now();
+    while (!job.done && performance.now() - t0 < 30) job.advance(200);
+    if (!job.done) { $("busy").textContent = `simulating… ${Math.round(100*job.progress)}%`; setTimeout(chunk, 0); return; }
+    pending = null; sim = job; hzNow = hz;
+    classic = classicDiameters(hz.x, hz.y, xEnd, p.r0, 300);
+    smAt = null;
+    for (let f = 0; f < sim.nFrames; f++) if (sim.frameD[f] <= SINGLE_MODE_D) { smAt = sim.frameX[f]; break; }
+    const cEnd = classic.d[classic.d.length - 1], sEnd = sim.frameD[sim.nFrames - 1];
+    $("classicHint").textContent = `Final waist: ${fmtD(sEnd)} simulated, ${fmtD(cEnd)} by the textbook model.` +
+      (smAt !== null ? ` Single mode from ${smAt.toFixed(1)} mm.` : "");
+    $("busy").hidden = true; $("busy").textContent = "simulating…";
+    t = reducedMotion ? 0.6*sim.totalTime : 0;
+    setPlaying(!reducedMotion);
+    drawAll();
+  })();
+}
+function setPlaying(on) {
+  playing = on; lastTs = 0;
+  $("btnPlay").textContent = on ? "Pause" : "Play";
+  if (on) requestAnimationFrame(tick);
+}
+function tick(ts) {
+  if (!playing || !sim) return;
+  if (lastTs) t += Math.min(0.1, (ts - lastTs)/1000)*parseFloat($("speed").value);
+  lastTs = ts;
+  if (t >= sim.totalTime) { t = sim.totalTime; setPlaying(false); }
+  drawAll();
+  if (playing) requestAnimationFrame(tick);
+}
+$("btnPlay").addEventListener("click", () => {
+  if (!sim) return;
+  if (!playing && t >= sim.totalTime) t = 0;
+  setPlaying(!playing);
+});
+$("btnRestart").addEventListener("click", () => { t = 0; if (sim) { setPlaying(true); drawAll(); } });
+$("scrub").addEventListener("input", () => { if (!sim) return; t = sim.totalTime*$("scrub").value/1000; if (!playing) drawAll(); });
+document.addEventListener("keydown", ev => {
+  if (ev.code !== "Space" || /INPUT|TEXTAREA|SELECT|BUTTON/.test(ev.target.tagName)) return;
+  ev.preventDefault(); $("btnPlay").click();
+});
+
+// ---- Drawing --------------------------------------------------------------------------------
+const cur = { r: null, x: 0, u: 0, d: 0, hz: 0 };
+function sampleState() {
+  const f = Math.min(t/sim.dt, sim.nSteps - 1);
+  const nF = sim.nFrames, m = sim.m;
+  let k = Math.min(Math.floor(f/sim.every), nF - 2); if (k < 0) k = 0;
+  const s0 = sim.frameStep[k], s1 = sim.frameStep[Math.min(k + 1, nF - 1)];
+  const w = s1 > s0 ? Math.min(1, Math.max(0, (f - s0)/(s1 - s0))) : 0;
+  if (!cur.r || cur.r.length !== m) cur.r = new Float32Array(m);
+  const a = k*m, b = Math.min(k + 1, nF - 1)*m, fr = sim.frames;
+  for (let j = 0; j < m; j++) cur.r[j] = fr[a + j] + (fr[b + j] - fr[a + j])*w;
+  const fi = Math.floor(f), fw = f - fi, fp = sim.flamePos;
+  cur.u = fp[fi] + (fp[Math.min(fi + 1, sim.nSteps - 1)] - fp[fi])*fw;
+  cur.x = f*2*sim.p.vPull*sim.dt;
+  cur.d = sim.frameD[k] + (sim.frameD[Math.min(k + 1, nF - 1)] - sim.frameD[k])*w;
+  cur.hz = interp(cur.x, sim.p.hzX, sim.p.hzY);
+}
+function radiusAt(z) {   // µm
+  const pos = z/sim.dz + sim.mHalf;
+  if (pos <= 0 || pos >= sim.m - 1) return sim.p.r0*1000;
+  const a = Math.floor(pos);
+  return 1000*(cur.r[a] + (cur.r[a + 1] - cur.r[a])*(pos - a));
+}
+function fitCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w*dpr) || cv.height !== Math.round(h*dpr)) { cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr); }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+function niceTicks(lo, hi, target) {
+  const span = hi - lo, raw = span/target, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw/mag, stepv = (norm < 1.5 ? 1 : norm < 3.5 ? 2 : norm < 7.5 ? 5 : 10)*mag;
+  const out = [];
+  for (let v = Math.ceil(lo/stepv - 1e-9)*stepv; v <= hi + 1e-9; v += stepv) out.push(Math.abs(v) < stepv*1e-6 ? 0 : v);
+  return { ticks: out, step: stepv };
+}
+function fmtTick(v, stepv) { const dec = Math.max(0, -Math.floor(Math.log10(stepv) + 1e-9)); return v.toFixed(Math.min(dec, 4)); }
+function fmtD(d) { return d >= 10 ? d.toFixed(1) + " µm" : d >= 1 ? d.toFixed(2) + " µm" : (d*1000).toFixed(0) + " nm"; }
+const STAGE = { panel: "#111821", grid: "#243242", text: "#c9d4df", glass: "#7fb8e6", edge: "#dff1ff", green: "#5fd38d" };
+
+function drawView(cv, xmin, xmax, ymax, zoomSpan) {
+  const { ctx, w, h } = fitCanvas(cv);
+  const L = 58, B = 20, T = 4, R = 6, pw = w - L - R, ph = h - T - B, cy = T + ph/2;
+  const X = z => L + (z - xmin)/(xmax - xmin)*pw, Y = r => cy - r/ymax*(ph/2);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = STAGE.panel; ctx.fillRect(L, T, pw, ph);
+  ctx.font = "11px Inter, system-ui, sans-serif"; ctx.lineWidth = 1;
+  // Grid and ticks
+  const xt = niceTicks(xmin, xmax, Math.max(4, pw/90)), yt = niceTicks(-ymax, ymax, Math.max(3, ph/45));
+  ctx.strokeStyle = STAGE.grid; ctx.fillStyle = STAGE.text; ctx.beginPath();
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (const v of xt.ticks) { const x = Math.round(X(v)) + 0.5; ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.fillText(fmtTick(v, xt.step), x, T + ph + 4); }
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const v of yt.ticks) { const y = Math.round(Y(v)) + 0.5; ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.fillText(fmtTick(v, yt.step), L - 6, y); }
+  ctx.stroke();
+  ctx.save(); ctx.translate(9, cy); ctx.rotate(-Math.PI/2); ctx.textAlign = "center"; ctx.globalAlpha = 0.7; ctx.fillText("radius (µm)", 0, 0); ctx.restore();
+  ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.globalAlpha = 0.7; ctx.fillText("mm", L + pw - 4, T + ph - 3); ctx.globalAlpha = 1;
+
+  ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+  if (zoomSpan) { ctx.fillStyle = "rgba(255,255,255,0.045)"; ctx.fillRect(X(-zoomSpan), T, X(zoomSpan) - X(-zoomSpan), ph); }
+  // Fiber
+  const nx = Math.ceil(pw), rs = new Float32Array(nx + 1);
+  for (let i = 0; i <= nx; i++) rs[i] = radiusAt(xmin + (xmax - xmin)*i/nx);
+  const path = scale => { ctx.beginPath(); for (let i = 0; i <= nx; i++) ctx.lineTo(L + i*pw/nx, Y(rs[i]*scale)); for (let i = nx; i >= 0; i--) ctx.lineTo(L + i*pw/nx, Y(-rs[i]*scale)); ctx.closePath(); };
+  path(1); ctx.fillStyle = STAGE.glass; ctx.fill();
+  path(0.6); ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fill();
+  path(0.25); ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fill();
+  path(1); ctx.strokeStyle = STAGE.edge; ctx.lineWidth = 1; ctx.stroke();
+  // Flame: gaussian glow, FWHM = flame size
+  const fx = X(cur.u), fwPx = sim.p.flame/(xmax - xmin)*pw;
+  const half = Math.max(1.5*fwPx, 3);
+  const col = ctx.createLinearGradient(fx - half, 0, fx + half, 0);
+  for (let i = 0; i <= 10; i++) { const q = i/10, g = Math.exp(-0.5*Math.pow((q - 0.5)*3/0.4247, 2)); col.addColorStop(q, `rgba(255,${Math.round(110 + 110*g)},${Math.round(30 + 90*g)},${(0.38*g).toFixed(3)})`); }
+  ctx.fillStyle = col; ctx.fillRect(fx - half, T, 2*half, ph);
+  ctx.save(); ctx.translate(fx, cy); ctx.scale(half, ph*0.48);
+  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  core.addColorStop(0, "rgba(255,240,170,0.75)"); core.addColorStop(0.35, "rgba(255,170,70,0.38)"); core.addColorStop(1, "rgba(255,90,20,0)");
+  ctx.fillStyle = core; ctx.beginPath(); ctx.arc(0, 0, 1, 0, 2*Math.PI); ctx.fill(); ctx.restore();
+  // Hotzone edges
+  ctx.strokeStyle = STAGE.green; ctx.globalAlpha = 0.75; ctx.setLineDash([5, 4]); ctx.beginPath();
+  for (const e of [-cur.hz/2, cur.hz/2]) { const x = Math.round(X(e)) + 0.5; ctx.moveTo(x, T); ctx.lineTo(x, T + ph); }
+  ctx.stroke(); ctx.restore();
+}
+
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+const chartGeom = {};
+function drawChart(cv, key, xmax, ymin, ymax, logY, series, marks) {
+  const { ctx, w, h } = fitCanvas(cv);
+  const L = 44, B = 22, T = 6, R = 8, pw = w - L - R, ph = h - T - B;
+  const ink = cssVar("--ink"), muted = cssVar("--muted"), line = cssVar("--line");
+  const fy = v => logY ? Math.log10(v) : v, y0 = fy(ymin), y1 = fy(ymax);
+  const X = x => L + x/xmax*pw, Y = v => T + ph - (fy(v) - y0)/(y1 - y0)*ph;
+  chartGeom[key] = { L, T, pw, ph, xmax, X, Y, invX: px => (px - L)/pw*xmax, invY: py => y0 + (T + ph - py)/ph*(y1 - y0) };
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = "11px Inter, system-ui, sans-serif"; ctx.lineWidth = 1; ctx.strokeStyle = line; ctx.fillStyle = muted;
+  ctx.beginPath(); ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const xt = niceTicks(0, xmax, Math.max(3, pw/70));
+  for (const v of xt.ticks) { const x = Math.round(X(v)) + 0.5; ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.fillText(fmtTick(v, xt.step), x, T + ph + 5); }
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  if (logY) { for (let e = Math.ceil(y0 - 1e-9); e <= y1 + 1e-9; e++) { const y = Math.round(Y(Math.pow(10, e))) + 0.5; ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.fillText(e >= 0 ? String(Math.pow(10, e)) : Math.pow(10, e).toFixed(-e), L - 6, y); } }
+  else { const yt = niceTicks(ymin, ymax, Math.max(3, ph/40)); for (const v of yt.ticks) { const y = Math.round(Y(v)) + 0.5; ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.fillText(fmtTick(v, yt.step), L - 6, y); } }
+  ctx.stroke();
+  ctx.textAlign = "right"; ctx.textBaseline = "top"; ctx.fillText("mm pulled", L + pw - 3, T + 3);
+  ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+  for (const mk of marks || []) {
+    const y = Math.round(Y(mk.y)) + 0.5;
+    ctx.strokeStyle = mk.color; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = mk.color; ctx.textAlign = "left"; ctx.textBaseline = "bottom"; ctx.fillText(mk.label, L + 5, y - 2);
+  }
+  for (const s of series) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = s.width || 2; ctx.setLineDash(s.dash || []); ctx.beginPath();
+    for (let i = 0; i < s.n; i++) { const v = Math.max(s.y[i], ymin*0.5); ctx.lineTo(X(s.x[i]), Y(v)); }
+    ctx.stroke(); ctx.setLineDash([]);
+    if (s.points) { ctx.fillStyle = cssVar("--panel"); for (let i = 0; i < s.n; i++) { ctx.beginPath(); ctx.arc(X(s.x[i]), Y(s.y[i]), 5, 0, 2*Math.PI); ctx.fill(); ctx.stroke(); } }
+  }
+  const cx = Math.round(X(cur.x)) + 0.5;
+  ctx.strokeStyle = ink; ctx.lineWidth = 1; ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(cx, T); ctx.lineTo(cx, T + ph); ctx.stroke();
+  ctx.restore();
+}
+
+function drawAll() {
+  if (!sim) return;
+  sampleState();
+  const zoomHalf = Math.min(Math.max.apply(null, sim.p.hzY)/2 + 2.5, sim.viewHalf);
+  let rmax = 0;
+  for (let i = 0; i <= 60; i++) rmax = Math.max(rmax, radiusAt(-zoomHalf + 2*zoomHalf*i/60));
+  drawView($("cvWhole"), -sim.viewHalf, sim.viewHalf, 1.7*sim.p.r0*1000, zoomHalf);
+  drawView($("cvZoom"), -zoomHalf, zoomHalf, 1.35*rmax, 0);
+
+  const xEnd = sim.p.xEnd, accent = cssVar("--accent"), glass = cssVar("--glass"), muted = cssVar("--muted"), ok = cssVar("--ok");
+  const hzMaxY = Math.max.apply(null, hzNow.y)*1.25;
+  const noSweep = sim.p.flame + sim.p.minSpan;
+  drawChart($("cvHz"), "hz", xEnd, 0, hzMaxY, false,
+    [{ x: hzNow.x, y: hzNow.y, n: hzNow.x.length, color: accent, points: state.profile === "custom" }],
+    sim.p.minSpan >= 0.3 ? [{ y: noSweep, color: muted, label: "below this the flame stays still" }, { y: sim.p.flame, color: muted, label: "flame size" }]
+                         : [{ y: noSweep, color: muted, label: "below this the flame stays still" }]);
+  const dEnd = Math.min(sim.frameD[sim.nFrames - 1], classic.d[classic.d.length - 1]);
+  const dMin = Math.pow(10, Math.floor(Math.log10(Math.max(dEnd, 1e-3)*0.8)));
+  drawChart($("cvD"), "d", xEnd, dMin, sim.p.r0*2000*1.6, true,
+    [{ x: classic.x, y: classic.d, n: classic.x.length, color: muted, dash: [5, 4], width: 1.5 },
+     { x: sim.frameX, y: sim.frameD, n: sim.nFrames, color: glass }],
+    [{ y: SINGLE_MODE_D, color: ok, label: "single mode at 1550 nm" }]);
+
+  $("roPulled").textContent = cur.x.toFixed(2).padStart(5, " ") + " mm";
+  $("roWaist").textContent = fmtD(cur.d);
+  $("roHz").textContent = cur.hz.toFixed(2) + " mm";
+  $("roTime").textContent = Math.round(t) + " / " + Math.round(sim.totalTime) + " s";
+  const single = cur.d <= SINGLE_MODE_D;
+  $("chipSM").textContent = single ? "single mode at 1550 nm" : "multimode at 1550 nm";
+  $("chipSM").classList.toggle("on", single);
+  if (document.activeElement !== $("scrub") || playing) $("scrub").value = Math.round(1000*t/sim.totalTime);
+}
+
+// ---- Chart interaction: seek, and edit the custom hotzone points ------------------------------
+function chartPointer(cv, key, editable) {
+  let drag = null;
+  const pos = ev => { const b = cv.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
+  const hit = (px, py) => {
+    if (!editable || state.profile !== "custom") return -1;
+    const g = chartGeom[key];
+    return state.custom.findIndex(q => Math.hypot(g.X(q[0]) - px, g.Y(q[1]) - py) < 12);
+  };
+  const seek = px => { const g = chartGeom[key]; if (!g || !sim) return; const x = Math.min(g.xmax, Math.max(0, g.invX(px))); t = Math.min(sim.totalTime, x/(2*sim.p.vPull)); if (!playing) drawAll(); };
+  cv.addEventListener("pointerdown", ev => {
+    const [px, py] = pos(ev), i = hit(px, py);
+    drag = i >= 0 ? { i } : { seek: true };
+    cv.setPointerCapture(ev.pointerId);
+    if (drag.seek) seek(px);
+  });
+  cv.addEventListener("pointermove", ev => {
+    if (!drag) return;
+    const [px, py] = pos(ev), g = chartGeom[key];
+    if (drag.seek) return seek(px);
+    const pts = state.custom, i = drag.i;
+    const lo = i === 0 ? 0 : pts[i - 1][0] + 0.2, hi = i === pts.length - 1 ? 70 : pts[i + 1][0] - 0.2;
+    pts[i][0] = i === 0 ? 0 : Math.min(hi, Math.max(lo, g.invX(px)));
+    pts[i][1] = Math.min(15, Math.max(0.3, g.invY(py)));
+    hzNow = hzFunction(); syncProfileUI(); if (!playing) drawAll(); scheduleSim();
+  });
+  const end = () => { drag = null; };
+  cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+  if (editable) cv.addEventListener("dblclick", ev => {
+    if (state.profile !== "custom") return;
+    const [px, py] = pos(ev), g = chartGeom[key], i = hit(px, py);
+    if (i > 0 && state.custom.length > 2) state.custom.splice(i, 1);
+    else if (i < 0) state.custom.push([Math.max(0.2, g.invX(px)), g.invY(py)]);
+    cleanCustom(); syncProfileUI(); scheduleSim();
+  });
+}
+chartPointer($("cvHz"), "hz", true);
+chartPointer($("cvD"), "d", false);
+
+window.addEventListener("resize", () => { if (sim) drawAll(); });
+if (window.matchMedia) for (const q of ["(prefers-color-scheme: dark)"]) window.matchMedia(q).addEventListener("change", () => { if (sim) drawAll(); });
+new MutationObserver(() => { if (sim) drawAll(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+syncProfileUI(); updateHints(); startSim();
+</script>
+</body>
+</html>
