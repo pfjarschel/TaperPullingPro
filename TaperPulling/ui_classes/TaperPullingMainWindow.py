@@ -1251,8 +1251,18 @@ class MainWindow(FormUI, WindowUI):
         parameters_dict["Result"]["Est_waist_diam"] = self.waistDiamIndSpin.value()
         parameters_dict["Result"]["Est_waist_length"] = self.waistLengthIndSpin.value()
         parameters_dict["Result"]["Est_trans_length"] = self.transLengthIndSpin.value()
-        parameters_dict["Result"]["Final_loss"] = self.transm_array[self.transm_i-1][1]
-        
+        # Power at the start of the pull and at its end (mean of the first and last recorded
+        # points), and the pull loss between them
+        n_transm = self.transm_i
+        p_start = float(self.transm_array[0][1]) if n_transm > 0 else None
+        p_end = float(self.transm_array[n_transm-1][1]) if n_transm > 0 else None
+        parameters_dict["Result"]["Initial_power_mW"] = p_start
+        parameters_dict["Result"]["Final_power_mW"] = p_end
+        if p_start is not None and p_end is not None and p_start > 0 and p_end > 0:
+            parameters_dict["Result"]["Final_loss_dB"] = 10*np.log10(p_start/p_end)
+        else:
+            parameters_dict["Result"]["Final_loss_dB"] = None
+
         with open(parameters_file, 'w') as f:
             json.dump(parameters_dict, f, 
                 indent=4,
@@ -1262,7 +1272,7 @@ class MainWindow(FormUI, WindowUI):
             
         transm_file = file_prefix + "_transmission.txt"
         if self.transm_i > 0:
-            np.savetxt(transm_file, self.transm_array[:self.transm_i-1],
+            np.savetxt(transm_file, self.transm_array[:self.transm_i],
                        header="Pulled (mm), power (mW): mean, minimum, maximum (since the previous point)")
             
         profile_file = file_prefix + "_profile.txt"
